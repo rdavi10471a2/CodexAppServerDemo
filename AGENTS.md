@@ -2,58 +2,52 @@
 
 ## Purpose
 
-This repository is a WinForms harness for `codex app-server` with a local MCP HTTP host.
+This repository is now a Blazor control surface for `codex app-server`.
 
-The key design rule is the file-boundary model:
+The primary workflow is CWD/workspace based:
 
-- The WinForms app may provide selected file metadata in the prompt.
-- Selected file content must be fetched through the local MCP tool boundary.
-- Do not inline selected file contents into generated turn text.
+- The user chooses a current working directory in the Blazor UI.
+- Codex turns should treat that CWD as the loaded workspace.
+- Do not assume a selected-file workflow.
+- Do not ask Codex to fetch source through `GetSelectedFile` unless a future task explicitly reintroduces a selected-file tool.
 
 ## Working Agreements
 
 - Keep changes small and explicit.
-- Preserve the harness/MCP separation.
-- Prefer fixes that make context flow observable in the UI or logs.
-- Do not add hidden prompt injection paths through the WinForms client.
-
-## MCP Boundary
-
-- Local MCP endpoint: `http://localhost:6278`
-- Tool: `GetSelectedFile(includeContent: bool = true)`
-- When discussing the selected file, fetch it through the MCP tool rather than assuming prompt-injected content.
-- Do not broaden file access unless the user explicitly asks for wider repo inspection.
+- Prefer workflow order: discovery, proposal, edit/diff, compile, reindex.
+- Make context sources visible in the UI or logs.
+- Keep UI, MCP, and Codex app-server connection code separated by service boundaries.
 
 ## Repo Map
 
-- `MainForm.cs`: WinForms UI, prompt assembly, turn submission, and event display.
+- `CodexAppServerBlazor/`: Blazor Server control UI and app host.
 - `CodexAppServerClient.cs`: JSON-RPC client for `codex app-server`, protocol events, and token usage handling.
-- `Mcp/`: local MCP host, selected-file state, and file tool workflow.
-- `Program.cs`: app startup and MCP host lifetime.
+- `Mcp/`: local MCP HTTP host and compatibility tools.
+- `CodexAppServerWinForms_corrected.slnx`: root solution pointing at the Blazor project.
 
 ## Build And Run
 
 Use these commands from the repository root:
 
 ```powershell
-dotnet restore
-dotnet build
-dotnet run
+dotnet restore .\CodexAppServerWinForms_corrected.slnx
+dotnet build .\CodexAppServerWinForms_corrected.slnx
+dotnet run --project .\CodexAppServerBlazor\CodexAppServerBlazor.csproj --urls http://localhost:5205
 ```
 
 ## Startup Check
 
 For a basic manual smoke test:
 
-1. Start the app.
-2. Click `Start Server`.
-3. Select a repo root and a file.
-4. Start a thread and send a turn.
-5. Confirm the prompt includes only metadata for the selected file.
-6. Confirm Codex fetches file content through `GetSelectedFile`.
+1. Start the Blazor app.
+2. Choose or type the CWD.
+3. Click `Start Server`.
+4. Click `Start Thread`.
+5. Send a turn from the Assistant tab.
+6. Confirm the prompt and assistant response remain visible together.
 
 ## When Editing
 
-- If you change turn construction, verify the selected file content is still not embedded in the prompt.
+- If you change turn construction, verify it remains CWD/workspace based.
 - If you change telemetry or protocol handling, keep raw protocol visibility intact.
-- If you add instruction discovery or logging features, make the source of that context visible to the user.
+- If you change the UI, build and restart the Blazor app before reporting it is visible.

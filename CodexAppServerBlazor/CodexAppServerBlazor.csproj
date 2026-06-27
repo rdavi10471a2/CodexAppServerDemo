@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="*" />
+    <PackageReference Include="Radzen.Blazor" Version="10.3.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\CodexAppServerClient.cs" Link="Shared\CodexAppServerClient.cs" />
+    <Compile Include="..\CodexEvents.cs" Link="Shared\CodexEvents.cs" />
+    <Compile Include="..\JsonRpcMessage.cs" Link="Shared\JsonRpcMessage.cs" />
+    <Compile Include="..\Mcp\FileMcpTools.cs" Link="Shared\Mcp\FileMcpTools.cs" />
+    <Compile Include="..\Mcp\HarnessFileWorkflow.cs" Link="Shared\Mcp\HarnessFileWorkflow.cs" />
+    <Compile Include="..\Mcp\McpHostFactory.cs" Link="Shared\Mcp\McpHostFactory.cs" />
+    <Compile Include="..\Mcp\SelectedFileState.cs" Link="Shared\Mcp\SelectedFileState.cs" />
+  </ItemGroup>
+
+</Project>

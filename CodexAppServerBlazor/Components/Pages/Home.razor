@@ -1,0 +1,122 @@
+@page "/"
+@rendermode InteractiveServer
+
+<PageTitle>Codex Control</PageTitle>
+
+<section class="control-screen">
+    <header class="command-bar">
+        <div>
+            <span class="eyebrow">Workspace control</span>
+            <h1>Codex Server Connection</h1>
+        </div>
+        <div class="status-stack">
+            <span class="status-pill @(snapshot.IsServerStarted ? "online" : "offline")">
+                @(snapshot.IsServerStarted ? "Server running" : "Server stopped")
+            </span>
+            <span class="cwd-chip">@repoRoot</span>
+        </div>
+    </header>
+
+    <main class="control-grid">
+        <aside class="connection-panel" aria-label="Connection controls">
+            <div class="panel-heading">
+                <div>
+                    <span class="eyebrow">Connection</span>
+                    <h2>Runtime</h2>
+                </div>
+            </div>
+
+            <label class="field">
+                <span>Codex executable</span>
+                <RadzenTextBox @bind-Value="codexExe" />
+            </label>
+
+            <label class="field">
+                <span>Model</span>
+                <RadzenTextBox @bind-Value="model" />
+            </label>
+
+            <div class="settings-pair">
+                <label class="field">
+                    <span>Approval</span>
+                    <RadzenTextBox @bind-Value="approvalPolicy" Disabled="true" />
+                </label>
+                <label class="field">
+                    <span>Sandbox</span>
+                    <RadzenTextBox @bind-Value="sandbox" Disabled="true" />
+                </label>
+            </div>
+
+            <div class="cwd-box">
+                <span class="eyebrow">CWD</span>
+                <div class="path-row">
+                    <RadzenTextBox class="path-input" @bind-Value="cwdText" />
+                    <RadzenButton Icon="folder_open" Text="Browse" ButtonStyle="ButtonStyle.Secondary" Click="@ApplyTypedDirectory" Disabled="@busy" />
+                </div>
+                <RadzenButton class="apply-cwd" Icon="check" Text="Use This CWD" ButtonStyle="ButtonStyle.Primary" Click="@UseCurrentDirectory" Disabled="@busy" />
+                @if (!string.IsNullOrWhiteSpace(directorySnapshot.ErrorMessage))
+                {
+                    <div class="inline-error">@directorySnapshot.ErrorMessage</div>
+                }
+            </div>
+
+            <div class="actions connection-actions">
+                <RadzenButton Icon="power_settings_new" Text="Start Server" ButtonStyle="ButtonStyle.Secondary" Click="@StartServer" Disabled="@busy" />
+                <RadzenButton Icon="forum" Text="Start Thread" ButtonStyle="ButtonStyle.Secondary" Click="@StartThread" Disabled="@(!snapshot.IsServerStarted || busy)" />
+            </div>
+
+            <div class="summary-stack">
+                <div>
+                    <span>Thread</span>
+                    <strong>@(snapshot.ThreadId ?? "not started")</strong>
+                </div>
+                <div>
+                    <span>Codex cwd</span>
+                    <strong>@repoRoot</strong>
+                </div>
+                <div>
+                    <span>MCP endpoint</span>
+                    <strong>http://localhost:6278</strong>
+                </div>
+            </div>
+        </aside>
+
+        <section class="work-panel">
+            <RadzenTabs RenderMode="TabRenderMode.Client">
+                <Tabs>
+                    <RadzenTabsItem Text="Assistant">
+                        <div class="assistant-layout">
+                            <label class="prompt-panel">
+                                <span>Prompt</span>
+                                <RadzenTextArea @bind-Value="prompt" Rows="6" />
+                            </label>
+
+                            <div class="actions">
+                                <RadzenButton Icon="send" Text="Send Turn" ButtonStyle="ButtonStyle.Primary" Click="@SendTurn" Disabled="@(!snapshot.IsServerStarted || busy)" />
+                            </div>
+
+                            <pre class="output-box assistant-output">@snapshot.AssistantText</pre>
+                        </div>
+                    </RadzenTabsItem>
+                    <RadzenTabsItem Text="Status">
+                        <pre class="output-box">@JoinLines(snapshot.StatusLines)</pre>
+                    </RadzenTabsItem>
+                    <RadzenTabsItem Text="Telemetry">
+                        <pre class="output-box">@JoinLines(snapshot.TelemetryLines)</pre>
+                    </RadzenTabsItem>
+                    <RadzenTabsItem Text="Tools">
+                        <pre class="output-box">@JoinLines(snapshot.ToolLines)</pre>
+                    </RadzenTabsItem>
+                    <RadzenTabsItem Text="Raw Protocol">
+                        <pre class="output-box">@JoinLines(snapshot.RawLines)</pre>
+                    </RadzenTabsItem>
+                </Tabs>
+            </RadzenTabs>
+        </section>
+    </main>
+
+    @if (!string.IsNullOrWhiteSpace(errorMessage))
+    {
+        <div class="error-banner">@errorMessage</div>
+    }
+</section>

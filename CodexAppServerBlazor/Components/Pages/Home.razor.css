@@ -1,0 +1,250 @@
+.control-screen {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 18px;
+    background: #eef3f7;
+    color: #16202c;
+}
+
+.command-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    min-height: 68px;
+    border-bottom: 1px solid #cad6df;
+}
+
+.command-bar h1,
+.panel-heading h2 {
+    margin: 0;
+    font-weight: 700;
+    letter-spacing: 0;
+}
+
+.command-bar h1 {
+    font-size: 1.55rem;
+}
+
+.panel-heading h2 {
+    font-size: 1.05rem;
+}
+
+.eyebrow {
+    display: block;
+    margin-bottom: 4px;
+    color: #58708a;
+    font-size: .73rem;
+    font-weight: 800;
+    letter-spacing: 0;
+    text-transform: uppercase;
+}
+
+.status-stack {
+    display: flex;
+    align-items: flex-end;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.status-pill,
+.cwd-chip {
+    max-width: min(48vw, 760px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.status-pill {
+    border: 1px solid #b9c8d5;
+    border-radius: 6px;
+    padding: 6px 10px;
+    background: #f8fafc;
+    color: #4b5c70;
+    font-weight: 800;
+}
+
+.status-pill.online {
+    border-color: #62a87f;
+    background: #e8f5ed;
+    color: #22623c;
+}
+
+.cwd-chip {
+    color: #5a6d81;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: .78rem;
+}
+
+.control-grid {
+    min-height: 0;
+    flex: 1;
+    display: grid;
+    grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+    gap: 14px;
+}
+
+.connection-panel,
+.work-panel {
+    min-height: 0;
+    border: 1px solid #c8d5df;
+    border-radius: 8px;
+    background: #ffffff;
+    box-shadow: 0 10px 24px rgba(30, 47, 65, .08);
+}
+
+.connection-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 14px;
+}
+
+.work-panel {
+    overflow: hidden;
+    padding: 12px;
+}
+
+.panel-heading,
+.path-row,
+.actions {
+    display: flex;
+    gap: 10px;
+}
+
+.panel-heading {
+    align-items: center;
+    justify-content: space-between;
+}
+
+.field,
+.prompt-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.field span,
+.prompt-panel span,
+.summary-stack span {
+    color: #526a82;
+    font-size: .8rem;
+    font-weight: 800;
+}
+
+.settings-pair {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+}
+
+.cwd-box {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    border-top: 1px solid #d7e1ea;
+    border-bottom: 1px solid #d7e1ea;
+    padding: 14px 0;
+}
+
+.path-row {
+    align-items: stretch;
+}
+
+.path-input {
+    flex: 1;
+    min-width: 0;
+}
+
+.apply-cwd,
+.connection-actions .rz-button {
+    width: 100%;
+}
+
+.connection-actions {
+    flex-direction: column;
+}
+
+.assistant-layout {
+    display: grid;
+    grid-template-rows: auto auto minmax(360px, 1fr);
+    gap: 12px;
+    min-height: calc(100vh - 176px);
+}
+
+.actions {
+    flex-wrap: wrap;
+}
+
+.summary-stack {
+    display: grid;
+    gap: 10px;
+    margin-top: auto;
+}
+
+.summary-stack div {
+    min-width: 0;
+    border: 1px solid #d7e1ea;
+    border-radius: 6px;
+    padding: 10px;
+    background: #f7fafc;
+}
+
+.summary-stack strong {
+    display: block;
+    margin-top: 4px;
+    overflow-wrap: anywhere;
+}
+
+.output-box {
+    width: 100%;
+    height: 100%;
+    min-height: 360px;
+    max-height: calc(100vh - 330px);
+    margin: 0;
+    overflow: auto;
+    border: 1px solid #d7e1ea;
+    border-radius: 6px;
+    padding: 12px;
+    background: #0f1722;
+    color: #d9e6f2;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.assistant-output {
+    background: #ffffff;
+    color: #16202c;
+}
+
+.error-banner,
+.inline-error {
+    border: 1px solid #e4a0a6;
+    border-radius: 6px;
+    padding: 10px 12px;
+    background: #fff1f2;
+    color: #8a1f28;
+}
+
+@media (max-width: 1100px) {
+    .control-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .status-stack {
+        align-items: flex-start;
+    }
+
+    .command-bar {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .status-pill,
+    .cwd-chip {
+        max-width: 100%;
+    }
+}

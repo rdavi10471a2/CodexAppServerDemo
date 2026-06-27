@@ -1,0 +1,70 @@
+html,
+body {
+    width: 100%;
+    min-height: 100%;
+    margin: 0;
+    font-family: "Segoe UI", Aptos, Arial, sans-serif;
+    background: #eef3f7;
+    color: #16202c;
+}
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+a,
+.btn-link {
+    color: #176ca8;
+}
+
+button,
+input,
+textarea,
+select {
+    font: inherit;
+}
+
+h1:focus {
+    outline: none;
+}
+
+#blazor-error-ui {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 1000;
+    display: none;
+    max-width: 520px;
+    border: 1px solid #e0a0a8;
+    border-radius: 8px;
+    padding: 12px 44px 12px 14px;
+    background: #fff1f2;
+    color: #7f1d1d;
+    box-shadow: 0 16px 40px rgba(30, 47, 65, .18);
+}
+
+#blazor-error-ui .reload {
+    margin-left: 8px;
+}
+
+#blazor-error-ui .dismiss {
+    position: absolute;
+    top: 8px;
+    right: 12px;
+    cursor: pointer;
+    font-weight: 800;
+}
+
+.blazor-error-boundary {
+    border: 1px solid #e0a0a8;
+    border-radius: 8px;
+    padding: 16px;
+    background: #fff1f2;
+    color: #7f1d1d;
+}
+
+.blazor-error-boundary::after {
+    content: "An error has occurred.";
+}

@@ -8,6 +8,7 @@ namespace CodexAppServerWinForms.Mcp;
 public static class McpHostFactory
 {
     public const string LocalMcpUrl = "http://localhost:6278";
+    public const string HealthPath = "/health";
 
     public static IHost Create(SelectedFileState selectedFileState)
     {
@@ -19,10 +20,23 @@ public static class McpHostFactory
 
         builder.Services
             .AddMcpServer()
-            .WithHttpTransport()
+            .WithHttpTransport(options =>
+            {
+                // This harness only exposes a single local file tool and does not rely on
+                // long-lived MCP sessions or server-to-client callbacks.
+                options.Stateless = true;
+            })
             .WithTools<FileMcpTools>();
 
         var app = builder.Build();
+        app.MapGet(HealthPath, () => Results.Json(new
+        {
+            status = "ok",
+            mcpEndpoint = LocalMcpUrl,
+            transport = "streamable-http",
+            stateless = true,
+            tool = nameof(FileMcpTools.GetSelectedFile)
+        }));
         app.MapMcp();
 
         return app;

@@ -1,14 +1,14 @@
 namespace CodexAppServerWinForms;
 
-public enum CodexEventKind
-{
-    Protocol,
-    Assistant,
-    Telemetry,
-    Tool,
-    Status,
-    Error
-}
+//public enum CodexEventKind
+//{
+//    Protocol,
+//    Assistant,
+//    Telemetry,
+//    Tool,
+//    Status,
+//    Error
+//}
 
 public sealed record AssistantTextEvent(string Text, bool IsFinal);
 
