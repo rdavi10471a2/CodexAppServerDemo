@@ -97,9 +97,6 @@
 }
 
 .connection-panel {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
     padding: 14px;
 }
 
@@ -141,13 +138,11 @@
     gap: 10px;
 }
 
-.cwd-box {
+.left-tab {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    border-top: 1px solid #d7e1ea;
-    border-bottom: 1px solid #d7e1ea;
-    padding: 14px 0;
+    gap: 14px;
+    padding: 10px 2px 2px;
 }
 
 .path-row {
@@ -159,7 +154,6 @@
     min-width: 0;
 }
 
-.apply-cwd,
 .connection-actions .rz-button {
     width: 100%;
 }

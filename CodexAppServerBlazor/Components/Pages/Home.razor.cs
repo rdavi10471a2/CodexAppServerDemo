@@ -22,6 +22,7 @@ public partial class Home : IDisposable
     private string approvalPolicy = "never";
     private string sandbox = "danger-full-access";
     private string prompt = "Inspect the current workspace. Start with discovery, propose the next safe step, and do not edit files unless explicitly asked.";
+    private string? browseChoice;
     private string? errorMessage;
     private bool busy;
 
@@ -70,6 +71,18 @@ public partial class Home : IDisposable
         return Task.CompletedTask;
     }
 
+    private Task SelectBrowseChoice(object? value)
+    {
+        string? selectedPath = value?.ToString();
+        if (!string.IsNullOrWhiteSpace(selectedPath))
+        {
+            LoadDirectory(selectedPath);
+            browseChoice = selectedPath;
+        }
+
+        return Task.CompletedTask;
+    }
+
     private Task RefreshDirectory()
     {
         LoadDirectory(directorySnapshot.CurrentPath);
@@ -97,6 +110,7 @@ public partial class Home : IDisposable
     {
         directorySnapshot = DirectoryBrowser.GetSnapshot(path);
         cwdText = directorySnapshot.CurrentPath;
+        browseChoice = directorySnapshot.CurrentPath;
     }
 
     private async Task RunCommandAsync(Func<Task> command)

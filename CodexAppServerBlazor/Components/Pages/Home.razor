@@ -19,66 +19,100 @@
 
     <main class="control-grid">
         <aside class="connection-panel" aria-label="Connection controls">
-            <div class="panel-heading">
-                <div>
-                    <span class="eyebrow">Connection</span>
-                    <h2>Runtime</h2>
-                </div>
-            </div>
+            <RadzenTabs RenderMode="TabRenderMode.Client">
+                <Tabs>
+                    <RadzenTabsItem Text="Workspace">
+                        <div class="left-tab">
+                            <div class="panel-heading">
+                                <div>
+                                    <span class="eyebrow">CWD</span>
+                                    <h2>Workspace</h2>
+                                </div>
+                            </div>
 
-            <label class="field">
-                <span>Codex executable</span>
-                <RadzenTextBox @bind-Value="codexExe" />
-            </label>
+                            <label class="field">
+                                <span>Current directory</span>
+                                <RadzenTextBox @bind-Value="cwdText" />
+                            </label>
 
-            <label class="field">
-                <span>Model</span>
-                <RadzenTextBox @bind-Value="model" />
-            </label>
+                            <label class="field">
+                                <span>Browse</span>
+                                <RadzenDropDown TValue="string"
+                                                Value="@browseChoice"
+                                                Data="@directorySnapshot.BrowseChoices"
+                                                TextProperty="Name"
+                                                ValueProperty="FullPath"
+                                                Change="@SelectBrowseChoice"
+                                                Style="width: 100%;" />
+                            </label>
 
-            <div class="settings-pair">
-                <label class="field">
-                    <span>Approval</span>
-                    <RadzenTextBox @bind-Value="approvalPolicy" Disabled="true" />
-                </label>
-                <label class="field">
-                    <span>Sandbox</span>
-                    <RadzenTextBox @bind-Value="sandbox" Disabled="true" />
-                </label>
-            </div>
+                            <div class="actions connection-actions">
+                                <RadzenButton Icon="subdirectory_arrow_right" Text="Open Typed Path" ButtonStyle="ButtonStyle.Secondary" Click="@ApplyTypedDirectory" Disabled="@busy" />
+                                <RadzenButton Icon="check" Text="Use This CWD" ButtonStyle="ButtonStyle.Primary" Click="@UseCurrentDirectory" Disabled="@busy" />
+                            </div>
 
-            <div class="cwd-box">
-                <span class="eyebrow">CWD</span>
-                <div class="path-row">
-                    <RadzenTextBox class="path-input" @bind-Value="cwdText" />
-                    <RadzenButton Icon="folder_open" Text="Browse" ButtonStyle="ButtonStyle.Secondary" Click="@ApplyTypedDirectory" Disabled="@busy" />
-                </div>
-                <RadzenButton class="apply-cwd" Icon="check" Text="Use This CWD" ButtonStyle="ButtonStyle.Primary" Click="@UseCurrentDirectory" Disabled="@busy" />
-                @if (!string.IsNullOrWhiteSpace(directorySnapshot.ErrorMessage))
-                {
-                    <div class="inline-error">@directorySnapshot.ErrorMessage</div>
-                }
-            </div>
+                            @if (!string.IsNullOrWhiteSpace(directorySnapshot.ErrorMessage))
+                            {
+                                <div class="inline-error">@directorySnapshot.ErrorMessage</div>
+                            }
 
-            <div class="actions connection-actions">
-                <RadzenButton Icon="power_settings_new" Text="Start Server" ButtonStyle="ButtonStyle.Secondary" Click="@StartServer" Disabled="@busy" />
-                <RadzenButton Icon="forum" Text="Start Thread" ButtonStyle="ButtonStyle.Secondary" Click="@StartThread" Disabled="@(!snapshot.IsServerStarted || busy)" />
-            </div>
+                            <div class="summary-stack">
+                                <div>
+                                    <span>Codex cwd</span>
+                                    <strong>@repoRoot</strong>
+                                </div>
+                            </div>
+                        </div>
+                    </RadzenTabsItem>
+                    <RadzenTabsItem Text="Connection">
+                        <div class="left-tab">
+                            <div class="panel-heading">
+                                <div>
+                                    <span class="eyebrow">Connection</span>
+                                    <h2>Runtime</h2>
+                                </div>
+                            </div>
 
-            <div class="summary-stack">
-                <div>
-                    <span>Thread</span>
-                    <strong>@(snapshot.ThreadId ?? "not started")</strong>
-                </div>
-                <div>
-                    <span>Codex cwd</span>
-                    <strong>@repoRoot</strong>
-                </div>
-                <div>
-                    <span>MCP endpoint</span>
-                    <strong>http://localhost:6278</strong>
-                </div>
-            </div>
+                            <label class="field">
+                                <span>Codex executable</span>
+                                <RadzenTextBox @bind-Value="codexExe" />
+                            </label>
+
+                            <label class="field">
+                                <span>Model</span>
+                                <RadzenTextBox @bind-Value="model" />
+                            </label>
+
+                            <div class="settings-pair">
+                                <label class="field">
+                                    <span>Approval</span>
+                                    <RadzenTextBox @bind-Value="approvalPolicy" Disabled="true" />
+                                </label>
+                                <label class="field">
+                                    <span>Sandbox</span>
+                                    <RadzenTextBox @bind-Value="sandbox" Disabled="true" />
+                                </label>
+                            </div>
+
+                            <div class="actions connection-actions">
+                                <RadzenButton Icon="power_settings_new" Text="Start Server" ButtonStyle="ButtonStyle.Secondary" Click="@StartServer" Disabled="@busy" />
+                                <RadzenButton Icon="forum" Text="Start Thread" ButtonStyle="ButtonStyle.Secondary" Click="@StartThread" Disabled="@(!snapshot.IsServerStarted || busy)" />
+                            </div>
+
+                            <div class="summary-stack">
+                                <div>
+                                    <span>Thread</span>
+                                    <strong>@(snapshot.ThreadId ?? "not started")</strong>
+                                </div>
+                                <div>
+                                    <span>MCP endpoint</span>
+                                    <strong>http://localhost:6278</strong>
+                                </div>
+                            </div>
+                        </div>
+                    </RadzenTabsItem>
+                </Tabs>
+            </RadzenTabs>
         </aside>
 
         <section class="work-panel">

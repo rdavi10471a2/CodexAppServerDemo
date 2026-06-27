@@ -29,11 +29,13 @@ public sealed class DirectoryBrowserService
         }
 
         string? parentPath = Directory.GetParent(resolvedPath)?.FullName;
+        DirectoryEntryViewModel[] browseChoices = GetBrowseChoices(resolvedPath, parentPath, drives, children);
         return new DirectoryBrowserSnapshot(
             Path.GetFullPath(resolvedPath),
             parentPath,
             drives,
             children,
+            browseChoices,
             errorMessage);
     }
 
@@ -62,6 +64,38 @@ public sealed class DirectoryBrowserService
             .ToArray();
     }
 
+    private static DirectoryEntryViewModel[] GetBrowseChoices(
+        string currentPath,
+        string? parentPath,
+        IReadOnlyList<DirectoryEntryViewModel> drives,
+        IReadOnlyList<DirectoryEntryViewModel> children)
+    {
+        List<DirectoryEntryViewModel> choices = [];
+        choices.Add(new DirectoryEntryViewModel("Current folder", currentPath));
+        if (!string.IsNullOrWhiteSpace(parentPath))
+        {
+            choices.Add(new DirectoryEntryViewModel("Parent folder", parentPath));
+        }
+
+        AddKnownFolder(choices, "User profile", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        AddKnownFolder(choices, "Desktop", Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory));
+        AddKnownFolder(choices, "Documents", Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments));
+        choices.AddRange(drives.Select(drive => new DirectoryEntryViewModel($"Drive {drive.Name}", drive.FullPath)));
+        choices.AddRange(children.Select(child => new DirectoryEntryViewModel(child.Name, child.FullPath)));
+        return choices
+            .GroupBy(choice => choice.FullPath, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToArray();
+    }
+
+    private static void AddKnownFolder(List<DirectoryEntryViewModel> choices, string name, string path)
+    {
+        if (!string.IsNullOrWhiteSpace(path) && Directory.Exists(path))
+        {
+            choices.Add(new DirectoryEntryViewModel(name, path));
+        }
+    }
+
     private static bool IsHiddenOrSystem(FileAttributes attributes)
     {
         return attributes.HasFlag(FileAttributes.Hidden) || attributes.HasFlag(FileAttributes.System);
@@ -73,11 +107,13 @@ public sealed record DirectoryBrowserSnapshot(
     string? ParentPath,
     IReadOnlyList<DirectoryEntryViewModel> Drives,
     IReadOnlyList<DirectoryEntryViewModel> Children,
+    IReadOnlyList<DirectoryEntryViewModel> BrowseChoices,
     string? ErrorMessage)
 {
     public static DirectoryBrowserSnapshot Empty { get; } = new(
         string.Empty,
         null,
+        [],
         [],
         [],
         null);
