@@ -23,6 +23,7 @@ public partial class Home : IDisposable
     private string prompt = "Inspect the current workspace. Start with discovery, propose the next safe step, and do not edit files unless explicitly asked.";
     private string? errorMessage;
     private bool busy;
+    private bool isConnectionPanelVisible = true;
 
     [Inject]
     public CodexConnectionService ConnectionService { get; set; } = default!;
@@ -83,6 +84,11 @@ public partial class Home : IDisposable
     {
         directorySnapshot = DirectoryBrowser.GetSnapshot(path);
         repoRoot = directorySnapshot.CurrentPath;
+    }
+
+    private void ToggleConnectionPanel()
+    {
+        isConnectionPanelVisible = !isConnectionPanelVisible;
     }
 
     private async Task RunCommandAsync(Func<Task> command)
