@@ -97,6 +97,9 @@
 }
 
 .connection-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
     padding: 14px;
 }
 
@@ -118,8 +121,7 @@
 }
 
 .field,
-.prompt-panel,
-.cwd-display {
+.prompt-panel {
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -127,35 +129,16 @@
 
 .field span,
 .prompt-panel span,
-.summary-stack span,
-.cwd-display span {
+.summary-stack span {
     color: #526a82;
     font-size: .8rem;
     font-weight: 800;
-}
-
-.cwd-display {
-    border: 1px solid #d7e1ea;
-    border-radius: 6px;
-    padding: 10px;
-    background: #f7fafc;
-}
-
-.cwd-display strong {
-    overflow-wrap: anywhere;
 }
 
 .settings-pair {
     display: grid;
     grid-template-columns: 1fr;
     gap: 10px;
-}
-
-.left-tab {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    padding: 10px 2px 2px;
 }
 
 .path-row {
@@ -175,11 +158,42 @@
     flex-direction: column;
 }
 
+.workspace-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    min-height: 44px;
+    border-bottom: 1px solid #d7e1ea;
+    padding: 0 0 10px;
+}
+
+.workspace-path {
+    min-width: 0;
+}
+
+.workspace-path span {
+    display: block;
+    color: #526a82;
+    font-size: .75rem;
+    font-weight: 800;
+}
+
+.workspace-path strong {
+    display: block;
+    overflow: hidden;
+    color: #33485f;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: .86rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .assistant-layout {
     display: grid;
     grid-template-rows: auto auto minmax(360px, 1fr);
     gap: 12px;
-    min-height: calc(100vh - 176px);
+    min-height: calc(100vh - 230px);
 }
 
 .actions {
