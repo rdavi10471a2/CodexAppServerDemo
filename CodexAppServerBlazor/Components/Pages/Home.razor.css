@@ -118,7 +118,8 @@
 }
 
 .field,
-.prompt-panel {
+.prompt-panel,
+.cwd-display {
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -126,10 +127,22 @@
 
 .field span,
 .prompt-panel span,
-.summary-stack span {
+.summary-stack span,
+.cwd-display span {
     color: #526a82;
     font-size: .8rem;
     font-weight: 800;
+}
+
+.cwd-display {
+    border: 1px solid #d7e1ea;
+    border-radius: 6px;
+    padding: 10px;
+    background: #f7fafc;
+}
+
+.cwd-display strong {
+    overflow-wrap: anywhere;
 }
 
 .settings-pair {

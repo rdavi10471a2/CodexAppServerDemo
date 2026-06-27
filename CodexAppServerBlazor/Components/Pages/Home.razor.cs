@@ -16,8 +16,7 @@ public partial class Home : IDisposable
 
     private DirectoryBrowserSnapshot directorySnapshot = DirectoryBrowserSnapshot.Empty;
     private string codexExe = "codex";
-    private string repoRoot = "C:\\CodexAppServerWinForms_corrected";
-    private string cwdText = "C:\\CodexAppServerWinForms_corrected";
+    private string repoRoot = string.Empty;
     private string model = "gpt-5.4";
     private string approvalPolicy = "never";
     private string sandbox = "danger-full-access";
@@ -34,11 +33,15 @@ public partial class Home : IDisposable
     [Inject]
     public NativeFolderPickerService FolderPicker { get; set; } = default!;
 
+    [Inject]
+    public IConfiguration Configuration { get; set; } = default!;
+
     protected override void OnInitialized()
     {
         ConnectionService.Changed += OnConnectionChanged;
         snapshot = ConnectionService.GetSnapshot();
-        LoadDirectory(repoRoot);
+        string configuredCwd = Configuration["Workspace:DefaultCwd"] ?? Directory.GetCurrentDirectory();
+        SetWorkspace(configuredCwd);
     }
 
     private async Task StartServer()
@@ -67,49 +70,19 @@ public partial class Home : IDisposable
             CancellationToken.None));
     }
 
-    private Task ApplyTypedDirectory()
-    {
-        LoadDirectory(cwdText);
-        return Task.CompletedTask;
-    }
-
     private async Task BrowseForDirectory()
     {
-        string? selectedPath = await FolderPicker.PickFolderAsync(cwdText, CancellationToken.None);
+        string? selectedPath = await FolderPicker.PickFolderAsync(repoRoot, CancellationToken.None);
         if (!string.IsNullOrWhiteSpace(selectedPath))
         {
-            LoadDirectory(selectedPath);
-            repoRoot = directorySnapshot.CurrentPath;
+            SetWorkspace(selectedPath);
         }
     }
 
-    private Task RefreshDirectory()
-    {
-        LoadDirectory(directorySnapshot.CurrentPath);
-        return Task.CompletedTask;
-    }
-
-    private Task OpenDirectory(string path)
-    {
-        LoadDirectory(path);
-        return Task.CompletedTask;
-    }
-
-    private Task UseCurrentDirectory()
-    {
-        if (!string.IsNullOrWhiteSpace(directorySnapshot.CurrentPath))
-        {
-            repoRoot = directorySnapshot.CurrentPath;
-            cwdText = repoRoot;
-        }
-
-        return Task.CompletedTask;
-    }
-
-    private void LoadDirectory(string? path)
+    private void SetWorkspace(string? path)
     {
         directorySnapshot = DirectoryBrowser.GetSnapshot(path);
-        cwdText = directorySnapshot.CurrentPath;
+        repoRoot = directorySnapshot.CurrentPath;
     }
 
     private async Task RunCommandAsync(Func<Task> command)

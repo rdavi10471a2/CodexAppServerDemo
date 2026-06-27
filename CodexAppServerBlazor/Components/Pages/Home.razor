@@ -30,28 +30,19 @@
                                 </div>
                             </div>
 
-                            <label class="field">
+                            <div class="cwd-display">
                                 <span>Current directory</span>
-                                <RadzenTextBox @bind-Value="cwdText" />
-                            </label>
+                                <strong>@repoRoot</strong>
+                            </div>
 
                             <div class="actions connection-actions">
                                 <RadzenButton Icon="folder_open" Text="Browse Folder" ButtonStyle="ButtonStyle.Secondary" Click="@BrowseForDirectory" Disabled="@busy" />
-                                <RadzenButton Icon="subdirectory_arrow_right" Text="Open Typed Path" ButtonStyle="ButtonStyle.Light" Click="@ApplyTypedDirectory" Disabled="@busy" />
-                                <RadzenButton Icon="check" Text="Use This CWD" ButtonStyle="ButtonStyle.Primary" Click="@UseCurrentDirectory" Disabled="@busy" />
                             </div>
 
                             @if (!string.IsNullOrWhiteSpace(directorySnapshot.ErrorMessage))
                             {
                                 <div class="inline-error">@directorySnapshot.ErrorMessage</div>
                             }
-
-                            <div class="summary-stack">
-                                <div>
-                                    <span>Codex cwd</span>
-                                    <strong>@repoRoot</strong>
-                                </div>
-                            </div>
                         </div>
                     </RadzenTabsItem>
                     <RadzenTabsItem Text="Connection">
