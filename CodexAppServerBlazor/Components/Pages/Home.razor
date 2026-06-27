@@ -35,19 +35,9 @@
                                 <RadzenTextBox @bind-Value="cwdText" />
                             </label>
 
-                            <label class="field">
-                                <span>Browse</span>
-                                <RadzenDropDown TValue="string"
-                                                Value="@browseChoice"
-                                                Data="@directorySnapshot.BrowseChoices"
-                                                TextProperty="Name"
-                                                ValueProperty="FullPath"
-                                                Change="@SelectBrowseChoice"
-                                                Style="width: 100%;" />
-                            </label>
-
                             <div class="actions connection-actions">
-                                <RadzenButton Icon="subdirectory_arrow_right" Text="Open Typed Path" ButtonStyle="ButtonStyle.Secondary" Click="@ApplyTypedDirectory" Disabled="@busy" />
+                                <RadzenButton Icon="folder_open" Text="Browse Folder" ButtonStyle="ButtonStyle.Secondary" Click="@BrowseForDirectory" Disabled="@busy" />
+                                <RadzenButton Icon="subdirectory_arrow_right" Text="Open Typed Path" ButtonStyle="ButtonStyle.Light" Click="@ApplyTypedDirectory" Disabled="@busy" />
                                 <RadzenButton Icon="check" Text="Use This CWD" ButtonStyle="ButtonStyle.Primary" Click="@UseCurrentDirectory" Disabled="@busy" />
                             </div>
 

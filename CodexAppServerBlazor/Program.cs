@@ -17,6 +17,7 @@ public class Program
         builder.Services.AddSingleton<SelectedFileState>();
         builder.Services.AddSingleton<CodexConnectionService>();
         builder.Services.AddSingleton<DirectoryBrowserService>();
+        builder.Services.AddSingleton<NativeFolderPickerService>();
         builder.Services.AddSingleton<HarnessMcpHostedService>();
         builder.Services.AddHostedService(services => services.GetRequiredService<HarnessMcpHostedService>());
 

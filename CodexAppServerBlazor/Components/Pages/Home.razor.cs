@@ -22,7 +22,6 @@ public partial class Home : IDisposable
     private string approvalPolicy = "never";
     private string sandbox = "danger-full-access";
     private string prompt = "Inspect the current workspace. Start with discovery, propose the next safe step, and do not edit files unless explicitly asked.";
-    private string? browseChoice;
     private string? errorMessage;
     private bool busy;
 
@@ -31,6 +30,9 @@ public partial class Home : IDisposable
 
     [Inject]
     public DirectoryBrowserService DirectoryBrowser { get; set; } = default!;
+
+    [Inject]
+    public NativeFolderPickerService FolderPicker { get; set; } = default!;
 
     protected override void OnInitialized()
     {
@@ -71,16 +73,14 @@ public partial class Home : IDisposable
         return Task.CompletedTask;
     }
 
-    private Task SelectBrowseChoice(object? value)
+    private async Task BrowseForDirectory()
     {
-        string? selectedPath = value?.ToString();
+        string? selectedPath = await FolderPicker.PickFolderAsync(cwdText, CancellationToken.None);
         if (!string.IsNullOrWhiteSpace(selectedPath))
         {
             LoadDirectory(selectedPath);
-            browseChoice = selectedPath;
+            repoRoot = directorySnapshot.CurrentPath;
         }
-
-        return Task.CompletedTask;
     }
 
     private Task RefreshDirectory()
@@ -110,7 +110,6 @@ public partial class Home : IDisposable
     {
         directorySnapshot = DirectoryBrowser.GetSnapshot(path);
         cwdText = directorySnapshot.CurrentPath;
-        browseChoice = directorySnapshot.CurrentPath;
     }
 
     private async Task RunCommandAsync(Func<Task> command)
