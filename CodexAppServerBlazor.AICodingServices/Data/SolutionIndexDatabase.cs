@@ -35,7 +35,12 @@ public sealed class SolutionIndexDatabase
     public SqliteConnection OpenConnection()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(databasePath) ?? ".");
-        SqliteConnection connection = new($"Data Source={databasePath}");
+        SqliteConnectionStringBuilder connectionString = new()
+        {
+            DataSource = databasePath,
+            Pooling = false
+        };
+        SqliteConnection connection = new(connectionString.ToString());
         connection.Open();
 
         using (SqliteCommand pragma = connection.CreateCommand())
