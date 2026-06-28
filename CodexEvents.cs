@@ -1,4 +1,4 @@
-namespace CodexAppServerWinForms;
+namespace CodexAppServerBlazor;
 
 //public enum CodexEventKind
 //{

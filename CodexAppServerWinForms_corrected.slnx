@@ -1,3 +1,4 @@
 <Solution>
+  <Project Path="CodexAppServerBlazor.AICodingServices/CodexAppServerBlazor.AICodingServices.csproj" />
   <Project Path="CodexAppServerBlazor/CodexAppServerBlazor.csproj" />
 </Solution>

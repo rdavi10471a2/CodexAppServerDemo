@@ -110,7 +110,7 @@
 .workspace-toolbar {
     flex: 0 0 auto;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     align-items: center;
     gap: 10px;
     min-height: 36px;
@@ -123,6 +123,42 @@
     align-items: baseline;
     gap: 8px;
     min-width: 0;
+}
+
+.workspace-state {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.state-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    border: 1px solid #c8d5df;
+    border-radius: 999px;
+    padding: 3px 9px;
+    font-size: .72rem;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.state-chip-ok {
+    border-color: #8fcaa6;
+    background: #ecfdf3;
+    color: #0c6b37;
+}
+
+.state-chip-muted {
+    background: #f3f6f9;
+    color: #526a82;
+}
+
+.state-chip-running {
+    border-color: #f0c36a;
+    background: #fff8e7;
+    color: #805600;
 }
 
 .workspace-path span {

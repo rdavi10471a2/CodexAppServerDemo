@@ -32,6 +32,16 @@ MCP health:
 http://localhost:6278/health
 ```
 
+The health response advertises the local MCP discovery surface. It includes the
+endpoint metadata plus tool names and descriptions:
+
+- `GetWorkspace`: returns the current workspace CWD selected in the Blazor UI.
+- `GetWatchedSolutionDigest`: returns cheap readiness and change-detection
+  metadata for the watched solution, including counts, summary size, hash, and
+  index paths.
+- `GetWatchedSolutionSummary`: returns the full indexed project/file/type/member
+  tree for on-demand discovery. It does not include source file bodies.
+
 ## Project Layout
 
 ```text

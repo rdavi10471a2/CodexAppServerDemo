@@ -22,7 +22,9 @@ The primary workflow is CWD/workspace based:
 
 - `CodexAppServerBlazor/`: Blazor Server control UI and app host.
 - `CodexAppServerClient.cs`: JSON-RPC client for `codex app-server`, protocol events, and token usage handling.
-- `Mcp/`: local MCP HTTP host and workspace metadata tool.
+- `Mcp/`: local MCP HTTP host and workspace metadata tools. The health endpoint
+  at `http://localhost:6278/health` advertises available MCP discovery tools and
+  descriptions.
 - `CodexAppServerWinForms_corrected.slnx`: root solution pointing at the Blazor project.
 
 ## Build And Run

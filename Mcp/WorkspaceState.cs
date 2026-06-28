@@ -1,4 +1,4 @@
-namespace CodexAppServerWinForms.Mcp;
+namespace CodexAppServerBlazor.Mcp;
 
 public sealed class WorkspaceState
 {

@@ -1,7 +1,6 @@
 using CodexAppServerBlazor.Components;
 using CodexAppServerBlazor.Services;
-using CodexAppServerWinForms.Mcp;
-using Microsoft.AspNetCore.Hosting.StaticWebAssets;
+using CodexAppServerBlazor.Mcp;
 using Radzen;
 
 namespace CodexAppServerBlazor;
@@ -24,6 +23,7 @@ public class Program
         builder.Services.AddSingleton<NativeFolderPickerService>();
         builder.Services.AddSingleton<HarnessMcpHostedService>();
         builder.Services.AddHostedService(services => services.GetRequiredService<HarnessMcpHostedService>());
+        builder.Services.AddHostedService<WorkspaceStartupHostedService>();
 
         var app = builder.Build();
 

@@ -9,16 +9,12 @@
 
   <ItemGroup>
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="*" />
+    <PackageReference Include="Markdig" Version="0.41.3" />
     <PackageReference Include="Radzen.Blazor" Version="10.3.2" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="C:\VSCodeProjects\CodingServices\src\AICodingServices.Core\AICodingServices.Core.csproj" />
-    <ProjectReference Include="C:\VSCodeProjects\CodingServices\src\AICodingServices.Data\AICodingServices.Data.csproj" />
-    <ProjectReference Include="C:\VSCodeProjects\CodingServices\src\AICodingServices.Indexing\AICodingServices.Indexing.csproj" />
-    <ProjectReference Include="C:\VSCodeProjects\CodingServices\src\AICodingServices.Logging\AICodingServices.Logging.csproj" />
-    <ProjectReference Include="C:\VSCodeProjects\CodingServices\src\AICodingServices.MSBuild\AICodingServices.MSBuild.csproj" />
-    <ProjectReference Include="C:\VSCodeProjects\CodingServices\src\AICodingServices.Workflow\AICodingServices.Workflow.csproj" />
+    <ProjectReference Include="..\CodexAppServerBlazor.AICodingServices\CodexAppServerBlazor.AICodingServices.csproj" />
   </ItemGroup>
 
   <ItemGroup>

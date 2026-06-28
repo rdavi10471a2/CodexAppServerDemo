@@ -1,4 +1,4 @@
-using AICodingServices.Core;
+using CodexAppServerBlazor.AICodingServices.Core;
 
 namespace CodexAppServerBlazor.Services;
 

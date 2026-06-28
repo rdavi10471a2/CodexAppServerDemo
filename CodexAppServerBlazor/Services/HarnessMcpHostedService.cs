@@ -1,15 +1,17 @@
-using CodexAppServerWinForms.Mcp;
+using CodexAppServerBlazor.Mcp;
 
 namespace CodexAppServerBlazor.Services;
 
 public sealed class HarnessMcpHostedService : IHostedService, IDisposable
 {
     private readonly WorkspaceState workspaceState;
+    private readonly SourceWorkspaceService sourceWorkspaceService;
     private IHost? host;
 
-    public HarnessMcpHostedService(WorkspaceState workspaceState)
+    public HarnessMcpHostedService(WorkspaceState workspaceState, SourceWorkspaceService sourceWorkspaceService)
     {
         this.workspaceState = workspaceState;
+        this.sourceWorkspaceService = sourceWorkspaceService;
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -19,7 +21,7 @@ public sealed class HarnessMcpHostedService : IHostedService, IDisposable
             return Task.CompletedTask;
         }
 
-        host = McpHostFactory.Create(workspaceState);
+        host = McpHostFactory.Create(workspaceState, sourceWorkspaceService);
         return host.StartAsync(cancellationToken);
     }
 

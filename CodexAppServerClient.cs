@@ -4,7 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-namespace CodexAppServerWinForms;
+namespace CodexAppServerBlazor;
 
 public sealed class CodexAppServerClient : IAsyncDisposable
 {
@@ -70,8 +70,8 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         {
             clientInfo = new
             {
-                name = "codex_app_server_winforms",
-                title = "Codex App Server WinForms Sample",
+                name = "codex_app_server_blazor",
+                title = "Codex App Server Blazor",
                 version = "0.2.0"
             }
         }, cancellationToken);
@@ -96,7 +96,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             cwd = repoRoot,
             approvalPolicy,
             sandbox,
-            serviceName = "codex_app_server_winforms"
+            serviceName = "codex_app_server_blazor"
         }, cancellationToken);
 
         ThrowIfRpcError(response);

@@ -2,21 +2,62 @@
 @implements IAsyncDisposable
 
 <div class="assistant-layout" @ref="assistantLayout">
-    <section class="transcript-panel" @ref="transcriptPanel" aria-label="Codex transcript">
-        <iframe class="transcript-webview"
-                title="Codex transcript"
-                sandbox=""
-                srcdoc="@TranscriptHtml"></iframe>
-    </section>
+    <div class="assistant-main" @ref="assistantMain">
+        <section class="transcript-panel" @ref="transcriptPanel" aria-label="Completed Codex transcript">
+            <div class="transcript-header">
+                <span>Chat History</span>
+                <div class="transcript-actions">
+                    <RadzenButton Icon="content_copy"
+                                  Text="Copy"
+                                  ButtonStyle="ButtonStyle.Light"
+                                  Size="ButtonSize.Small"
+                                  Click="@CopyTranscript"
+                                  Disabled="@(!HasTranscript)" />
+                    <RadzenButton Icon="open_in_new"
+                                  Text="Pop Out"
+                                  ButtonStyle="ButtonStyle.Light"
+                                  Size="ButtonSize.Small"
+                                  Click="@OpenTranscript"
+                                  Disabled="@(!HasTranscript)" />
+                    <RadzenButton Icon="delete_sweep"
+                                  Text="Clear"
+                                  ButtonStyle="ButtonStyle.Light"
+                                  Size="ButtonSize.Small"
+                                  Click="@ClearTranscript"
+                                  Disabled="@(!HasTranscript || Busy)" />
+                </div>
+            </div>
+            <iframe class="transcript-webview"
+                    title="Completed Codex transcript"
+                    sandbox="allow-scripts"
+                    srcdoc="@TranscriptHtml"></iframe>
+        </section>
+
+        <div class="stream-splitter" @ref="streamSplitter" title="Drag to resize history and current turn" aria-hidden="true"></div>
+
+        <aside class="current-turn-panel" @ref="currentTurnPanel" aria-label="Current turn stream">
+            <div class="current-turn-header">Current Turn</div>
+            <div class="current-turn-body" @ref="currentTurnBody">
+                @if (string.IsNullOrWhiteSpace(CurrentTurnHtml))
+                {
+                    <div class="current-turn-empty">Current turn stream will appear here.</div>
+                }
+                else
+                {
+                    <div class="current-turn-markdown">@((MarkupString)CurrentTurnHtml)</div>
+                }
+            </div>
+        </aside>
+    </div>
 
     <div class="assistant-splitter" @ref="assistantSplitter" title="Drag to resize transcript and input" aria-hidden="true"></div>
 
     <div class="chat-composer" @ref="chatComposer">
-        <RadzenTextArea Value="@ChatDraft"
-                        Change="@OnChatDraftChanged"
-                        Placeholder="Inspect the current workspace..."
-                        Class="chat-composer-input"
-                        Style="height: 200px; min-height: 200px; max-height: 320px; overflow: auto; resize: vertical;" />
+        <textarea @ref="chatInput"
+                  class="chat-composer-input"
+                  value="@ChatDraft"
+                  placeholder="Inspect the current workspace..."
+                  @oninput="OnChatInput"></textarea>
         <RadzenButton Icon="send"
                       ButtonStyle="ButtonStyle.Primary"
                       Click="@SendChatDraft"
@@ -27,6 +68,12 @@
 @code {
     [Parameter]
     public string TranscriptHtml { get; set; } = string.Empty;
+
+    [Parameter]
+    public string TranscriptText { get; set; } = string.Empty;
+
+    [Parameter]
+    public string CurrentTurnHtml { get; set; } = string.Empty;
 
     [Parameter]
     public string ChatDraft { get; set; } = string.Empty;
@@ -43,31 +90,73 @@
     [Parameter]
     public EventCallback SendChatDraft { get; set; }
 
+    [Parameter]
+    public EventCallback ClearHistory { get; set; }
+
+    private bool HasTranscript => !string.IsNullOrWhiteSpace(TranscriptText);
+
     private ElementReference assistantLayout;
+    private ElementReference assistantMain;
     private ElementReference transcriptPanel;
+    private ElementReference streamSplitter;
+    private ElementReference currentTurnPanel;
+    private ElementReference currentTurnBody;
     private ElementReference chatComposer;
     private ElementReference assistantSplitter;
+    private ElementReference chatInput;
     private IJSObjectReference? resizeModule;
 
-    private Task OnChatDraftChanged(string? value)
+    private Task OnChatInput(ChangeEventArgs args)
     {
-        return ChatDraftChanged.InvokeAsync(value ?? string.Empty);
+        return ChatDraftChanged.InvokeAsync(args.Value?.ToString() ?? string.Empty);
     }
 
-    protected override async Task OnAfterRenderAsync(bool firstRender)
+    private async Task CopyTranscript()
     {
-        if (!firstRender)
+        if (resizeModule is null || !HasTranscript)
         {
             return;
         }
 
-        resizeModule = await JS.InvokeAsync<IJSObjectReference>("import", "/js/sourceResize.js");
-        await resizeModule.InvokeVoidAsync(
-            "attachAssistantSplitter",
-            assistantLayout,
-            transcriptPanel,
-            chatComposer,
-            assistantSplitter);
+        await resizeModule.InvokeVoidAsync("copyTextToClipboard", TranscriptText);
+    }
+
+    private async Task OpenTranscript()
+    {
+        if (resizeModule is null || !HasTranscript)
+        {
+            return;
+        }
+
+        await resizeModule.InvokeVoidAsync("openHtmlDocument", TranscriptHtml, "Coding Services Chat History");
+    }
+
+    private Task ClearTranscript()
+    {
+        return ClearHistory.InvokeAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        resizeModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "/js/sourceResize.js");
+        if (firstRender)
+        {
+            await resizeModule.InvokeVoidAsync(
+                "attachAssistantSplitter",
+                assistantLayout,
+                assistantMain,
+                chatComposer,
+                assistantSplitter);
+            await resizeModule.InvokeVoidAsync(
+                "attachStreamSplitter",
+                assistantMain,
+                transcriptPanel,
+                currentTurnPanel,
+                streamSplitter);
+            await resizeModule.InvokeVoidAsync("attachComposerAutoScroll", chatInput);
+        }
+
+        await resizeModule.InvokeVoidAsync("scrollElementToBottom", currentTurnBody);
     }
 
     public async ValueTask DisposeAsync()

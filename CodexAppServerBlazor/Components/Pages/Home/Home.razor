@@ -42,6 +42,15 @@
                     <span>CWD</span>
                     <strong>@repoRoot</strong>
                 </div>
+                <div class="workspace-state">
+                    <span class="state-chip @(snapshot.IsServerStarted ? "state-chip-ok" : "state-chip-muted")">
+                        @(snapshot.IsServerStarted ? "Server running" : "Server stopped")
+                    </span>
+                    @if (snapshot.IsTurnRunning)
+                    {
+                        <span class="state-chip state-chip-running">Turn running</span>
+                    }
+                </div>
                 <RadzenButton Icon="folder_open"
                               Text="Browse"
                               ButtonStyle="ButtonStyle.Secondary"
@@ -59,10 +68,13 @@
                 <Tabs>
                     <RadzenTabsItem Text="Assistant">
                         <AssistantTab TranscriptHtml="@TranscriptHtml"
+                                      TranscriptText="@TranscriptText"
+                                      CurrentTurnHtml="@CurrentTurnHtml"
                                       @bind-ChatDraft="@chatDraft"
                                       IsServerStarted="@snapshot.IsServerStarted"
                                       Busy="@busy"
-                                      SendChatDraft="@SendChatDraft" />
+                                      SendChatDraft="@SendChatDraft"
+                                      ClearHistory="@ClearChatHistory" />
                     </RadzenTabsItem>
 
                     <RadzenTabsItem Text="Source">

@@ -1,6 +1,6 @@
-using AICodingServices.Core;
-using AICodingServices.Data;
-using AICodingServices.Indexing;
+using CodexAppServerBlazor.AICodingServices.Core;
+using CodexAppServerBlazor.AICodingServices.Data;
+using CodexAppServerBlazor.AICodingServices.Indexing;
 
 namespace CodexAppServerBlazor.Services;
 
@@ -66,6 +66,47 @@ public sealed class SourceWorkspaceService
                 selectedFile,
                 filter ?? string.Empty,
                 files.Count == 0 ? "No indexed source files matched the current filter." : string.Empty);
+    }
+
+    public SourceWorkspaceStructureSnapshot BuildStructureSnapshot(string workspaceRoot, string? filter)
+    {
+        CodingServicesSettings settings = settingsProvider.GetSettings(workspaceRoot);
+        string workspaceDataRoot = MonitorWorkspacePaths.GetWatchedSolutionWorkspaceRoot(settings);
+        string databasePath = MonitorDataPaths.GetDefaultIndexDatabasePath(settings);
+
+        Directory.CreateDirectory(Path.Combine(workspaceDataRoot, "data"));
+        SolutionIndexDatabase database = new(databasePath);
+        database.EnsureCreated();
+
+        SolutionIndexCounts counts = new SolutionIndexProbe(database).GetCounts();
+        bool rebuildRequired = database.IsFullRebuildRequired()
+            || counts.Projects == 0
+            || counts.Documents == 0;
+        if (rebuildRequired)
+        {
+            return new SourceWorkspaceStructureSnapshot(
+                settings.WatchedProjectFolder,
+                settings.WatchedSolutionPath,
+                databasePath,
+                0,
+                [],
+                "Solution index is empty or stale. Rebuild the index to load source.");
+        }
+
+        SolutionIndexStore store = new(database);
+        IReadOnlyList<IndexedProjectRow> projects = store.ListProjects();
+        IReadOnlyList<IndexedDocumentRow> documents = store.ListDocuments();
+        IReadOnlyList<IndexedSymbolRow> symbols = store.ListSymbols();
+        IReadOnlyList<SourceFileEntry> files = BuildFiles(settings.WatchedProjectFolder, documents, filter);
+        IReadOnlyList<SourceTreeNode> tree = BuildTree(projects, documents, symbols, settings.WatchedProjectFolder, files);
+
+        return new SourceWorkspaceStructureSnapshot(
+            settings.WatchedProjectFolder,
+            settings.WatchedSolutionPath,
+            databasePath,
+            files.Count,
+            tree,
+            files.Count == 0 ? "No indexed source files matched the current filter." : string.Empty);
     }
 
     public async Task RebuildIndexAsync(string workspaceRoot, CancellationToken cancellationToken)
@@ -575,6 +616,14 @@ public sealed record SourceWorkspaceSnapshot(
         return new SourceWorkspaceSnapshot(string.Empty, string.Empty, string.Empty, [], [], null, string.Empty, message);
     }
 }
+
+public sealed record SourceWorkspaceStructureSnapshot(
+    string WorkspaceRoot,
+    string WatchedSolutionPath,
+    string IndexDatabasePath,
+    int FileCount,
+    IReadOnlyList<SourceTreeNode> Tree,
+    string Message);
 
 public sealed record SourceFileEntry(
     string RelativePath,

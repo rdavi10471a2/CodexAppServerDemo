@@ -1,4 +1,6 @@
 using CodexAppServerBlazor.Services;
+using Markdig;
+using Markdig.Extensions.MediaLinks;
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
 using System.Net;
@@ -14,6 +16,7 @@ public partial class Home : IDisposable, IAsyncDisposable
     private CodexConnectionSnapshot snapshot = new(
         false,
         null,
+        false,
         string.Empty,
         CodexTelemetrySummary.Empty,
         [],
@@ -44,8 +47,14 @@ public partial class Home : IDisposable, IAsyncDisposable
     private ElementReference workPanel;
     private ElementReference mainSplitter;
     private IJSObjectReference? mainResizeModule;
+    private static readonly MarkdownPipeline MarkdownPipeline = new MarkdownPipelineBuilder()
+        .UseAdvancedExtensions()
+        .DisableHtml()
+        .Build();
 
     private string TranscriptHtml => BuildTranscriptHtml();
+    private string TranscriptText => BuildTranscriptText();
+    private string CurrentTurnHtml => RenderMarkdown(GetCurrentTurnText());
 
     [Inject]
     public CodexConnectionService ConnectionService { get; set; } = default!;
@@ -116,7 +125,7 @@ public partial class Home : IDisposable, IAsyncDisposable
             approvalPolicy,
             sandbox,
             CancellationToken.None));
-        RenderAssistantSnapshot(isStreaming: false);
+        RenderAssistantSnapshot(isStreaming: snapshot.IsTurnRunning);
     }
 
     private async Task BrowseForDirectory()
@@ -196,20 +205,44 @@ public partial class Home : IDisposable, IAsyncDisposable
         isConnectionPanelVisible = !isConnectionPanelVisible;
     }
 
+    private void ClearChatHistory()
+    {
+        if (snapshot.IsTurnRunning)
+        {
+            return;
+        }
+
+        chatMessages.Clear();
+        activeAssistantMessageId = null;
+        renderedAssistantText = string.Empty;
+    }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        mainResizeModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "/js/sourceResize.js");
+        await mainResizeModule.InvokeVoidAsync(
+            "setBeforeUnloadGuard",
+            ShouldWarnBeforeUnload(),
+            "Refreshing or closing this page will reset the current Coding Services session.");
+
         if (!isConnectionPanelVisible)
         {
             return;
         }
 
-        mainResizeModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "/js/sourceResize.js");
         await mainResizeModule.InvokeVoidAsync(
             "attachMainSplitter",
             controlGrid,
             connectionPane,
             workPanel,
             mainSplitter);
+    }
+
+    private bool ShouldWarnBeforeUnload()
+    {
+        return snapshot.IsServerStarted
+            || snapshot.IsTurnRunning
+            || !string.IsNullOrWhiteSpace(snapshot.ThreadId);
     }
 
     private async Task RunCommandAsync(Func<Task> command)
@@ -235,7 +268,7 @@ public partial class Home : IDisposable, IAsyncDisposable
     private void OnConnectionChanged()
     {
         snapshot = ConnectionService.GetSnapshot();
-        RenderAssistantSnapshot(isStreaming: busy);
+        RenderAssistantSnapshot(isStreaming: snapshot.IsTurnRunning);
         _ = InvokeAsync(StateHasChanged);
     }
 
@@ -284,6 +317,10 @@ public partial class Home : IDisposable, IAsyncDisposable
         renderedAssistantText = snapshot.AssistantText;
         message.Content = renderedAssistantText;
         message.IsStreaming = isStreaming;
+        if (!isStreaming)
+        {
+            activeAssistantMessageId = null;
+        }
     }
 
     private static string JoinLines(IEnumerable<string> lines)
@@ -353,11 +390,32 @@ public partial class Home : IDisposable, IAsyncDisposable
         }
         .message-body {
             padding: 10px 12px;
-            white-space: pre-wrap;
             overflow-wrap: anywhere;
+        }
+        .message-body p:first-child {
+            margin-top: 0;
+        }
+        .message-body p:last-child {
+            margin-bottom: 0;
+        }
+        .message-body ul,
+        .message-body ol {
+            padding-left: 22px;
+        }
+        .message-body a {
+            color: #4169e1;
+            text-decoration: none;
+        }
+        .message-body a:hover {
+            text-decoration: underline;
         }
         code, pre {
             font-family: Consolas, "Courier New", monospace;
+        }
+        code {
+            border-radius: 4px;
+            padding: 1px 4px;
+            background: #eef3f7;
         }
         pre {
             overflow: auto;
@@ -366,6 +424,11 @@ public partial class Home : IDisposable, IAsyncDisposable
             background: #0f1722;
             color: #d9e6f2;
             white-space: pre;
+        }
+        pre code {
+            padding: 0;
+            background: transparent;
+            color: inherit;
         }
         </style>
         </head>
@@ -385,6 +448,11 @@ public partial class Home : IDisposable, IAsyncDisposable
         {
             foreach (TranscriptMessage message in chatMessages)
             {
+                if (message.IsStreaming)
+                {
+                    continue;
+                }
+
                 string role = message.IsUser ? "user" : "assistant";
                 string label = message.IsUser ? "You" : "Codex";
                 string timestamp = WebUtility.HtmlEncode(message.Timestamp.ToString("HH:mm:ss"));
@@ -395,13 +463,63 @@ public partial class Home : IDisposable, IAsyncDisposable
                 html.Append("</span><span>");
                 html.Append(timestamp);
                 html.Append("</span></header><div class=\"message-body\">");
-                html.Append(WebUtility.HtmlEncode(message.Content));
+                html.Append(RenderMarkdown(message.Content));
                 html.Append("</div></article>");
             }
         }
 
         html.Append("</body></html>");
         return html.ToString();
+    }
+
+    private string BuildTranscriptText()
+    {
+        var text = new StringBuilder();
+        foreach (TranscriptMessage message in chatMessages)
+        {
+            if (message.IsStreaming)
+            {
+                continue;
+            }
+
+            string label = message.IsUser ? "You" : "Codex";
+            if (text.Length > 0)
+            {
+                text.AppendLine();
+                text.AppendLine();
+            }
+
+            text.Append(label);
+            text.Append(" ");
+            text.AppendLine(message.Timestamp.ToString("HH:mm:ss"));
+            text.AppendLine(message.Content);
+        }
+
+        return text.ToString();
+    }
+
+    private string GetCurrentTurnText()
+    {
+        if (!string.IsNullOrWhiteSpace(activeAssistantMessageId))
+        {
+            TranscriptMessage? message = chatMessages.FirstOrDefault(candidate => candidate.Id == activeAssistantMessageId);
+            if (message?.IsStreaming == true)
+            {
+                return message.Content;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string RenderMarkdown(string markdown)
+    {
+        if (string.IsNullOrWhiteSpace(markdown))
+        {
+            return string.Empty;
+        }
+
+        return Markdown.ToHtml(markdown, MarkdownPipeline);
     }
 
     public void Dispose()
@@ -415,6 +533,7 @@ public partial class Home : IDisposable, IAsyncDisposable
         {
             try
             {
+                await mainResizeModule.InvokeVoidAsync("setBeforeUnloadGuard", false, string.Empty);
                 await mainResizeModule.DisposeAsync();
             }
             catch (JSDisconnectedException)
