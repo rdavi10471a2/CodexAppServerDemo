@@ -26,6 +26,10 @@ select {
     font: inherit;
 }
 
+img {
+    max-width: 100%;
+}
+
 h1:focus {
     outline: none;
 }

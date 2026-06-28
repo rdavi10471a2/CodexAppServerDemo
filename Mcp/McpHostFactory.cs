@@ -10,23 +10,23 @@ public static class McpHostFactory
     public const string LocalMcpUrl = "http://localhost:6278";
     public const string HealthPath = "/health";
 
-    public static IHost Create(SelectedFileState selectedFileState)
+    public static IHost Create(WorkspaceState workspaceState)
     {
         var builder = WebApplication.CreateBuilder();
 
         builder.WebHost.UseUrls(LocalMcpUrl);
-        builder.Services.AddSingleton(selectedFileState);
-        builder.Services.AddSingleton<HarnessFileWorkflow>();
+        builder.Services.AddSingleton(workspaceState);
+        builder.Services.AddSingleton<HarnessWorkspaceWorkflow>();
 
         builder.Services
             .AddMcpServer()
             .WithHttpTransport(options =>
             {
-                // This harness only exposes a single local file tool and does not rely on
+                // This harness only exposes local workspace metadata and does not rely on
                 // long-lived MCP sessions or server-to-client callbacks.
                 options.Stateless = true;
             })
-            .WithTools<FileMcpTools>();
+            .WithTools<WorkspaceMcpTools>();
 
         var app = builder.Build();
         app.MapGet(HealthPath, () => Results.Json(new
@@ -35,7 +35,7 @@ public static class McpHostFactory
             mcpEndpoint = LocalMcpUrl,
             transport = "streamable-http",
             stateless = true,
-            tool = nameof(FileMcpTools.GetSelectedFile)
+            tool = nameof(WorkspaceMcpTools.GetWorkspace)
         }));
         app.MapMcp();
 

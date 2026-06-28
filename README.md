@@ -10,7 +10,7 @@ The old WinForms harness has been removed. The app is now centered on a CWD/work
 - Lets the user set the Codex current working directory.
 - Shows the prompt and assistant response together on the Assistant tab.
 - Keeps status, telemetry, tool activity, and raw protocol output in separate tabs.
-- Hosts the local MCP HTTP endpoint for compatibility while the workflow is ported forward.
+- Hosts the local MCP HTTP endpoint for workspace metadata.
 
 ## Run
 
@@ -37,7 +37,7 @@ http://localhost:6278/health
 ```text
 CodexAppServerBlazor/       Blazor UI and app host
 CodexAppServerClient.cs     codex app-server JSON-RPC client
-Mcp/                        MCP HTTP host and compatibility tools
+Mcp/                        MCP HTTP host and workspace metadata tool
 CodexEvents.cs              protocol event models
 JsonRpcMessage.cs           JSON-RPC message model
 ```

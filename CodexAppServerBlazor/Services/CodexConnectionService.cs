@@ -5,22 +5,24 @@ namespace CodexAppServerBlazor.Services;
 
 public sealed class CodexConnectionService : IAsyncDisposable
 {
-    private const int MaxLines = 300;
+    private const int MaxEvents = 500;
     private const string SupportedApprovalPolicy = "never";
     private const string SupportedSandbox = "danger-full-access";
 
     private readonly object gate = new();
-    private readonly SelectedFileState selectedFileState;
+    private readonly SemaphoreSlim operationGate = new(1, 1);
+    private readonly WorkspaceState workspaceState;
     private CodexAppServerClient? client;
     private string assistantText = string.Empty;
-    private readonly List<string> statusLines = [];
-    private readonly List<string> telemetryLines = [];
-    private readonly List<string> toolLines = [];
+    private CodexTelemetrySummary telemetrySummary = CodexTelemetrySummary.Empty;
+    private readonly List<CodexOutputEvent> statusEvents = [];
+    private readonly List<CodexOutputEvent> telemetryEvents = [];
+    private readonly List<CodexOutputEvent> toolEvents = [];
     private readonly List<string> rawLines = [];
 
-    public CodexConnectionService(SelectedFileState selectedFileState)
+    public CodexConnectionService(WorkspaceState workspaceState)
     {
-        this.selectedFileState = selectedFileState;
+        this.workspaceState = workspaceState;
     }
 
     public event Action? Changed;
@@ -33,31 +35,76 @@ public sealed class CodexConnectionService : IAsyncDisposable
                 IsServerStarted: client?.IsStarted == true,
                 ThreadId: client?.ThreadId,
                 AssistantText: assistantText,
-                StatusLines: statusLines.ToArray(),
-                TelemetryLines: telemetryLines.ToArray(),
-                ToolLines: toolLines.ToArray(),
+                TelemetrySummary: telemetrySummary,
+                StatusEvents: statusEvents.ToArray(),
+                TelemetryEvents: telemetryEvents.ToArray(),
+                ToolEvents: toolEvents.ToArray(),
                 RawLines: rawLines.ToArray());
         }
     }
 
     public async Task StartServerAsync(string codexExe, CancellationToken cancellationToken)
     {
+        if (!await operationGate.WaitAsync(0, cancellationToken))
+        {
+            throw new InvalidOperationException("A Codex operation is already running.");
+        }
+
+        try
+        {
         if (client?.IsStarted == true)
         {
             return;
         }
 
         client = new CodexAppServerClient();
-        client.RawProtocol += line => AddLine(rawLines, line);
-        client.LogLine += line => AddLine(statusLines, line);
+        client.RawProtocol += line => AddRawLine(line);
+        client.LogLine += line => AddEvent(statusEvents, "Log", null, "app-server", line);
         client.AssistantText += OnAssistantText;
-        client.Telemetry += e => AddLine(telemetryLines, e.Summary);
-        client.ToolActivity += e => AddLine(toolLines, $"{e.EventType}: {e.Name} [{e.Status}] {e.Detail}");
-        client.Status += e => AddLine(statusLines, $"{e.EventType}: {e.Summary}");
-        client.Exited += code => AddLine(statusLines, $"server: codex app-server exited with code {code}.");
+        client.Telemetry += OnTelemetry;
+        client.ToolActivity += e => AddEvent(toolEvents, e.EventType, e.Status, e.Name, e.Detail ?? string.Empty);
+        client.Status += e => AddEvent(statusEvents, e.EventType, null, "codex", e.Summary);
+        client.Exited += code => AddEvent(statusEvents, "ServerExited", code == 0 ? "ok" : "error", "codex app-server", $"Exited with code {code}.");
 
         await client.StartAsync(codexExe, cancellationToken);
-        AddLine(statusLines, "Blazor connection initialized codex app-server.");
+        AddEvent(statusEvents, "ServerStarted", "ok", "codex app-server", "Blazor connection initialized codex app-server.");
+        }
+        finally
+        {
+            operationGate.Release();
+        }
+    }
+
+    public async Task StopServerAsync(CancellationToken cancellationToken)
+    {
+        if (!await operationGate.WaitAsync(0, cancellationToken))
+        {
+            throw new InvalidOperationException("A Codex operation is already running.");
+        }
+
+        try
+        {
+            if (client is null)
+            {
+                return;
+            }
+
+            await client.DisposeAsync();
+                client = null;
+                lock (gate)
+                {
+                    assistantText = string.Empty;
+                    telemetryEvents.Clear();
+                    toolEvents.Clear();
+                }
+
+            AddEvent(statusEvents, "ServerStopped", "ok", "codex app-server", "Stopped codex app-server.");
+        }
+        finally
+        {
+            operationGate.Release();
+            Changed?.Invoke();
+        }
     }
 
     public async Task StartThreadAsync(
@@ -67,15 +114,27 @@ public sealed class CodexConnectionService : IAsyncDisposable
         string sandbox,
         CancellationToken cancellationToken)
     {
+        if (!await operationGate.WaitAsync(0, cancellationToken))
+        {
+            throw new InvalidOperationException("A Codex operation is already running.");
+        }
+
+        try
+        {
         CodexAppServerClient activeClient = GetStartedClient();
-        selectedFileState.SetRepoRoot(repoRoot);
+        workspaceState.SetRepoRoot(repoRoot);
         await activeClient.StartThreadAsync(
             repoRoot,
             model,
             SupportedApprovalPolicy,
             SupportedSandbox,
             cancellationToken);
-        AddLine(statusLines, $"Thread policy forced to approval={SupportedApprovalPolicy}, sandbox={SupportedSandbox}.");
+        AddEvent(statusEvents, "ThreadPolicy", "ok", "codex", $"Thread policy forced to approval={SupportedApprovalPolicy}, sandbox={SupportedSandbox}.");
+        }
+        finally
+        {
+            operationGate.Release();
+        }
     }
 
     public async Task SendTurnAsync(
@@ -86,13 +145,27 @@ public sealed class CodexConnectionService : IAsyncDisposable
         string sandbox,
         CancellationToken cancellationToken)
     {
+        if (!await operationGate.WaitAsync(0, cancellationToken))
+        {
+            throw new InvalidOperationException("A Codex operation is already running.");
+        }
+
+        try
+        {
         CodexAppServerClient activeClient = GetStartedClient();
         if (string.IsNullOrWhiteSpace(activeClient.ThreadId))
         {
-            await StartThreadAsync(repoRoot, model, approvalPolicy, sandbox, cancellationToken);
+            workspaceState.SetRepoRoot(repoRoot);
+            await activeClient.StartThreadAsync(
+                repoRoot,
+                model,
+                SupportedApprovalPolicy,
+                SupportedSandbox,
+                cancellationToken);
+            AddEvent(statusEvents, "ThreadPolicy", "ok", "codex", $"Thread policy forced to approval={SupportedApprovalPolicy}, sandbox={SupportedSandbox}.");
         }
 
-        selectedFileState.SetRepoRoot(repoRoot);
+        workspaceState.SetRepoRoot(repoRoot);
         string prompt = $$"""
         {{userPrompt}}
 
@@ -107,6 +180,11 @@ public sealed class CodexConnectionService : IAsyncDisposable
 
         ClearTurnOutput();
         await activeClient.StartTurnAsync(prompt, cancellationToken);
+        }
+        finally
+        {
+            operationGate.Release();
+        }
     }
 
     private CodexAppServerClient GetStartedClient()
@@ -136,30 +214,96 @@ public sealed class CodexConnectionService : IAsyncDisposable
         Changed?.Invoke();
     }
 
+    private void OnTelemetry(TelemetryEvent e)
+    {
+        lock (gate)
+        {
+            telemetrySummary = telemetrySummary.Apply(e);
+        }
+
+        AddEvent(telemetryEvents, "Telemetry", null, "codex", e.Summary);
+    }
+
     private void ClearTurnOutput()
     {
         lock (gate)
         {
             assistantText = string.Empty;
-            telemetryLines.Clear();
-            toolLines.Clear();
+            telemetryEvents.Clear();
+            toolEvents.Clear();
         }
 
         Changed?.Invoke();
     }
 
-    private void AddLine(List<string> target, string line)
+    private void AddEvent(List<CodexOutputEvent> target, string type, string? status, string source, string detail)
     {
+        CodexOutputEvent outputEvent = new(
+            Timestamp: DateTimeOffset.Now,
+            Type: string.IsNullOrWhiteSpace(type) ? "Event" : type,
+            Status: status,
+            Source: string.IsNullOrWhiteSpace(source) ? "codex" : source,
+            Detail: detail,
+            Severity: ClassifySeverity(type, status, detail));
+
         lock (gate)
         {
-            target.Add($"[{DateTime.Now:HH:mm:ss}] {line}");
-            if (target.Count > MaxLines)
+            target.Add(outputEvent);
+            if (target.Count > MaxEvents)
             {
-                target.RemoveRange(0, target.Count - MaxLines);
+                target.RemoveRange(0, target.Count - MaxEvents);
             }
         }
 
         Changed?.Invoke();
+    }
+
+    private void AddRawLine(string line)
+    {
+        lock (gate)
+        {
+            rawLines.Add($"[{DateTime.Now:HH:mm:ss}] {line}");
+            if (rawLines.Count > MaxEvents)
+            {
+                rawLines.RemoveRange(0, rawLines.Count - MaxEvents);
+            }
+        }
+
+        Changed?.Invoke();
+    }
+
+    private static string ClassifySeverity(string? type, string? status, string? detail)
+    {
+        string text = string.Join(" ", type, status, detail);
+        if (ContainsAny(text, "error", "failed", "exception", "unauthorized", "token"))
+        {
+            return "error";
+        }
+
+        if (ContainsAny(text, "warning", "warn", "rate", "retry"))
+        {
+            return "warning";
+        }
+
+        if (ContainsAny(text, "ok", "succeeded", "success", "completed"))
+        {
+            return "success";
+        }
+
+        return "info";
+    }
+
+    private static bool ContainsAny(string value, params string[] terms)
+    {
+        foreach (string term in terms)
+        {
+            if (value.Contains(term, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public async ValueTask DisposeAsync()
@@ -168,6 +312,8 @@ public sealed class CodexConnectionService : IAsyncDisposable
         {
             await client.DisposeAsync();
         }
+
+        operationGate.Dispose();
     }
 }
 
@@ -175,7 +321,49 @@ public sealed record CodexConnectionSnapshot(
     bool IsServerStarted,
     string? ThreadId,
     string AssistantText,
-    IReadOnlyList<string> StatusLines,
-    IReadOnlyList<string> TelemetryLines,
-    IReadOnlyList<string> ToolLines,
+    CodexTelemetrySummary TelemetrySummary,
+    IReadOnlyList<CodexOutputEvent> StatusEvents,
+    IReadOnlyList<CodexOutputEvent> TelemetryEvents,
+    IReadOnlyList<CodexOutputEvent> ToolEvents,
     IReadOnlyList<string> RawLines);
+
+public sealed record CodexOutputEvent(
+    DateTimeOffset Timestamp,
+    string Type,
+    string? Status,
+    string Source,
+    string Detail,
+    string Severity);
+
+public sealed record CodexTelemetrySummary(
+    int? InputTokens,
+    int? CachedInputTokens,
+    int? OutputTokens,
+    int? ReasoningOutputTokens,
+    int? ModelContextWindow,
+    int? PrimaryUsedPercent,
+    int? SecondaryUsedPercent,
+    string? PlanType)
+{
+    public static CodexTelemetrySummary Empty { get; } = new(null, null, null, null, null, null, null, null);
+
+    public double? ContextUsedPercent =>
+        InputTokens.HasValue && ModelContextWindow.HasValue && ModelContextWindow.Value > 0
+            ? InputTokens.Value * 100.0 / ModelContextWindow.Value
+            : null;
+
+    public CodexTelemetrySummary Apply(TelemetryEvent e)
+    {
+        return this with
+        {
+            InputTokens = e.InputTokens ?? InputTokens,
+            CachedInputTokens = e.CachedInputTokens ?? CachedInputTokens,
+            OutputTokens = e.OutputTokens ?? OutputTokens,
+            ReasoningOutputTokens = e.ReasoningOutputTokens ?? ReasoningOutputTokens,
+            ModelContextWindow = e.ModelContextWindow ?? ModelContextWindow,
+            PrimaryUsedPercent = e.PrimaryUsedPercent ?? PrimaryUsedPercent,
+            SecondaryUsedPercent = e.SecondaryUsedPercent ?? SecondaryUsedPercent,
+            PlanType = e.PlanType ?? PlanType
+        };
+    }
+}

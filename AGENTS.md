@@ -9,7 +9,7 @@ The primary workflow is CWD/workspace based:
 - The user chooses a current working directory in the Blazor UI.
 - Codex turns should treat that CWD as the loaded workspace.
 - Do not assume a selected-file workflow.
-- Do not ask Codex to fetch source through `GetSelectedFile` unless a future task explicitly reintroduces a selected-file tool.
+- Do not ask Codex to fetch source through selected-file tools unless a future task explicitly reintroduces that workflow.
 
 ## Working Agreements
 
@@ -22,7 +22,7 @@ The primary workflow is CWD/workspace based:
 
 - `CodexAppServerBlazor/`: Blazor Server control UI and app host.
 - `CodexAppServerClient.cs`: JSON-RPC client for `codex app-server`, protocol events, and token usage handling.
-- `Mcp/`: local MCP HTTP host and compatibility tools.
+- `Mcp/`: local MCP HTTP host and workspace metadata tool.
 - `CodexAppServerWinForms_corrected.slnx`: root solution pointing at the Blazor project.
 
 ## Build And Run

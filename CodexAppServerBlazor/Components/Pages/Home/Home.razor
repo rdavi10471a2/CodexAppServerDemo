@@ -1,0 +1,98 @@
+@page "/"
+@rendermode InteractiveServer
+@inject IJSRuntime JS
+
+<PageTitle>Coding Services</PageTitle>
+
+<section class="control-screen @(isConnectionPanelVisible ? string.Empty : "connection-hidden")">
+    <header class="command-bar">
+        <div class="title-strip">
+            <div class="brand-lockup">
+                <img class="brand-logo" src="/images/CSLogo.png" alt="Coding Services" width="56" height="40" />
+                <h1>Coding Services</h1>
+            </div>
+        </div>
+        <RadzenButton Icon="dock_to_left"
+                      Text="@(isConnectionPanelVisible ? "Hide Connection" : "Show Connection")"
+                      ButtonStyle="ButtonStyle.Light"
+                      Size="ButtonSize.Small"
+                      Click="@ToggleConnectionPanel" />
+    </header>
+
+    <main class="control-grid" @ref="controlGrid">
+        @if (isConnectionPanelVisible)
+        {
+            <div class="connection-shell" @ref="connectionPane">
+                <ConnectionPanel Snapshot="@snapshot"
+                                 Busy="@busy"
+                                 @bind-CodexExe="@codexExe"
+                                 @bind-Model="@model"
+                                 ApprovalPolicy="@approvalPolicy"
+                                 Sandbox="@sandbox"
+                                 ToggleServer="@ToggleServer"
+                                 StartThread="@StartThread" />
+            </div>
+
+            <div class="main-splitter" @ref="mainSplitter" title="Drag to resize connection panel" aria-hidden="true"></div>
+        }
+
+        <section class="work-panel" @ref="workPanel">
+            <div class="workspace-toolbar">
+                <div class="workspace-path">
+                    <span>CWD</span>
+                    <strong>@repoRoot</strong>
+                </div>
+                <RadzenButton Icon="folder_open"
+                              Text="Browse"
+                              ButtonStyle="ButtonStyle.Secondary"
+                              Size="ButtonSize.Small"
+                              Click="@BrowseForDirectory"
+                              Disabled="@busy" />
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(directorySnapshot.ErrorMessage))
+            {
+                <div class="inline-error">@directorySnapshot.ErrorMessage</div>
+            }
+
+            <RadzenTabs RenderMode="TabRenderMode.Client">
+                <Tabs>
+                    <RadzenTabsItem Text="Assistant">
+                        <AssistantTab TranscriptHtml="@TranscriptHtml"
+                                      @bind-ChatDraft="@chatDraft"
+                                      IsServerStarted="@snapshot.IsServerStarted"
+                                      Busy="@busy"
+                                      SendChatDraft="@SendChatDraft" />
+                    </RadzenTabsItem>
+
+                    <RadzenTabsItem Text="Source">
+                        <SourceTab Snapshot="@sourceSnapshot"
+                                   @bind-Filter="@sourceFilter"
+                                   SelectedPath="@selectedSourcePath"
+                                   IsRebuildingIndex="@isRebuildingSourceIndex"
+                                   ApplyFilter="@ApplySourceFilter"
+                                   RebuildIndex="@RebuildSourceIndex"
+                                   SelectFile="@SelectSourceFile" />
+                    </RadzenTabsItem>
+
+                    <RadzenTabsItem Text="Status">
+                        <OutputTab Events="@snapshot.StatusEvents" EmptyText="No status events yet." />
+                    </RadzenTabsItem>
+
+                    <RadzenTabsItem Text="Telemetry">
+                        <OutputTab Events="@snapshot.TelemetryEvents" EmptyText="No telemetry events yet." />
+                    </RadzenTabsItem>
+
+                    <RadzenTabsItem Text="Tools">
+                        <OutputTab Events="@snapshot.ToolEvents" EmptyText="No tool events yet." />
+                    </RadzenTabsItem>
+                </Tabs>
+            </RadzenTabs>
+        </section>
+    </main>
+
+    @if (!string.IsNullOrWhiteSpace(errorMessage))
+    {
+        <div class="error-banner">@errorMessage</div>
+    }
+</section>

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <TargetFramework>net9.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -13,13 +13,22 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="C:\VSCodeProjects\CodingServices\src\AICodingServices.Core\AICodingServices.Core.csproj" />
+    <ProjectReference Include="C:\VSCodeProjects\CodingServices\src\AICodingServices.Data\AICodingServices.Data.csproj" />
+    <ProjectReference Include="C:\VSCodeProjects\CodingServices\src\AICodingServices.Indexing\AICodingServices.Indexing.csproj" />
+    <ProjectReference Include="C:\VSCodeProjects\CodingServices\src\AICodingServices.Logging\AICodingServices.Logging.csproj" />
+    <ProjectReference Include="C:\VSCodeProjects\CodingServices\src\AICodingServices.MSBuild\AICodingServices.MSBuild.csproj" />
+    <ProjectReference Include="C:\VSCodeProjects\CodingServices\src\AICodingServices.Workflow\AICodingServices.Workflow.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Compile Include="..\CodexAppServerClient.cs" Link="Shared\CodexAppServerClient.cs" />
     <Compile Include="..\CodexEvents.cs" Link="Shared\CodexEvents.cs" />
     <Compile Include="..\JsonRpcMessage.cs" Link="Shared\JsonRpcMessage.cs" />
-    <Compile Include="..\Mcp\FileMcpTools.cs" Link="Shared\Mcp\FileMcpTools.cs" />
-    <Compile Include="..\Mcp\HarnessFileWorkflow.cs" Link="Shared\Mcp\HarnessFileWorkflow.cs" />
+    <Compile Include="..\Mcp\WorkspaceMcpTools.cs" Link="Shared\Mcp\WorkspaceMcpTools.cs" />
+    <Compile Include="..\Mcp\HarnessWorkspaceWorkflow.cs" Link="Shared\Mcp\HarnessWorkspaceWorkflow.cs" />
     <Compile Include="..\Mcp\McpHostFactory.cs" Link="Shared\Mcp\McpHostFactory.cs" />
-    <Compile Include="..\Mcp\SelectedFileState.cs" Link="Shared\Mcp\SelectedFileState.cs" />
+    <Compile Include="..\Mcp\WorkspaceState.cs" Link="Shared\Mcp\WorkspaceState.cs" />
   </ItemGroup>
 
 </Project>

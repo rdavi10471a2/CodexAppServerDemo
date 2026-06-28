@@ -1,0 +1,86 @@
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<div class="assistant-layout" @ref="assistantLayout">
+    <section class="transcript-panel" @ref="transcriptPanel" aria-label="Codex transcript">
+        <iframe class="transcript-webview"
+                title="Codex transcript"
+                sandbox=""
+                srcdoc="@TranscriptHtml"></iframe>
+    </section>
+
+    <div class="assistant-splitter" @ref="assistantSplitter" title="Drag to resize transcript and input" aria-hidden="true"></div>
+
+    <div class="chat-composer" @ref="chatComposer">
+        <RadzenTextArea Value="@ChatDraft"
+                        Change="@OnChatDraftChanged"
+                        Placeholder="Inspect the current workspace..."
+                        Class="chat-composer-input"
+                        Style="height: 200px; min-height: 200px; max-height: 320px; overflow: auto; resize: vertical;" />
+        <RadzenButton Icon="send"
+                      ButtonStyle="ButtonStyle.Primary"
+                      Click="@SendChatDraft"
+                      Disabled="@(!IsServerStarted || Busy || string.IsNullOrWhiteSpace(ChatDraft))" />
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public string TranscriptHtml { get; set; } = string.Empty;
+
+    [Parameter]
+    public string ChatDraft { get; set; } = string.Empty;
+
+    [Parameter]
+    public EventCallback<string> ChatDraftChanged { get; set; }
+
+    [Parameter]
+    public bool IsServerStarted { get; set; }
+
+    [Parameter]
+    public bool Busy { get; set; }
+
+    [Parameter]
+    public EventCallback SendChatDraft { get; set; }
+
+    private ElementReference assistantLayout;
+    private ElementReference transcriptPanel;
+    private ElementReference chatComposer;
+    private ElementReference assistantSplitter;
+    private IJSObjectReference? resizeModule;
+
+    private Task OnChatDraftChanged(string? value)
+    {
+        return ChatDraftChanged.InvokeAsync(value ?? string.Empty);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        resizeModule = await JS.InvokeAsync<IJSObjectReference>("import", "/js/sourceResize.js");
+        await resizeModule.InvokeVoidAsync(
+            "attachAssistantSplitter",
+            assistantLayout,
+            transcriptPanel,
+            chatComposer,
+            assistantSplitter);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (resizeModule is not null)
+        {
+            try
+            {
+                await resizeModule.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+        }
+    }
+}

@@ -1,0 +1,163 @@
+<aside class="connection-panel" aria-label="Connection controls">
+    <div class="panel-heading">
+        <div>
+            <span class="eyebrow">Connection</span>
+            <h2>Runtime</h2>
+        </div>
+    </div>
+
+    <label class="field">
+        <span>Codex executable</span>
+        <RadzenTextBox Value="@CodexExe" Change="@OnCodexExeChanged" />
+    </label>
+
+    <label class="field">
+        <span>Model</span>
+        <RadzenTextBox Value="@Model" Change="@OnModelChanged" />
+    </label>
+
+    <div class="settings-pair">
+        <label class="field">
+            <span>Approval</span>
+            <RadzenTextBox Value="@ApprovalPolicy" Disabled="true" />
+        </label>
+        <label class="field">
+            <span>Sandbox</span>
+            <RadzenTextBox Value="@Sandbox" Disabled="true" />
+        </label>
+    </div>
+
+    <div class="actions connection-actions">
+        <RadzenButton Icon="power_settings_new"
+                      Text="@(Snapshot.IsServerStarted ? "Stop Server" : "Start Server")"
+                      ButtonStyle="@(Snapshot.IsServerStarted ? ButtonStyle.Danger : ButtonStyle.Secondary)"
+                      Click="@ToggleServer"
+                      Disabled="@Busy" />
+        <RadzenButton Icon="forum"
+                      Text="Start Thread"
+                      ButtonStyle="ButtonStyle.Secondary"
+                      Click="@StartThread"
+                      Disabled="@(!Snapshot.IsServerStarted || Busy)" />
+    </div>
+
+    <section class="token-summary" aria-label="Token and rate summary">
+        <div class="token-summary-header">
+            <span>Tokens</span>
+            <strong>@FormatContextPercent()</strong>
+        </div>
+        <div class="token-grid">
+            <div>
+                <span>Input</span>
+                <strong>@FormatNumber(Snapshot.TelemetrySummary.InputTokens)</strong>
+            </div>
+            <div>
+                <span>Cached</span>
+                <strong>@FormatNumber(Snapshot.TelemetrySummary.CachedInputTokens)</strong>
+            </div>
+            <div>
+                <span>Output</span>
+                <strong>@FormatNumber(Snapshot.TelemetrySummary.OutputTokens)</strong>
+            </div>
+            <div>
+                <span>Reasoning</span>
+                <strong>@FormatNumber(Snapshot.TelemetrySummary.ReasoningOutputTokens)</strong>
+            </div>
+        </div>
+        <div class="rate-row">
+            <span>Rate</span>
+            <strong>@FormatRateSummary()</strong>
+        </div>
+    </section>
+
+    <div class="summary-stack">
+        <div>
+            <span>Thread</span>
+            <strong>@(Snapshot.ThreadId ?? "not started")</strong>
+        </div>
+        <div>
+            <span>MCP</span>
+            <strong>localhost:6278</strong>
+        </div>
+        <div>
+            <span>Health</span>
+            <strong>http://localhost:6278/health</strong>
+        </div>
+    </div>
+
+    <section class="connection-help" aria-label="Connection help">
+        <span>Help</span>
+        <p><strong>Start Server</strong> launches the local Codex app-server and MCP host.</p>
+        <p><strong>Start Thread</strong> opens a new Codex thread for the current CWD.</p>
+        <p><strong>MCP Health</strong> should answer at <code>localhost:6278/health</code>.</p>
+    </section>
+</aside>
+
+@code {
+    [Parameter]
+    public required CodexConnectionSnapshot Snapshot { get; set; }
+
+    [Parameter]
+    public bool Busy { get; set; }
+
+    [Parameter]
+    public string CodexExe { get; set; } = string.Empty;
+
+    [Parameter]
+    public EventCallback<string> CodexExeChanged { get; set; }
+
+    [Parameter]
+    public string Model { get; set; } = string.Empty;
+
+    [Parameter]
+    public EventCallback<string> ModelChanged { get; set; }
+
+    [Parameter]
+    public string ApprovalPolicy { get; set; } = string.Empty;
+
+    [Parameter]
+    public string Sandbox { get; set; } = string.Empty;
+
+    [Parameter]
+    public EventCallback ToggleServer { get; set; }
+
+    [Parameter]
+    public EventCallback StartThread { get; set; }
+
+    private Task OnCodexExeChanged(string? value)
+    {
+        return CodexExeChanged.InvokeAsync(value ?? string.Empty);
+    }
+
+    private Task OnModelChanged(string? value)
+    {
+        return ModelChanged.InvokeAsync(value ?? string.Empty);
+    }
+
+    private string FormatContextPercent()
+    {
+        double? percent = Snapshot.TelemetrySummary.ContextUsedPercent;
+        return percent.HasValue
+            ? $"{percent.Value:0.0}% window"
+            : "waiting";
+    }
+
+    private static string FormatNumber(int? value)
+    {
+        return value.HasValue ? value.Value.ToString("N0") : "-";
+    }
+
+    private string FormatRateSummary()
+    {
+        string primary = Snapshot.TelemetrySummary.PrimaryUsedPercent.HasValue
+            ? $"{Snapshot.TelemetrySummary.PrimaryUsedPercent.Value}%"
+            : "-";
+        string secondary = Snapshot.TelemetrySummary.SecondaryUsedPercent.HasValue
+            ? $"{Snapshot.TelemetrySummary.SecondaryUsedPercent.Value}%"
+            : "-";
+        string plan = string.IsNullOrWhiteSpace(Snapshot.TelemetrySummary.PlanType)
+            ? "plan unknown"
+            : Snapshot.TelemetrySummary.PlanType;
+
+        return $"{primary} / {secondary} · {plan}";
+    }
+}

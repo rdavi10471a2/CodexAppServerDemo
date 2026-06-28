@@ -1,0 +1,53 @@
+@using CodexAppServerBlazor.Services
+
+<div class="event-grid-shell">
+    @if (Events.Count == 0)
+    {
+        <div class="empty-events">@EmptyText</div>
+    }
+    else
+    {
+        <table class="event-grid">
+            <thead>
+                <tr>
+                    <th class="event-time">Time</th>
+                    <th class="event-type">Type</th>
+                    <th class="event-status">Status</th>
+                    <th class="event-source">Source</th>
+                    <th>Detail</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (CodexOutputEvent item in Events)
+                {
+                    <tr class="@GetRowClass(item)">
+                        <td class="event-time">@item.Timestamp.ToLocalTime().ToString("HH:mm:ss")</td>
+                        <td class="event-type">@item.Type</td>
+                        <td class="event-status">@(item.Status ?? "-")</td>
+                        <td class="event-source">@item.Source</td>
+                        <td class="event-detail">@item.Detail</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public IReadOnlyList<CodexOutputEvent> Events { get; set; } = [];
+
+    [Parameter]
+    public string EmptyText { get; set; } = "No events yet.";
+
+    private static string GetRowClass(CodexOutputEvent item)
+    {
+        return item.Severity switch
+        {
+            "error" => "event-row event-error",
+            "warning" => "event-row event-warning",
+            "success" => "event-row event-success",
+            _ => "event-row"
+        };
+    }
+}
