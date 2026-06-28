@@ -76,11 +76,11 @@
         </div>
         <div>
             <span>MCP</span>
-            <strong>localhost:6278</strong>
+            <strong>@McpDisplayUrl</strong>
         </div>
         <div>
             <span>Health</span>
-            <strong>http://localhost:6278/health</strong>
+            <strong>@McpHealthUrl</strong>
         </div>
     </div>
 
@@ -88,7 +88,7 @@
         <span>Help</span>
         <p><strong>Start Server</strong> launches the local Codex app-server and MCP host.</p>
         <p><strong>Start Thread</strong> opens a new Codex thread for the current CWD.</p>
-        <p><strong>MCP Health</strong> should answer at <code>localhost:6278/health</code>.</p>
+        <p><strong>MCP Health</strong> should answer at <code>@McpHealthUrl</code>.</p>
     </section>
 </aside>
 
@@ -98,6 +98,9 @@
 
     [Parameter]
     public bool Busy { get; set; }
+
+    [Parameter]
+    public string McpUrl { get; set; } = string.Empty;
 
     [Parameter]
     public string CodexExe { get; set; } = string.Empty;
@@ -133,6 +136,25 @@
         return ModelChanged.InvokeAsync(value ?? string.Empty);
     }
 
+    private string McpEndpointUrl
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(McpUrl))
+            {
+                return "http://localhost:6278";
+            }
+
+            return McpUrl.Trim().TrimEnd('/');
+        }
+    }
+
+    private string McpDisplayUrl => McpEndpointUrl
+        .Replace("http://", string.Empty, StringComparison.OrdinalIgnoreCase)
+        .Replace("https://", string.Empty, StringComparison.OrdinalIgnoreCase);
+
+    private string McpHealthUrl => $"{McpEndpointUrl}/health";
+
     private string FormatContextPercent()
     {
         double? percent = Snapshot.TelemetrySummary.ContextUsedPercent;
@@ -148,16 +170,27 @@
 
     private string FormatRateSummary()
     {
-        string primary = Snapshot.TelemetrySummary.PrimaryUsedPercent.HasValue
-            ? $"{Snapshot.TelemetrySummary.PrimaryUsedPercent.Value}%"
-            : "-";
-        string secondary = Snapshot.TelemetrySummary.SecondaryUsedPercent.HasValue
-            ? $"{Snapshot.TelemetrySummary.SecondaryUsedPercent.Value}%"
-            : "-";
+        string primary = FormatPercent(Snapshot.TelemetrySummary.PrimaryUsedPercent);
+        string secondary = FormatPercent(Snapshot.TelemetrySummary.SecondaryUsedPercent);
         string plan = string.IsNullOrWhiteSpace(Snapshot.TelemetrySummary.PlanType)
             ? "plan unknown"
             : Snapshot.TelemetrySummary.PlanType;
 
         return $"{primary} / {secondary} · {plan}";
+    }
+
+    private static string FormatPercent(int? value)
+    {
+        if (!value.HasValue)
+        {
+            return "-";
+        }
+
+        if (value.Value is < 0 or > 100)
+        {
+            return $"{value.Value}% raw";
+        }
+
+        return $"{value.Value}%";
     }
 }

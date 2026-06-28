@@ -28,6 +28,7 @@
                 </div>
             </div>
             <iframe class="transcript-webview"
+                    @ref="transcriptWebView"
                     title="Completed Codex transcript"
                     sandbox="allow-scripts"
                     srcdoc="@TranscriptHtml"></iframe>
@@ -98,6 +99,7 @@
     private ElementReference assistantLayout;
     private ElementReference assistantMain;
     private ElementReference transcriptPanel;
+    private ElementReference transcriptWebView;
     private ElementReference streamSplitter;
     private ElementReference currentTurnPanel;
     private ElementReference currentTurnBody;
@@ -157,6 +159,7 @@
         }
 
         await resizeModule.InvokeVoidAsync("scrollElementToBottom", currentTurnBody);
+        await resizeModule.InvokeVoidAsync("scrollIframeToBottom", transcriptWebView);
     }
 
     public async ValueTask DisposeAsync()

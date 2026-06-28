@@ -22,6 +22,40 @@ public sealed class SourceWorkspaceService
         string? filter)
     {
         CodingServicesSettings settings = settingsProvider.GetSettings(workspaceRoot);
+        return BuildSnapshot(settings, selectedRelativePath, selectedLine, filter, ProjectProjection.ProductOnly);
+    }
+
+    public SourceWorkspaceSnapshot BuildTestSnapshot(
+        string workspaceRoot,
+        string? selectedRelativePath,
+        int? selectedLine,
+        string? filter)
+    {
+        CodingServicesSettings settings = settingsProvider.GetSettings(workspaceRoot);
+        if (settings.TestProjectPaths.Count == 0)
+        {
+            string databasePath = MonitorDataPaths.GetDefaultIndexDatabasePath(settings);
+            return new SourceWorkspaceSnapshot(
+                settings.WatchedProjectFolder,
+                settings.WatchedSolutionPath,
+                databasePath,
+                [],
+                [],
+                null,
+                filter ?? string.Empty,
+                "No test projects are configured in CodingServices:TestProjectPaths.");
+        }
+
+        return BuildSnapshot(settings, selectedRelativePath, selectedLine, filter, ProjectProjection.TestsOnly);
+    }
+
+    private static SourceWorkspaceSnapshot BuildSnapshot(
+        CodingServicesSettings settings,
+        string? selectedRelativePath,
+        int? selectedLine,
+        string? filter,
+        ProjectProjection projection)
+    {
         string workspaceDataRoot = MonitorWorkspacePaths.GetWatchedSolutionWorkspaceRoot(settings);
         string databasePath = MonitorDataPaths.GetDefaultIndexDatabasePath(settings);
 
@@ -47,9 +81,9 @@ public sealed class SourceWorkspaceService
         }
 
         SolutionIndexStore store = new(database);
-        IReadOnlyList<IndexedProjectRow> projects = store.ListProjects();
-        IReadOnlyList<IndexedDocumentRow> documents = store.ListDocuments();
-        IReadOnlyList<IndexedSymbolRow> symbols = store.ListSymbols();
+        IReadOnlyList<IndexedProjectRow> projects = FilterProjects(store.ListProjects(), settings, projection);
+        IReadOnlyList<IndexedDocumentRow> documents = FilterDocuments(store.ListDocuments(), settings, projection);
+        IReadOnlyList<IndexedSymbolRow> symbols = FilterSymbols(store.ListSymbols(), settings, projection);
         IReadOnlyList<SourceFileEntry> files = BuildFiles(settings.WatchedProjectFolder, documents, filter);
         IReadOnlyList<SourceTreeNode> tree = BuildTree(projects, documents, symbols, settings.WatchedProjectFolder, files);
         SourceFileEntry? selectedEntry = SelectFile(files, selectedRelativePath);
@@ -59,18 +93,50 @@ public sealed class SourceWorkspaceService
 
         return new SourceWorkspaceSnapshot(
             settings.WatchedProjectFolder,
-                settings.WatchedSolutionPath,
-                databasePath,
-                files,
-                tree,
-                selectedFile,
-                filter ?? string.Empty,
-                files.Count == 0 ? "No indexed source files matched the current filter." : string.Empty);
+            settings.WatchedSolutionPath,
+            databasePath,
+            files,
+            tree,
+            selectedFile,
+            filter ?? string.Empty,
+            GetStructureMessage(files.Count, projection, filter));
     }
 
     public SourceWorkspaceStructureSnapshot BuildStructureSnapshot(string workspaceRoot, string? filter)
     {
         CodingServicesSettings settings = settingsProvider.GetSettings(workspaceRoot);
+        return BuildStructureSnapshot(settings, filter, ProjectProjection.All);
+    }
+
+    public SourceWorkspaceStructureSnapshot BuildProductStructureSnapshot(string workspaceRoot, string? filter)
+    {
+        CodingServicesSettings settings = settingsProvider.GetSettings(workspaceRoot);
+        return BuildStructureSnapshot(settings, filter, ProjectProjection.ProductOnly);
+    }
+
+    public SourceWorkspaceStructureSnapshot BuildTestProjectStructureSnapshot(string workspaceRoot, string? filter)
+    {
+        CodingServicesSettings settings = settingsProvider.GetSettings(workspaceRoot);
+        if (settings.TestProjectPaths.Count == 0)
+        {
+            string databasePath = MonitorDataPaths.GetDefaultIndexDatabasePath(settings);
+            return new SourceWorkspaceStructureSnapshot(
+                settings.WatchedProjectFolder,
+                settings.WatchedSolutionPath,
+                databasePath,
+                0,
+                [],
+                "No test projects are configured in CodingServices:TestProjectPaths.");
+        }
+
+        return BuildStructureSnapshot(settings, filter, ProjectProjection.TestsOnly);
+    }
+
+    private static SourceWorkspaceStructureSnapshot BuildStructureSnapshot(
+        CodingServicesSettings settings,
+        string? filter,
+        ProjectProjection projection)
+    {
         string workspaceDataRoot = MonitorWorkspacePaths.GetWatchedSolutionWorkspaceRoot(settings);
         string databasePath = MonitorDataPaths.GetDefaultIndexDatabasePath(settings);
 
@@ -94,9 +160,9 @@ public sealed class SourceWorkspaceService
         }
 
         SolutionIndexStore store = new(database);
-        IReadOnlyList<IndexedProjectRow> projects = store.ListProjects();
-        IReadOnlyList<IndexedDocumentRow> documents = store.ListDocuments();
-        IReadOnlyList<IndexedSymbolRow> symbols = store.ListSymbols();
+        IReadOnlyList<IndexedProjectRow> projects = FilterProjects(store.ListProjects(), settings, projection);
+        IReadOnlyList<IndexedDocumentRow> documents = FilterDocuments(store.ListDocuments(), settings, projection);
+        IReadOnlyList<IndexedSymbolRow> symbols = FilterSymbols(store.ListSymbols(), settings, projection);
         IReadOnlyList<SourceFileEntry> files = BuildFiles(settings.WatchedProjectFolder, documents, filter);
         IReadOnlyList<SourceTreeNode> tree = BuildTree(projects, documents, symbols, settings.WatchedProjectFolder, files);
 
@@ -106,7 +172,7 @@ public sealed class SourceWorkspaceService
             databasePath,
             files.Count,
             tree,
-            files.Count == 0 ? "No indexed source files matched the current filter." : string.Empty);
+            GetStructureMessage(files.Count, projection, filter));
     }
 
     public async Task RebuildIndexAsync(string workspaceRoot, CancellationToken cancellationToken)
@@ -121,6 +187,87 @@ public sealed class SourceWorkspaceService
         Directory.CreateDirectory(MonitorDataPaths.GetDefaultTaskMemoryRoot(settings));
 
         await new SolutionIndexRebuildService().RebuildAsync(settings, cancellationToken);
+    }
+
+    private static IReadOnlyList<IndexedProjectRow> FilterProjects(
+        IReadOnlyList<IndexedProjectRow> projects,
+        CodingServicesSettings settings,
+        ProjectProjection projection)
+    {
+        return projection switch
+        {
+            ProjectProjection.ProductOnly => projects
+                .Where(project => !IsConfiguredTestProject(project.ProjectPath, settings))
+                .ToArray(),
+            ProjectProjection.TestsOnly => projects
+                .Where(project => IsConfiguredTestProject(project.ProjectPath, settings))
+                .ToArray(),
+            _ => projects
+        };
+    }
+
+    private static IReadOnlyList<IndexedDocumentRow> FilterDocuments(
+        IReadOnlyList<IndexedDocumentRow> documents,
+        CodingServicesSettings settings,
+        ProjectProjection projection)
+    {
+        return projection switch
+        {
+            ProjectProjection.ProductOnly => documents
+                .Where(document => !IsConfiguredTestProject(document.ProjectPath, settings))
+                .ToArray(),
+            ProjectProjection.TestsOnly => documents
+                .Where(document => IsConfiguredTestProject(document.ProjectPath, settings))
+                .ToArray(),
+            _ => documents
+        };
+    }
+
+    private static IReadOnlyList<IndexedSymbolRow> FilterSymbols(
+        IReadOnlyList<IndexedSymbolRow> symbols,
+        CodingServicesSettings settings,
+        ProjectProjection projection)
+    {
+        return projection switch
+        {
+            ProjectProjection.ProductOnly => symbols
+                .Where(symbol => !IsConfiguredTestProject(symbol.ProjectPath, settings))
+                .ToArray(),
+            ProjectProjection.TestsOnly => symbols
+                .Where(symbol => IsConfiguredTestProject(symbol.ProjectPath, settings))
+                .ToArray(),
+            _ => symbols
+        };
+    }
+
+    private static bool IsConfiguredTestProject(string projectPath, CodingServicesSettings settings)
+    {
+        string fullProjectPath = Path.GetFullPath(projectPath);
+        return settings.TestProjectPaths.Any(testProjectPath =>
+            string.Equals(
+                fullProjectPath,
+                Path.GetFullPath(testProjectPath),
+                StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string GetStructureMessage(int fileCount, ProjectProjection projection, string? filter)
+    {
+        if (fileCount > 0)
+        {
+            return string.Empty;
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter))
+        {
+            return "No indexed source files matched the current filter.";
+        }
+
+        return projection switch
+        {
+            ProjectProjection.TestsOnly => "No configured test project files were found in the index. Rebuild the index if the test project was just added.",
+            ProjectProjection.ProductOnly => "No non-test source files matched the current filter.",
+            _ => "No indexed source files matched the current filter."
+        };
     }
 
     private static IReadOnlyList<SourceFileEntry> BuildFiles(
@@ -599,6 +746,13 @@ public sealed class SourceWorkspaceService
             Path.GetFullPath(right),
             StringComparison.OrdinalIgnoreCase);
     }
+}
+
+internal enum ProjectProjection
+{
+    All,
+    ProductOnly,
+    TestsOnly
 }
 
 public sealed record SourceWorkspaceSnapshot(

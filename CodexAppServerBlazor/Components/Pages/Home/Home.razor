@@ -8,8 +8,7 @@
     <header class="command-bar">
         <div class="title-strip">
             <div class="brand-lockup">
-                <img class="brand-logo" src="/images/CSLogo.png" alt="Coding Services" width="56" height="40" />
-                <h1>Coding Services</h1>
+                <img style="height:40px; width:auto;" src="/images/cs_header_logo_56x40.svg" alt="Coding Services" />                <h1>Coding Services</h1>
             </div>
         </div>
         <RadzenButton Icon="dock_to_left"
@@ -25,6 +24,7 @@
             <div class="connection-shell" @ref="connectionPane">
                 <ConnectionPanel Snapshot="@snapshot"
                                  Busy="@busy"
+                                 McpUrl="@mcpUrl"
                                  @bind-CodexExe="@codexExe"
                                  @bind-Model="@model"
                                  ApprovalPolicy="@approvalPolicy"
@@ -85,6 +85,16 @@
                                    ApplyFilter="@ApplySourceFilter"
                                    RebuildIndex="@RebuildSourceIndex"
                                    SelectFile="@SelectSourceFile" />
+                    </RadzenTabsItem>
+
+                    <RadzenTabsItem Text="Tests">
+                        <SourceTab Snapshot="@testSourceSnapshot"
+                                   @bind-Filter="@testSourceFilter"
+                                   SelectedPath="@selectedTestSourcePath"
+                                   IsRebuildingIndex="@isRebuildingSourceIndex"
+                                   ApplyFilter="@ApplyTestSourceFilter"
+                                   RebuildIndex="@RebuildSourceIndex"
+                                   SelectFile="@SelectTestSourceFile" />
                     </RadzenTabsItem>
 
                     <RadzenTabsItem Text="Status">

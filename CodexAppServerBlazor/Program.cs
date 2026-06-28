@@ -11,6 +11,11 @@ public class Program
     {
         var builder = WebApplication.CreateBuilder(args);
         builder.WebHost.UseStaticWebAssets();
+        string? blazorUrl = builder.Configuration["BlazorHost:Url"];
+        if (!string.IsNullOrWhiteSpace(blazorUrl))
+        {
+            builder.WebHost.UseUrls(blazorUrl.Trim());
+        }
 
         builder.Services.AddRazorComponents()
             .AddInteractiveServerComponents();

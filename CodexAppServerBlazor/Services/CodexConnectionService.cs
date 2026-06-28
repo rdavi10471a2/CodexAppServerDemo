@@ -246,7 +246,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
         SourceWorkspaceStructureSnapshot snapshot;
         try
         {
-            snapshot = sourceWorkspaceService.BuildStructureSnapshot(repoRoot, filter: null);
+            snapshot = sourceWorkspaceService.BuildProductStructureSnapshot(repoRoot, filter: null);
         }
         catch (Exception ex)
         {
@@ -284,16 +284,18 @@ public sealed class CodexConnectionService : IAsyncDisposable
             WriteIndented = true
         });
 
-        status = $"Injected workspace context for {context.ProjectCount} projects and {context.FileCount} indexed files.";
+        status = $"Injected product workspace context for {context.ProjectCount} projects and {context.FileCount} indexed files.";
         return $$"""
-        Initial workspace context:
+        Initial product workspace context:
         ```json
         {{json}}
         ```
 
-        Use this compiler/index-backed project/file map as initial orientation for this thread.
-        The local MCP discovery surface advertises GetWorkspace, GetWatchedSolutionDigest, and GetWatchedSolutionSummary.
-        Call GetWatchedSolutionSummary when deeper type/member structure is needed.
+        Use this compiler/index-backed product project/file map as initial orientation for this thread.
+        Test projects are intentionally not included in this initial context.
+        The local MCP discovery surface advertises GetWorkspace, GetWatchedSolutionDigest, GetWatchedSolutionSummary, and GetTestProjectSummary.
+        Call GetWatchedSolutionSummary when deeper full-solution type/member structure is needed.
+        Call GetTestProjectSummary when test project structure is relevant.
         Treat the CWD as the loaded workspace.
         Do not edit files during this initialization turn.
         Reply with a concise workspace orientation: main projects, likely responsibility boundaries, and any context gaps.

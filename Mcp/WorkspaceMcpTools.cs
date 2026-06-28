@@ -33,4 +33,11 @@ public sealed class WorkspaceMcpTools
     {
         return workflow.GetWatchedSolutionSummaryAsync(cancellationToken);
     }
+
+    [McpServerTool]
+    [Description("Returns the indexed project/file/type/member tree for configured test projects only. Does not include source file bodies.")]
+    public Task<WatchedSolutionSummaryResult> GetTestProjectSummary(CancellationToken cancellationToken = default)
+    {
+        return workflow.GetTestProjectSummaryAsync(cancellationToken);
+    }
 }

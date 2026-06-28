@@ -27,11 +27,15 @@ public sealed class CodingServicesSettingsProvider
         string[]? winMergeCandidatePaths = configuration
             .GetSection("CodingServices:WinMergeCandidatePaths")
             .Get<string[]>();
+        string[] testProjectPaths = ResolveConfiguredPaths(
+            "CodingServices:TestProjectPaths",
+            repositoryRoot);
 
         return CodingServicesSettings.Create(
             repositoryRoot,
             watchedSolutionPath,
             runtimeRoot,
+            testProjectPaths,
             winMergeCandidatePaths);
     }
 
@@ -62,6 +66,20 @@ public sealed class CodingServicesSettingsProvider
     {
         string configuredValue = configuration[key] ?? defaultValue;
         return ResolvePath(configuredValue, basePath);
+    }
+
+    private string[] ResolveConfiguredPaths(string key, string basePath)
+    {
+        string[]? configuredValues = configuration.GetSection(key).Get<string[]>();
+        if (configuredValues is null || configuredValues.Length == 0)
+        {
+            return [];
+        }
+
+        return configuredValues
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => ResolvePath(value, basePath))
+            .ToArray();
     }
 
     private static string ResolvePath(string path, string basePath)

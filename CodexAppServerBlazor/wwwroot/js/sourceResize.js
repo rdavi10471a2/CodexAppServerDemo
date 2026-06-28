@@ -196,6 +196,38 @@ export function scrollElementToBottom(element) {
     });
 }
 
+export function scrollIframeToBottom(iframe) {
+    if (!iframe) {
+        return;
+    }
+
+    const scroll = () => {
+        window.requestAnimationFrame(() => {
+            const documentElement = iframe.contentDocument?.documentElement;
+            const body = iframe.contentDocument?.body;
+            const target = body || documentElement;
+            if (!target) {
+                return;
+            }
+
+            const height = Math.max(
+                body?.scrollHeight || 0,
+                documentElement?.scrollHeight || 0);
+            target.scrollTop = height;
+            if (documentElement) {
+                documentElement.scrollTop = height;
+            }
+        });
+    };
+
+    if (iframe.contentDocument?.readyState === "complete") {
+        scroll();
+        return;
+    }
+
+    iframe.addEventListener("load", scroll, { once: true });
+}
+
 export async function copyTextToClipboard(text) {
     if (!text) {
         return;

@@ -23,7 +23,7 @@ The primary workflow is CWD/workspace based:
 - `CodexAppServerBlazor/`: Blazor Server control UI and app host.
 - `CodexAppServerClient.cs`: JSON-RPC client for `codex app-server`, protocol events, and token usage handling.
 - `Mcp/`: local MCP HTTP host and workspace metadata tools. The health endpoint
-  at `http://localhost:6278/health` advertises available MCP discovery tools and
+  under configured `Mcp:Url` advertises available MCP discovery tools and
   descriptions.
 - `CodexAppServerWinForms_corrected.slnx`: root solution pointing at the Blazor project.
 
@@ -34,8 +34,17 @@ Use these commands from the repository root:
 ```powershell
 dotnet restore .\CodexAppServerWinForms_corrected.slnx
 dotnet build .\CodexAppServerWinForms_corrected.slnx
-dotnet run --project .\CodexAppServerBlazor\CodexAppServerBlazor.csproj --urls http://localhost:5205
+dotnet run --project .\CodexAppServerBlazor\CodexAppServerBlazor.csproj
 ```
+
+Default ports are configured in `CodexAppServerBlazor/appsettings.json`:
+`BlazorHost:Url` controls the Blazor app URL and `Mcp:Url` controls the local
+MCP endpoint URL.
+
+Configured `CodingServices:TestProjectPaths` are part of the watched solution
+and index. The Source tab and initial bootstrap context use the product-source
+projection by default; the Tests tab and `GetTestProjectSummary` expose test
+structure explicitly when it is relevant.
 
 ## Startup Check
 

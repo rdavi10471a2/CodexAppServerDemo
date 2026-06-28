@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/tests/">
+    <Project Path="tests/CodexAppServerBlazor.Tests/CodexAppServerBlazor.Tests.csproj" />
+  </Folder>
   <Project Path="CodexAppServerBlazor.AICodingServices/CodexAppServerBlazor.AICodingServices.csproj" />
   <Project Path="CodexAppServerBlazor/CodexAppServerBlazor.csproj" />
 </Solution>

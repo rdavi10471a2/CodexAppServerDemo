@@ -1,8 +1,10 @@
+using CodexAppServerBlazor.Mcp;
 using CodexAppServerBlazor.Services;
 using Markdig;
 using Markdig.Extensions.MediaLinks;
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
+using Radzen;
 using System.Net;
 using System.Text;
 
@@ -26,14 +28,19 @@ public partial class Home : IDisposable, IAsyncDisposable
 
     private DirectoryBrowserSnapshot directorySnapshot = DirectoryBrowserSnapshot.Empty;
     private SourceWorkspaceSnapshot sourceSnapshot = SourceWorkspaceSnapshot.Empty("No workspace is selected.");
+    private SourceWorkspaceSnapshot testSourceSnapshot = SourceWorkspaceSnapshot.Empty("No test project context is loaded.");
     private string codexExe = "codex";
     private string repoRoot = string.Empty;
     private string sourceFilter = string.Empty;
     private string? selectedSourcePath;
     private int? selectedSourceLine;
+    private string testSourceFilter = string.Empty;
+    private string? selectedTestSourcePath;
+    private int? selectedTestSourceLine;
     private string model = "gpt-5.4";
     private string approvalPolicy = "never";
     private string sandbox = "danger-full-access";
+    private string mcpUrl = McpHostFactory.DefaultLocalMcpUrl;
     private readonly List<TranscriptMessage> chatMessages = [];
     private string chatDraft = "Inspect the current workspace. Start with discovery, propose the next safe step, and do not edit files unless explicitly asked.";
     private string? activeAssistantMessageId;
@@ -71,10 +78,14 @@ public partial class Home : IDisposable, IAsyncDisposable
     [Inject]
     public IConfiguration Configuration { get; set; } = default!;
 
+    [Inject]
+    public NotificationService NotificationService { get; set; } = default!;
+
     protected override void OnInitialized()
     {
         ConnectionService.Changed += OnConnectionChanged;
         snapshot = ConnectionService.GetSnapshot();
+        mcpUrl = Configuration["Mcp:Url"] ?? McpHostFactory.DefaultLocalMcpUrl;
         string configuredCwd = Configuration["Workspace:DefaultCwd"] ?? Directory.GetCurrentDirectory();
         SetWorkspace(configuredCwd);
     }
@@ -87,12 +98,22 @@ public partial class Home : IDisposable, IAsyncDisposable
         }
         else
         {
+            if (!ValidateWorkspaceForOperation("start Codex server"))
+            {
+                return;
+            }
+
             await RunCommandAsync(() => ConnectionService.StartServerAsync(codexExe, CancellationToken.None));
         }
     }
 
     private async Task StartThread()
     {
+        if (!ValidateWorkspaceForOperation("start a Codex thread"))
+        {
+            return;
+        }
+
         await RunCommandAsync(() => ConnectionService.StartThreadAsync(
             repoRoot,
             model,
@@ -111,6 +132,11 @@ public partial class Home : IDisposable, IAsyncDisposable
 
         string content = chatDraft;
         if (string.IsNullOrWhiteSpace(content))
+        {
+            return;
+        }
+
+        if (!ValidateWorkspaceForOperation("send a turn"))
         {
             return;
         }
@@ -137,13 +163,38 @@ public partial class Home : IDisposable, IAsyncDisposable
         }
     }
 
+    private bool ValidateWorkspaceForOperation(string operationName)
+    {
+        if (!string.IsNullOrWhiteSpace(repoRoot) && Directory.Exists(repoRoot))
+        {
+            return true;
+        }
+
+        string detail = string.IsNullOrWhiteSpace(repoRoot)
+            ? "No CWD is selected."
+            : $"CWD does not exist: {repoRoot}";
+        string message = $"Cannot {operationName}. {detail}";
+        errorMessage = message;
+        NotificationService.Notify(new NotificationMessage
+        {
+            Severity = NotificationSeverity.Error,
+            Summary = "Invalid CWD",
+            Detail = message,
+            Duration = 7000
+        });
+        return false;
+    }
+
     private void SetWorkspace(string? path)
     {
         directorySnapshot = DirectoryBrowser.GetSnapshot(path);
         repoRoot = directorySnapshot.CurrentPath;
         selectedSourcePath = null;
         selectedSourceLine = null;
+        selectedTestSourcePath = null;
+        selectedTestSourceLine = null;
         RefreshSourceSnapshot();
+        RefreshTestSourceSnapshot();
     }
 
     private void RefreshSourceSnapshot()
@@ -175,6 +226,7 @@ public partial class Home : IDisposable, IAsyncDisposable
             errorMessage = null;
             await SourceWorkspace.RebuildIndexAsync(repoRoot, CancellationToken.None);
             RefreshSourceSnapshot();
+            RefreshTestSourceSnapshot();
         }
         catch (Exception ex)
         {
@@ -198,6 +250,36 @@ public partial class Home : IDisposable, IAsyncDisposable
         selectedSourcePath = null;
         selectedSourceLine = null;
         RefreshSourceSnapshot();
+    }
+
+    private void RefreshTestSourceSnapshot()
+    {
+        try
+        {
+            testSourceSnapshot = SourceWorkspace.BuildTestSnapshot(repoRoot, selectedTestSourcePath, selectedTestSourceLine, testSourceFilter);
+            selectedTestSourcePath = testSourceSnapshot.SelectedFile?.RelativePath;
+            selectedTestSourceLine = testSourceSnapshot.SelectedFile?.SelectedLine;
+        }
+        catch (Exception ex)
+        {
+            testSourceSnapshot = SourceWorkspaceSnapshot.Empty(ex.Message);
+            selectedTestSourcePath = null;
+            selectedTestSourceLine = null;
+        }
+    }
+
+    private void SelectTestSourceFile(SourceSelection selection)
+    {
+        selectedTestSourcePath = selection.RelativePath;
+        selectedTestSourceLine = Math.Max(selection.Line, 1);
+        RefreshTestSourceSnapshot();
+    }
+
+    private void ApplyTestSourceFilter()
+    {
+        selectedTestSourcePath = null;
+        selectedTestSourceLine = null;
+        RefreshTestSourceSnapshot();
     }
 
     private void ToggleConnectionPanel()

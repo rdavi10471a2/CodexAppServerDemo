@@ -100,6 +100,32 @@ public sealed class HarnessWorkspaceWorkflow
             Error: null));
     }
 
+    public Task<WatchedSolutionSummaryResult> GetTestProjectSummaryAsync(CancellationToken cancellationToken)
+    {
+        string? repoRoot = workspaceState.RepoRoot;
+        if (string.IsNullOrWhiteSpace(repoRoot))
+        {
+            return Task.FromResult(WatchedSolutionSummaryResult.Fail("No workspace CWD has been selected in the Blazor control surface."));
+        }
+
+        if (!Directory.Exists(repoRoot))
+        {
+            return Task.FromResult(WatchedSolutionSummaryResult.Fail($"Workspace CWD no longer exists: {repoRoot}", repoRoot));
+        }
+
+        SourceWorkspaceStructureSnapshot snapshot = sourceWorkspaceService.BuildTestProjectStructureSnapshot(repoRoot, filter: null);
+        return Task.FromResult(new WatchedSolutionSummaryResult(
+            Success: true,
+            RepoRoot: repoRoot,
+            WorkspaceRoot: snapshot.WorkspaceRoot,
+            WatchedSolutionPath: snapshot.WatchedSolutionPath,
+            IndexDatabasePath: snapshot.IndexDatabasePath,
+            FileCount: snapshot.FileCount,
+            Tree: snapshot.Tree,
+            Message: snapshot.Message,
+            Error: null));
+    }
+
     private static string ComputeSummaryHash(SourceWorkspaceStructureSnapshot snapshot)
     {
         byte[] bytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(snapshot);

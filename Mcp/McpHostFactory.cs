@@ -8,14 +8,18 @@ namespace CodexAppServerBlazor.Mcp;
 
 public static class McpHostFactory
 {
-    public const string LocalMcpUrl = "http://localhost:6278";
+    public const string DefaultLocalMcpUrl = "http://localhost:6278";
     public const string HealthPath = "/health";
 
-    public static IHost Create(WorkspaceState workspaceState, SourceWorkspaceService sourceWorkspaceService)
+    public static IHost Create(
+        WorkspaceState workspaceState,
+        SourceWorkspaceService sourceWorkspaceService,
+        string? localMcpUrl)
     {
+        string endpointUrl = NormalizeUrl(localMcpUrl, DefaultLocalMcpUrl);
         var builder = WebApplication.CreateBuilder();
 
-        builder.WebHost.UseUrls(LocalMcpUrl);
+        builder.WebHost.UseUrls(endpointUrl);
         builder.Services.AddSingleton(workspaceState);
         builder.Services.AddSingleton(sourceWorkspaceService);
         builder.Services.AddSingleton<HarnessWorkspaceWorkflow>();
@@ -34,7 +38,7 @@ public static class McpHostFactory
         app.MapGet(HealthPath, () => Results.Json(new
         {
             status = "ok",
-            mcpEndpoint = LocalMcpUrl,
+            mcpEndpoint = endpointUrl,
             transport = "streamable-http",
             stateless = true,
             tools = new[]
@@ -53,11 +57,26 @@ public static class McpHostFactory
                 {
                     name = nameof(WorkspaceMcpTools.GetWatchedSolutionSummary),
                     description = "Full indexed project/file/type/member tree for on-demand discovery. Does not include source file bodies."
+                },
+                new
+                {
+                    name = nameof(WorkspaceMcpTools.GetTestProjectSummary),
+                    description = "Indexed project/file/type/member tree for configured test projects only. Does not include source file bodies."
                 }
             }
         }));
         app.MapMcp();
 
         return app;
+    }
+
+    private static string NormalizeUrl(string? configuredUrl, string fallbackUrl)
+    {
+        if (string.IsNullOrWhiteSpace(configuredUrl))
+        {
+            return fallbackUrl;
+        }
+
+        return configuredUrl.Trim().TrimEnd('/');
     }
 }

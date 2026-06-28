@@ -37,6 +37,12 @@ public static class CodingServicesSettingsLoader
                     codingServices,
                     resolvedRepositoryRoot,
                     settingsDirectory);
+                IReadOnlyList<string> testProjectPaths = TryGetStringArray(
+                    codingServices,
+                    "TestProjectPaths",
+                    out IReadOnlyList<string> configuredTestProjectPaths)
+                    ? ResolvePaths(configuredTestProjectPaths, settingsDirectory)
+                    : [];
                 string defaultReviewSurface = GetString(codingServices, "DefaultReviewSurface") ?? "Browser";
                 string browserReviewBaseUrl = GetString(codingServices, "BrowserReviewBaseUrl") ?? "http://localhost:5000";
 
@@ -44,6 +50,7 @@ public static class CodingServicesSettingsLoader
                     resolvedRepositoryRoot,
                     ResolvePath(watchedSolutionPath, settingsDirectory),
                     ResolvePath(runtimeRoot, resolvedRepositoryRoot),
+                    testProjectPaths,
                     ResolvePaths(winMergeCandidatePaths, settingsDirectory),
                     defaultReviewSurface,
                     browserReviewBaseUrl);
@@ -68,6 +75,9 @@ public static class CodingServicesSettingsLoader
         IReadOnlyList<string> existingWinMergeCandidatePaths = LoadExistingWinMergeCandidatePaths(
             resolvedSettingsPath,
             resolvedRepositoryRoot);
+        IReadOnlyList<string> existingTestProjectPaths = LoadExistingPathList(
+            resolvedSettingsPath,
+            "TestProjectPaths");
         string existingDefaultReviewSurface = LoadExistingString(
             resolvedSettingsPath,
             "DefaultReviewSurface",
@@ -80,6 +90,7 @@ public static class CodingServicesSettingsLoader
             new LocalCodingServicesSettings(
                 resolvedWatchedSolutionPath,
                 resolvedRuntimeRoot,
+                existingTestProjectPaths,
                 existingWinMergeCandidatePaths,
                 existingDefaultReviewSurface,
                 existingBrowserReviewBaseUrl));
@@ -194,6 +205,29 @@ public static class CodingServicesSettingsLoader
         }
     }
 
+    private static IReadOnlyList<string> LoadExistingPathList(string settingsPath, string propertyName)
+    {
+        if (!File.Exists(settingsPath))
+        {
+            return [];
+        }
+
+        using (FileStream stream = File.OpenRead(settingsPath))
+        {
+            using (JsonDocument document = JsonDocument.Parse(stream))
+            {
+                if (!document.RootElement.TryGetProperty("CodingServices", out JsonElement codingServices))
+                {
+                    return [];
+                }
+
+                return TryGetStringArray(codingServices, propertyName, out IReadOnlyList<string> existingPaths)
+                    ? existingPaths
+                    : [];
+            }
+        }
+    }
+
     private static IReadOnlyList<string> LoadTemplateWinMergeCandidatePaths(string resolvedRepositoryRoot)
     {
         string templatePath = Path.Combine(resolvedRepositoryRoot, "config", "appsettings.template.json");
@@ -237,6 +271,7 @@ public static class CodingServicesSettingsLoader
     private sealed record LocalCodingServicesSettings(
         string WatchedSolutionPath,
         string RuntimeRoot,
+        IReadOnlyList<string> TestProjectPaths,
         IReadOnlyList<string> WinMergeCandidatePaths,
         string DefaultReviewSurface,
         string BrowserReviewBaseUrl);

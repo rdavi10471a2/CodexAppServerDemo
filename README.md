@@ -17,7 +17,19 @@ The old WinForms harness has been removed. The app is now centered on a CWD/work
 ```powershell
 dotnet restore .\CodexAppServerWinForms_corrected.slnx
 dotnet build .\CodexAppServerWinForms_corrected.slnx
-dotnet run --project .\CodexAppServerBlazor\CodexAppServerBlazor.csproj --urls http://localhost:5205
+dotnet run --project .\CodexAppServerBlazor\CodexAppServerBlazor.csproj
+```
+
+The default app and MCP ports are configured in
+`CodexAppServerBlazor/appsettings.json`:
+
+```json
+"BlazorHost": {
+  "Url": "http://localhost:5205"
+},
+"Mcp": {
+  "Url": "http://localhost:6278"
+}
 ```
 
 Open:
@@ -41,6 +53,12 @@ endpoint metadata plus tool names and descriptions:
   index paths.
 - `GetWatchedSolutionSummary`: returns the full indexed project/file/type/member
   tree for on-demand discovery. It does not include source file bodies.
+- `GetTestProjectSummary`: returns the indexed project/file/type/member tree for
+  configured test projects only. It does not include source file bodies.
+
+The Source tab and startup context use the product-source projection by default.
+Configured test projects stay indexed and editable, but are shown separately in
+the Tests tab and through `GetTestProjectSummary`.
 
 ## Project Layout
 

@@ -4,6 +4,7 @@ public sealed record CodingServicesSettings(
     string RepositoryRoot,
     string RuntimeRoot,
     string WatchedSolutionPath,
+    IReadOnlyList<string> TestProjectPaths,
     IReadOnlyList<string> WinMergeCandidatePaths,
     string DefaultReviewSurface,
     string BrowserReviewBaseUrl)
@@ -15,6 +16,7 @@ public sealed record CodingServicesSettings(
         string repositoryRoot,
         string watchedSolutionPath,
         string? runtimeRoot = null,
+        IReadOnlyList<string>? testProjectPaths = null,
         IReadOnlyList<string>? winMergeCandidatePaths = null,
         string? defaultReviewSurface = null,
         string? browserReviewBaseUrl = null)
@@ -28,6 +30,7 @@ public sealed record CodingServicesSettings(
             resolvedRepositoryRoot,
             resolvedRuntimeRoot,
             resolvedWatchedSolutionPath,
+            testProjectPaths?.Select(Path.GetFullPath).ToArray() ?? [],
             winMergeCandidatePaths ?? [],
             string.IsNullOrWhiteSpace(defaultReviewSurface) ? "Browser" : defaultReviewSurface,
             string.IsNullOrWhiteSpace(browserReviewBaseUrl) ? "http://localhost:5000" : browserReviewBaseUrl.TrimEnd('/'));

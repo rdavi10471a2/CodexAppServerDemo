@@ -6,12 +6,17 @@ public sealed class HarnessMcpHostedService : IHostedService, IDisposable
 {
     private readonly WorkspaceState workspaceState;
     private readonly SourceWorkspaceService sourceWorkspaceService;
+    private readonly IConfiguration configuration;
     private IHost? host;
 
-    public HarnessMcpHostedService(WorkspaceState workspaceState, SourceWorkspaceService sourceWorkspaceService)
+    public HarnessMcpHostedService(
+        WorkspaceState workspaceState,
+        SourceWorkspaceService sourceWorkspaceService,
+        IConfiguration configuration)
     {
         this.workspaceState = workspaceState;
         this.sourceWorkspaceService = sourceWorkspaceService;
+        this.configuration = configuration;
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -21,7 +26,8 @@ public sealed class HarnessMcpHostedService : IHostedService, IDisposable
             return Task.CompletedTask;
         }
 
-        host = McpHostFactory.Create(workspaceState, sourceWorkspaceService);
+        string mcpUrl = configuration["Mcp:Url"] ?? McpHostFactory.DefaultLocalMcpUrl;
+        host = McpHostFactory.Create(workspaceState, sourceWorkspaceService, mcpUrl);
         return host.StartAsync(cancellationToken);
     }
 
