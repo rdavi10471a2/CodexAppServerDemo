@@ -125,10 +125,24 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         string model,
         string approvalPolicy,
         string sandbox,
+        IReadOnlyList<CodexTurnAttachment>? attachments = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(ThreadId))
             throw new InvalidOperationException("Start a thread first.");
+
+        List<object> input =
+        [
+            new { type = "text", text = prompt }
+        ];
+
+        if (attachments is not null)
+        {
+            foreach (CodexTurnAttachment attachment in attachments)
+            {
+                input.Add(CreateTurnAttachmentInput(attachment));
+            }
+        }
 
         var response = await SendRequestAsync("turn/start", new
         {
@@ -138,15 +152,30 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             approvalPolicy,
             approvalsReviewer = "user",
             sandboxPolicy = CreateSandboxPolicy(sandbox),
-            input = new object[]
-            {
-                new { type = "text", text = prompt }
-            }
+            input
         }, cancellationToken);
 
         ThrowIfRpcError(response);
         Status?.Invoke(new StatusEvent("turn", "Turn accepted by app-server."));
         LogLine?.Invoke("Turn started.");
+    }
+
+    private static object CreateTurnAttachmentInput(CodexTurnAttachment attachment)
+    {
+        return attachment.Kind switch
+        {
+            CodexTurnAttachmentKind.LocalImage => new
+            {
+                type = "localImage",
+                path = attachment.Path
+            },
+            _ => new
+            {
+                type = "mention",
+                name = attachment.Name,
+                path = attachment.Path
+            }
+        };
     }
 
     private static object CreateSandboxPolicy(string sandbox)

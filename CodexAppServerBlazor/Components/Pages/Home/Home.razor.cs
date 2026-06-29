@@ -3,6 +3,7 @@ using CodexAppServerBlazor.Services;
 using Markdig;
 using Markdig.Extensions.MediaLinks;
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.JSInterop;
 using Radzen;
 using System.Net;
@@ -14,6 +15,7 @@ public partial class Home : IDisposable, IAsyncDisposable
 {
     private const string CurrentUserId = "operator";
     private const string AssistantUserId = "codex";
+    private const long MaxAttachmentBytes = 25L * 1024L * 1024L;
 
     private CodexConnectionSnapshot snapshot = new(
         false,
@@ -44,6 +46,7 @@ public partial class Home : IDisposable, IAsyncDisposable
     private string sandbox = "read-only";
     private string mcpUrl = McpHostFactory.DefaultLocalMcpUrl;
     private readonly List<TranscriptMessage> chatMessages = [];
+    private readonly List<CodexTurnAttachment> turnAttachments = [];
     private string chatDraft = "Inspect the current workspace. Start with discovery, propose the next safe step, and do not edit files unless explicitly asked.";
     private string? activeAssistantMessageId;
     private string renderedAssistantText = string.Empty;
@@ -134,7 +137,7 @@ public partial class Home : IDisposable, IAsyncDisposable
         }
 
         string content = chatDraft;
-        if (string.IsNullOrWhiteSpace(content))
+        if (string.IsNullOrWhiteSpace(content) && turnAttachments.Count == 0)
         {
             return;
         }
@@ -144,8 +147,14 @@ public partial class Home : IDisposable, IAsyncDisposable
             return;
         }
 
+        CodexTurnAttachment[] attachments = turnAttachments.ToArray();
+        if (!ValidateAttachmentsForSend(attachments))
+        {
+            return;
+        }
+
         chatDraft = string.Empty;
-        AddUserMessage(content);
+        AddUserMessage(BuildUserTranscriptContent(content, attachments));
         StartAssistantMessage();
         await RunCommandAsync(() => ConnectionService.SendTurnAsync(
             repoRoot,
@@ -153,8 +162,96 @@ public partial class Home : IDisposable, IAsyncDisposable
             model,
             approvalPolicy,
             sandbox,
+            attachments,
             CancellationToken.None));
+        if (errorMessage is null)
+        {
+            turnAttachments.Clear();
+        }
+
         RenderAssistantSnapshot(isStreaming: snapshot.IsTurnRunning);
+    }
+
+    private async Task AttachTurnFiles(InputFileChangeEventArgs args)
+    {
+        if (!ValidateWorkspaceForOperation("attach a file"))
+        {
+            return;
+        }
+
+        foreach (IBrowserFile file in args.GetMultipleFiles())
+        {
+            await SaveTurnAttachment(file);
+        }
+    }
+
+    private async Task SaveTurnAttachment(IBrowserFile file)
+    {
+        string safeName = GetSafeFileName(file.Name);
+        string attachmentDirectory = Path.Combine(
+            repoRoot,
+            "runtime",
+            "turn-attachments",
+            DateTime.UtcNow.ToString("yyyyMMdd"),
+            Guid.NewGuid().ToString("N"));
+        string destinationPath = Path.Combine(attachmentDirectory, safeName);
+
+        try
+        {
+            Directory.CreateDirectory(attachmentDirectory);
+
+            Stream source = file.OpenReadStream(MaxAttachmentBytes);
+            try
+            {
+                FileStream target = File.Create(destinationPath);
+                try
+                {
+                    await source.CopyToAsync(target);
+                }
+                finally
+                {
+                    target.Dispose();
+                }
+            }
+            finally
+            {
+                source.Dispose();
+            }
+
+            CodexTurnAttachmentKind kind = IsImageAttachment(safeName, file.ContentType)
+                ? CodexTurnAttachmentKind.LocalImage
+                : CodexTurnAttachmentKind.Mention;
+            turnAttachments.Add(new CodexTurnAttachment(
+                safeName,
+                destinationPath,
+                kind,
+                file.Size));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            string message = $"Could not attach {safeName}: {ex.Message}";
+            errorMessage = message;
+            NotificationService.Notify(new NotificationMessage
+            {
+                Severity = NotificationSeverity.Error,
+                Summary = "Attachment failed",
+                Detail = message,
+                Duration = 7000
+            });
+        }
+    }
+
+    private Task RemoveTurnAttachment(string path)
+    {
+        CodexTurnAttachment? attachment = turnAttachments.FirstOrDefault(candidate =>
+            candidate.Path.Equals(path, StringComparison.OrdinalIgnoreCase));
+        if (attachment is not null)
+        {
+            turnAttachments.Remove(attachment);
+            TryDeleteRuntimeAttachment(attachment.Path);
+        }
+
+        return Task.CompletedTask;
     }
 
     private async Task DenyPermissionRequest(int requestId)
@@ -679,6 +776,123 @@ public partial class Home : IDisposable, IAsyncDisposable
         }
 
         return text.ToString();
+    }
+
+    private bool ValidateAttachmentsForSend(IReadOnlyList<CodexTurnAttachment> attachments)
+    {
+        foreach (CodexTurnAttachment attachment in attachments)
+        {
+            if (!File.Exists(attachment.Path))
+            {
+                string message = $"Attachment is missing from runtime storage: {attachment.Name}";
+                errorMessage = message;
+                NotificationService.Notify(new NotificationMessage
+                {
+                    Severity = NotificationSeverity.Error,
+                    Summary = "Attachment missing",
+                    Detail = message,
+                    Duration = 7000
+                });
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static string BuildUserTranscriptContent(string content, IReadOnlyList<CodexTurnAttachment> attachments)
+    {
+        if (attachments.Count == 0)
+        {
+            return content;
+        }
+
+        var text = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(content))
+        {
+            text.AppendLine(content.TrimEnd());
+            text.AppendLine();
+        }
+
+        text.AppendLine("Attachments:");
+        foreach (CodexTurnAttachment attachment in attachments)
+        {
+            string kind = attachment.Kind == CodexTurnAttachmentKind.LocalImage ? "image" : "file";
+            text.Append("- ");
+            text.Append(attachment.Name);
+            text.Append(" (");
+            text.Append(kind);
+            text.Append(", ");
+            text.Append(FormatAttachmentSize(attachment.SizeBytes));
+            text.AppendLine(")");
+        }
+
+        return text.ToString();
+    }
+
+    private static string FormatAttachmentSize(long sizeBytes)
+    {
+        if (sizeBytes >= 1024L * 1024L)
+        {
+            return $"{sizeBytes / 1024d / 1024d:0.##} MB";
+        }
+
+        if (sizeBytes >= 1024L)
+        {
+            return $"{sizeBytes / 1024d:0.##} KB";
+        }
+
+        return $"{sizeBytes} bytes";
+    }
+
+    private static bool IsImageAttachment(string fileName, string? contentType)
+    {
+        if (!string.IsNullOrWhiteSpace(contentType) &&
+            contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        string extension = Path.GetExtension(fileName);
+        return extension.Equals(".png", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".jpg", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".jpeg", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".gif", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".webp", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".bmp", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetSafeFileName(string fileName)
+    {
+        string name = Path.GetFileName(fileName);
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return "attachment";
+        }
+
+        foreach (char invalid in Path.GetInvalidFileNameChars())
+        {
+            name = name.Replace(invalid, '_');
+        }
+
+        return name;
+    }
+
+    private static void TryDeleteRuntimeAttachment(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
     }
 
     private void NotifyPermissionAction(string summary, string detail, NotificationSeverity severity)

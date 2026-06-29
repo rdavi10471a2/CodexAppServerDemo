@@ -1,4 +1,5 @@
 @using CodexAppServerBlazor.Services
+@using Microsoft.AspNetCore.Components.Forms
 @inject IJSRuntime JS
 @implements IAsyncDisposable
 
@@ -126,6 +127,33 @@
     <div class="assistant-splitter" @ref="assistantSplitter" title="Drag to resize transcript and input" aria-hidden="true"></div>
 
     <div class="chat-composer" @ref="chatComposer">
+        <div class="attachment-strip">
+            <label class="attachment-picker-label">
+                <span class="attachment-icon">+</span>
+                <span>Attach</span>
+                <InputFile class="attachment-picker"
+                           OnChange="@AttachFiles"
+                           multiple
+                           disabled="@Busy" />
+            </label>
+            @if (Attachments.Count > 0)
+            {
+                <div class="attachment-chips" aria-label="Attached files">
+                    @foreach (CodexTurnAttachment attachment in Attachments)
+                    {
+                        <span class="attachment-chip" title="@attachment.Path">
+                            <span class="attachment-kind">@GetAttachmentKindText(attachment)</span>
+                            <span>@attachment.Name</span>
+                            <small>@FormatAttachmentSize(attachment.SizeBytes)</small>
+                            <button type="button"
+                                    title="Remove attachment"
+                                    disabled="@Busy"
+                                    @onclick="@(() => RemoveAttachment.InvokeAsync(attachment.Path))">x</button>
+                        </span>
+                    }
+                </div>
+            }
+        </div>
         <textarea @ref="chatInput"
                   class="chat-composer-input"
                   value="@ChatDraft"
@@ -134,7 +162,7 @@
         <RadzenButton Icon="send"
                       ButtonStyle="ButtonStyle.Primary"
                       Click="@SendChatDraft"
-                      Disabled="@(!IsServerStarted || Busy || string.IsNullOrWhiteSpace(ChatDraft))" />
+                      Disabled="@(!IsServerStarted || Busy || (string.IsNullOrWhiteSpace(ChatDraft) && Attachments.Count == 0))" />
     </div>
 </div>
 
@@ -155,6 +183,9 @@
     public IReadOnlyList<CodexPermissionRequest> PermissionRequests { get; set; } = [];
 
     [Parameter]
+    public IReadOnlyList<CodexTurnAttachment> Attachments { get; set; } = [];
+
+    [Parameter]
     public string ChatDraft { get; set; } = string.Empty;
 
     [Parameter]
@@ -168,6 +199,12 @@
 
     [Parameter]
     public EventCallback SendChatDraft { get; set; }
+
+    [Parameter]
+    public EventCallback<InputFileChangeEventArgs> AttachFiles { get; set; }
+
+    [Parameter]
+    public EventCallback<string> RemoveAttachment { get; set; }
 
     [Parameter]
     public EventCallback ClearHistory { get; set; }
@@ -263,6 +300,28 @@
     {
         DateTimeOffset timestamp = request.ResolvedAt ?? request.CreatedAt;
         return timestamp.ToLocalTime().ToString("HH:mm:ss");
+    }
+
+    private static string GetAttachmentKindText(CodexTurnAttachment attachment)
+    {
+        return attachment.Kind == CodexTurnAttachmentKind.LocalImage
+            ? "IMG"
+            : "FILE";
+    }
+
+    private static string FormatAttachmentSize(long sizeBytes)
+    {
+        if (sizeBytes >= 1024L * 1024L)
+        {
+            return $"{sizeBytes / 1024d / 1024d:0.##} MB";
+        }
+
+        if (sizeBytes >= 1024L)
+        {
+            return $"{sizeBytes / 1024d:0.##} KB";
+        }
+
+        return $"{sizeBytes} B";
     }
 
     private ElementReference assistantLayout;

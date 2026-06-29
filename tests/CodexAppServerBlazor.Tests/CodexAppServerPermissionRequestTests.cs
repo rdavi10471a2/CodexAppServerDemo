@@ -82,6 +82,79 @@ public sealed class CodexAppServerPermissionRequestTests
     }
 
     [Fact]
+    public async Task StartTurnAsync_sends_text_images_and_file_mentions()
+    {
+        List<string> sentMessages = [];
+        CodexAppServerClient? client = null;
+        client = new CodexAppServerClient((json, _) =>
+        {
+            sentMessages.Add(json);
+            JsonNode? request = JsonNode.Parse(json);
+            int id = request?["id"]?.GetValue<int>() ?? 0;
+            string? method = request?["method"]?.GetValue<string>();
+            if (id > 0)
+            {
+                object result = method == "thread/start"
+                    ? new
+                    {
+                        thread = new
+                        {
+                            id = "thread-1"
+                        }
+                    }
+                    : new
+                    {
+                        turn = new
+                        {
+                            id = "turn-1",
+                            status = "inProgress"
+                        }
+                    };
+
+                client!.HandleServerMessage(JsonSerializer.Serialize(new
+                {
+                    id,
+                    result
+                }));
+            }
+
+            return Task.CompletedTask;
+        });
+
+        await client.StartThreadAsync(
+            "C:\\Work",
+            "gpt-5.4",
+            "on-request",
+            "read-only");
+
+        await client.StartTurnAsync(
+            "review these",
+            "C:\\Work",
+            "gpt-5.4",
+            "on-request",
+            "read-only",
+            [
+                new CodexTurnAttachment("screen.png", "C:\\Work\\runtime\\turn-attachments\\screen.png", CodexTurnAttachmentKind.LocalImage, 1024),
+                new CodexTurnAttachment("notes.md", "C:\\Work\\runtime\\turn-attachments\\notes.md", CodexTurnAttachmentKind.Mention, 2048)
+            ]);
+
+        JsonNode? turnStart = sentMessages
+            .Select(messageJson => JsonNode.Parse(messageJson))
+            .FirstOrDefault(message => message?["method"]?.GetValue<string>() == "turn/start");
+        JsonArray? input = turnStart?["params"]?["input"]?.AsArray();
+
+        Assert.NotNull(input);
+        Assert.Equal(3, input!.Count);
+        Assert.Equal("text", input[0]?["type"]?.GetValue<string>());
+        Assert.Equal("review these", input[0]?["text"]?.GetValue<string>());
+        Assert.Equal("localImage", input[1]?["type"]?.GetValue<string>());
+        Assert.Equal("C:\\Work\\runtime\\turn-attachments\\screen.png", input[1]?["path"]?.GetValue<string>());
+        Assert.Equal("mention", input[2]?["type"]?.GetValue<string>());
+        Assert.Equal("notes.md", input[2]?["name"]?.GetValue<string>());
+        Assert.Equal("C:\\Work\\runtime\\turn-attachments\\notes.md", input[2]?["path"]?.GetValue<string>());
+    }
+
+    [Fact]
     public void HandleServerMessage_emits_server_request_for_permission_approval()
     {
         CodexAppServerClient client = new();

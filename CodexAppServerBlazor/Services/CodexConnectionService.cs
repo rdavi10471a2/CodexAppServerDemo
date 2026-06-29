@@ -153,6 +153,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
         string model,
         string approvalPolicy,
         string sandbox,
+        IReadOnlyList<CodexTurnAttachment>? attachments,
         CancellationToken cancellationToken)
     {
         if (!await operationGate.WaitAsync(0, cancellationToken))
@@ -196,6 +197,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
                 model,
                 NormalizeApprovalPolicy(approvalPolicy),
                 NormalizeSandbox(sandbox),
+                attachments,
                 cancellationToken);
             AddEvent(statusEvents, "TurnPolicy", "ok", "codex", $"Turn policy set to approval={NormalizeApprovalPolicy(approvalPolicy)}, sandbox={NormalizeSandbox(sandbox)}, reviewer=user.");
         }
@@ -315,6 +317,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
                 model,
                 NormalizeApprovalPolicy(approvalPolicy),
                 NormalizeSandbox(sandbox),
+                null,
                 cancellationToken);
             AddEvent(statusEvents, "TurnPolicy", "ok", "codex", $"Initial turn policy set to approval={NormalizeApprovalPolicy(approvalPolicy)}, sandbox={NormalizeSandbox(sandbox)}, reviewer=user.");
         }

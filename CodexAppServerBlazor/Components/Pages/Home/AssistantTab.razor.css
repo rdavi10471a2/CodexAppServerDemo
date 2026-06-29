@@ -498,12 +498,131 @@
     grid-column: 1;
     grid-row: 3;
     grid-template-columns: minmax(0, 1fr) 44px;
+    grid-template-rows: auto minmax(0, 1fr);
     align-items: start;
     gap: 8px;
     flex: 0 0 214px;
     min-height: 120px;
     max-height: 50vh;
     overflow: hidden;
+}
+
+.attachment-strip {
+    display: flex;
+    grid-column: 1 / 3;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.attachment-picker-label {
+    position: relative;
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 6px;
+    min-height: 32px;
+    border: 1px solid #d7e1ea;
+    border-radius: 6px;
+    padding: 5px 10px;
+    color: #31475f;
+    background: #f7fafc;
+    cursor: pointer;
+    font-size: .84rem;
+    font-weight: 700;
+}
+
+.attachment-picker-label:hover {
+    border-color: #aebdd0;
+    background: #eef3f7;
+}
+
+.attachment-picker {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.attachment-icon {
+    display: inline-grid;
+    width: 18px;
+    height: 18px;
+    place-items: center;
+    border-radius: 999px;
+    color: #ffffff;
+    background: #5b82f1;
+    font-size: .9rem;
+    line-height: 1;
+}
+
+.attachment-chips {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    overflow: auto;
+    padding-bottom: 1px;
+}
+
+.attachment-chip {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 6px;
+    max-width: 320px;
+    border: 1px solid #cdd8e3;
+    border-radius: 999px;
+    padding: 4px 6px 4px 8px;
+    color: #16202c;
+    background: #ffffff;
+    font-size: .8rem;
+}
+
+.attachment-chip > span:nth-child(2) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.attachment-kind {
+    border: 1px solid #cdd8e3;
+    border-radius: 4px;
+    padding: 1px 4px;
+    color: #526a82;
+    background: #f7fafc;
+    font-size: .66rem;
+    font-weight: 800;
+    letter-spacing: .02em;
+}
+
+.attachment-chip small {
+    color: #6c7d8f;
+    font-size: .72rem;
+    white-space: nowrap;
+}
+
+.attachment-chip button {
+    display: inline-grid;
+    width: 20px;
+    height: 20px;
+    place-items: center;
+    border: 0;
+    border-radius: 999px;
+    color: #526a82;
+    background: #eef3f7;
+    cursor: pointer;
+    font-size: .8rem;
+    line-height: 1;
+}
+
+.attachment-chip button:hover {
+    color: #8b3140;
+    background: #fde7ea;
 }
 
 .chat-composer-input {
