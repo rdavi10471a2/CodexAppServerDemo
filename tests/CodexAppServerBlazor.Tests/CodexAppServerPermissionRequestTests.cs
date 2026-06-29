@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using CodexAppServerBlazor.Services;
 
@@ -5,6 +6,81 @@ namespace CodexAppServerBlazor.Tests;
 
 public sealed class CodexAppServerPermissionRequestTests
 {
+    [Fact]
+    public async Task StartTurnAsync_sends_policy_reviewer_and_sandbox_policy()
+    {
+        List<string> sentMessages = [];
+        CodexAppServerClient? client = null;
+        client = new CodexAppServerClient((json, _) =>
+        {
+            sentMessages.Add(json);
+            JsonNode? request = JsonNode.Parse(json);
+            int id = request?["id"]?.GetValue<int>() ?? 0;
+            string? method = request?["method"]?.GetValue<string>();
+            if (id > 0)
+            {
+                object result = method == "thread/start"
+                    ? new
+                    {
+                        thread = new
+                        {
+                            id = "thread-1"
+                        }
+                    }
+                    : new
+                    {
+                        turn = new
+                        {
+                            id = "turn-1",
+                            status = "inProgress"
+                        }
+                    };
+
+                client!.HandleServerMessage(JsonSerializer.Serialize(new
+                {
+                    id,
+                    result
+                }));
+            }
+
+            return Task.CompletedTask;
+        });
+
+        await client.StartThreadAsync(
+            "C:\\Work",
+            "gpt-5.4",
+            "on-request",
+            "read-only");
+
+        await client.StartTurnAsync(
+            "search please",
+            "C:\\Work",
+            "gpt-5.4",
+            "on-request",
+            "read-only");
+
+        JsonNode? turnStart = null;
+        foreach (string messageJson in sentMessages)
+        {
+            JsonNode? message = JsonNode.Parse(messageJson);
+            if (message?["method"]?.GetValue<string>() == "turn/start")
+            {
+                turnStart = message;
+                break;
+            }
+        }
+        JsonNode? parameters = turnStart?["params"];
+
+        Assert.NotNull(turnStart);
+        Assert.Equal("thread-1", parameters?["threadId"]?.GetValue<string>());
+        Assert.Equal("C:\\Work", parameters?["cwd"]?.GetValue<string>());
+        Assert.Equal("gpt-5.4", parameters?["model"]?.GetValue<string>());
+        Assert.Equal("on-request", parameters?["approvalPolicy"]?.GetValue<string>());
+        Assert.Equal("user", parameters?["approvalsReviewer"]?.GetValue<string>());
+        Assert.Equal("readOnly", parameters?["sandboxPolicy"]?["type"]?.GetValue<string>());
+        Assert.False(parameters?["sandboxPolicy"]?["networkAccess"]?.GetValue<bool>());
+    }
+
     [Fact]
     public void HandleServerMessage_emits_server_request_for_permission_approval()
     {

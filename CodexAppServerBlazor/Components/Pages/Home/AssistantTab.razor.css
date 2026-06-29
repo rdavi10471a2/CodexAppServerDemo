@@ -63,6 +63,104 @@
     background: #ffffff;
 }
 
+.turn-stream-region {
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.agent-request-region {
+    display: flex;
+    flex: 0 0 220px;
+    flex-direction: column;
+    min-height: 150px;
+    border-top: 1px solid #d7e1ea;
+    background: #fbfdff;
+}
+
+.agent-request-header {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    border-bottom: 1px solid #e4ebf1;
+    padding: 7px 10px;
+    color: #526a82;
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.agent-request-header strong {
+    color: #1f5d38;
+    font-size: 11px;
+}
+
+.agent-request-empty {
+    display: grid;
+    flex: 1 1 auto;
+    min-height: 0;
+    place-content: center;
+    padding: 12px;
+    color: #6c7d8f;
+    font-size: .86rem;
+    text-align: center;
+}
+
+.agent-request-list {
+    display: grid;
+    gap: 8px;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    padding: 10px;
+}
+
+.agent-request-card {
+    display: grid;
+    gap: 10px;
+    border: 1px solid #efc7cc;
+    border-radius: 7px;
+    padding: 9px;
+    background: #fff8f9;
+}
+
+.agent-request-main {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+}
+
+.agent-request-main span {
+    color: #8b3140;
+    font-size: .72rem;
+    font-weight: 800;
+    overflow-wrap: anywhere;
+}
+
+.agent-request-main strong {
+    color: #172335;
+    font-size: .86rem;
+    font-weight: 700;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.agent-request-main code {
+    color: #526a82;
+    font-family: Consolas, "Cascadia Mono", monospace;
+    font-size: .75rem;
+}
+
+.agent-request-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
 .stream-splitter {
     position: relative;
     min-width: 12px;

@@ -19,11 +19,17 @@
     <div class="settings-pair">
         <label class="field">
             <span>Approval</span>
-            <RadzenTextBox Value="@ApprovalPolicy" Disabled="true" />
+            <RadzenDropDown TValue="string"
+                            Value="@ApprovalPolicy"
+                            ValueChanged="@OnApprovalPolicyChanged"
+                            Data="@ApprovalPolicies" />
         </label>
         <label class="field">
             <span>Sandbox</span>
-            <RadzenTextBox Value="@Sandbox" Disabled="true" />
+            <RadzenDropDown TValue="string"
+                            Value="@Sandbox"
+                            ValueChanged="@OnSandboxChanged"
+                            Data="@Sandboxes" />
         </label>
     </div>
 
@@ -118,7 +124,13 @@
     public string ApprovalPolicy { get; set; } = string.Empty;
 
     [Parameter]
+    public EventCallback<string> ApprovalPolicyChanged { get; set; }
+
+    [Parameter]
     public string Sandbox { get; set; } = string.Empty;
+
+    [Parameter]
+    public EventCallback<string> SandboxChanged { get; set; }
 
     [Parameter]
     public EventCallback ToggleServer { get; set; }
@@ -135,6 +147,31 @@
     {
         return ModelChanged.InvokeAsync(value ?? string.Empty);
     }
+
+    private Task OnApprovalPolicyChanged(string? value)
+    {
+        return ApprovalPolicyChanged.InvokeAsync(value ?? "on-request");
+    }
+
+    private Task OnSandboxChanged(string? value)
+    {
+        return SandboxChanged.InvokeAsync(value ?? "read-only");
+    }
+
+    private static readonly string[] ApprovalPolicies =
+    [
+        "on-request",
+        "untrusted",
+        "on-failure",
+        "never",
+    ];
+
+    private static readonly string[] Sandboxes =
+    [
+        "read-only",
+        "workspace-write",
+        "danger-full-access"
+    ];
 
     private string McpEndpointUrl
     {

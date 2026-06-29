@@ -102,6 +102,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             model,
             cwd = repoRoot,
             approvalPolicy,
+            approvalsReviewer = "user",
             sandbox,
             serviceName = "codex_app_server_blazor"
         }, cancellationToken);
@@ -118,7 +119,13 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         return threadId;
     }
 
-    public async Task StartTurnAsync(string prompt, CancellationToken cancellationToken = default)
+    public async Task StartTurnAsync(
+        string prompt,
+        string repoRoot,
+        string model,
+        string approvalPolicy,
+        string sandbox,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(ThreadId))
             throw new InvalidOperationException("Start a thread first.");
@@ -126,6 +133,11 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         var response = await SendRequestAsync("turn/start", new
         {
             threadId = ThreadId,
+            cwd = repoRoot,
+            model,
+            approvalPolicy,
+            approvalsReviewer = "user",
+            sandboxPolicy = CreateSandboxPolicy(sandbox),
             input = new object[]
             {
                 new { type = "text", text = prompt }
@@ -135,6 +147,35 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         ThrowIfRpcError(response);
         Status?.Invoke(new StatusEvent("turn", "Turn accepted by app-server."));
         LogLine?.Invoke("Turn started.");
+    }
+
+    private static object CreateSandboxPolicy(string sandbox)
+    {
+        return sandbox.Trim().ToLowerInvariant() switch
+        {
+            "read-only" => new
+            {
+                type = "readOnly",
+                networkAccess = false
+            },
+            "workspace-write" => new
+            {
+                type = "workspaceWrite",
+                networkAccess = false,
+                writableRoots = Array.Empty<string>(),
+                excludeTmpdirEnvVar = false,
+                excludeSlashTmp = false
+            },
+            "danger-full-access" => new
+            {
+                type = "dangerFullAccess"
+            },
+            _ => new
+            {
+                type = "readOnly",
+                networkAccess = false
+            }
+        };
     }
 
     public async Task<JsonRpcResponse> SendRequestAsync(string method, object parameters, CancellationToken cancellationToken = default)

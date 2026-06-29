@@ -27,8 +27,8 @@
                                  McpUrl="@mcpUrl"
                                  @bind-CodexExe="@codexExe"
                                  @bind-Model="@model"
-                                 ApprovalPolicy="@approvalPolicy"
-                                 Sandbox="@sandbox"
+                                 @bind-ApprovalPolicy="@approvalPolicy"
+                                 @bind-Sandbox="@sandbox"
                                  ToggleServer="@ToggleServer"
                                  StartThread="@StartThread" />
             </div>
@@ -70,11 +70,14 @@
                         <AssistantTab TranscriptHtml="@TranscriptHtml"
                                       TranscriptText="@TranscriptText"
                                       CurrentTurnHtml="@CurrentTurnHtml"
+                                      PermissionRequests="@snapshot.PermissionRequests"
                                       @bind-ChatDraft="@chatDraft"
                                       IsServerStarted="@snapshot.IsServerStarted"
                                       Busy="@busy"
                                       SendChatDraft="@SendChatDraft"
-                                      ClearHistory="@ClearChatHistory" />
+                                      ClearHistory="@ClearChatHistory"
+                                      DenyPermission="@DenyPermissionRequest"
+                                      CancelPermission="@CancelPermissionRequest" />
                     </RadzenTabsItem>
 
                     <RadzenTabsItem Text="Source">
@@ -106,11 +109,7 @@
                     </RadzenTabsItem>
 
                     <RadzenTabsItem Text="Tools">
-                        <ToolsTab PermissionRequests="@snapshot.PermissionRequests"
-                                  Events="@snapshot.ToolEvents"
-                                  Busy="@busy"
-                                  DenyPermission="@DenyPermissionRequest"
-                                  CancelPermission="@CancelPermissionRequest" />
+                        <OutputTab Events="@snapshot.ToolEvents" EmptyText="No tool events yet." />
                     </RadzenTabsItem>
                 </Tabs>
             </RadzenTabs>

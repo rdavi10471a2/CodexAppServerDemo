@@ -1,3 +1,4 @@
+@using CodexAppServerBlazor.Services
 @inject IJSRuntime JS
 @implements IAsyncDisposable
 
@@ -36,18 +37,59 @@
 
         <div class="stream-splitter" @ref="streamSplitter" title="Drag to resize history and current turn" aria-hidden="true"></div>
 
-        <aside class="current-turn-panel" @ref="currentTurnPanel" aria-label="Current turn stream">
-            <div class="current-turn-header">Current Turn</div>
-            <div class="current-turn-body" @ref="currentTurnBody">
-                @if (string.IsNullOrWhiteSpace(CurrentTurnHtml))
+        <aside class="current-turn-panel" @ref="currentTurnPanel" aria-label="Current turn stream and agent requests">
+            <section class="turn-stream-region">
+                <div class="current-turn-header">Current Turn</div>
+                <div class="current-turn-body" @ref="currentTurnBody">
+                    @if (string.IsNullOrWhiteSpace(CurrentTurnHtml))
+                    {
+                        <div class="current-turn-empty">Current turn stream will appear here.</div>
+                    }
+                    else
+                    {
+                        <div class="current-turn-markdown">@((MarkupString)CurrentTurnHtml)</div>
+                    }
+                </div>
+            </section>
+
+            <section class="agent-request-region" aria-label="Agent actions">
+                <div class="agent-request-header">
+                    <span>Agent Actions</span>
+                    <strong>@PendingRequests.Count pending</strong>
+                </div>
+
+                @if (PendingRequests.Count == 0)
                 {
-                    <div class="current-turn-empty">Current turn stream will appear here.</div>
+                    <div class="agent-request-empty">Permission and elicitation actions will appear here.</div>
                 }
                 else
                 {
-                    <div class="current-turn-markdown">@((MarkupString)CurrentTurnHtml)</div>
+                    <div class="agent-request-list">
+                        @foreach (CodexPermissionRequest request in PendingRequests)
+                        {
+                            <article class="agent-request-card">
+                                <div class="agent-request-main">
+                                    <span>@request.Method</span>
+                                    <strong>@request.Summary</strong>
+                                    <code>#@request.RequestId</code>
+                                </div>
+                                <div class="agent-request-actions">
+                                    <RadzenButton Text="Deny"
+                                                  ButtonStyle="ButtonStyle.Light"
+                                                  Size="ButtonSize.Small"
+                                                  Disabled="@Busy"
+                                                  Click="@(() => DenyPermission.InvokeAsync(request.RequestId))" />
+                                    <RadzenButton Text="Cancel Turn"
+                                                  ButtonStyle="ButtonStyle.Danger"
+                                                  Size="ButtonSize.Small"
+                                                  Disabled="@Busy"
+                                                  Click="@(() => CancelPermission.InvokeAsync(request.RequestId))" />
+                                </div>
+                            </article>
+                        }
+                    </div>
                 }
-            </div>
+            </section>
         </aside>
     </div>
 
@@ -77,6 +119,9 @@
     public string CurrentTurnHtml { get; set; } = string.Empty;
 
     [Parameter]
+    public IReadOnlyList<CodexPermissionRequest> PermissionRequests { get; set; } = [];
+
+    [Parameter]
     public string ChatDraft { get; set; } = string.Empty;
 
     [Parameter]
@@ -94,7 +139,17 @@
     [Parameter]
     public EventCallback ClearHistory { get; set; }
 
+    [Parameter]
+    public EventCallback<int> DenyPermission { get; set; }
+
+    [Parameter]
+    public EventCallback<int> CancelPermission { get; set; }
+
     private bool HasTranscript => !string.IsNullOrWhiteSpace(TranscriptText);
+    private IReadOnlyList<CodexPermissionRequest> PendingRequests =>
+        PermissionRequests
+            .Where(request => request.Status.Equals("pending", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
 
     private ElementReference assistantLayout;
     private ElementReference assistantMain;

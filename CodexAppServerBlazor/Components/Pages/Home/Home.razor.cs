@@ -39,8 +39,8 @@ public partial class Home : IDisposable, IAsyncDisposable
     private string? selectedTestSourcePath;
     private int? selectedTestSourceLine;
     private string model = "gpt-5.4";
-    private string approvalPolicy = "never";
-    private string sandbox = "danger-full-access";
+    private string approvalPolicy = "on-request";
+    private string sandbox = "read-only";
     private string mcpUrl = McpHostFactory.DefaultLocalMcpUrl;
     private readonly List<TranscriptMessage> chatMessages = [];
     private string chatDraft = "Inspect the current workspace. Start with discovery, propose the next safe step, and do not edit files unless explicitly asked.";

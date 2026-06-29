@@ -6,8 +6,6 @@ namespace CodexAppServerBlazor.Services;
 public sealed class CodexConnectionService : IAsyncDisposable
 {
     private const int MaxEvents = 500;
-    private const string SupportedApprovalPolicy = "never";
-    private const string SupportedSandbox = "danger-full-access";
 
     private readonly object gate = new();
     private readonly SemaphoreSlim operationGate = new(1, 1);
@@ -135,6 +133,8 @@ public sealed class CodexConnectionService : IAsyncDisposable
                 activeClient,
                 repoRoot,
                 model,
+                approvalPolicy,
+                sandbox,
                 sendInitialContext: true,
                 cancellationToken);
         }
@@ -166,6 +166,8 @@ public sealed class CodexConnectionService : IAsyncDisposable
                     activeClient,
                     repoRoot,
                     model,
+                    approvalPolicy,
+                    sandbox,
                     sendInitialContext: true,
                     cancellationToken);
             }
@@ -185,7 +187,14 @@ public sealed class CodexConnectionService : IAsyncDisposable
 
             ClearTurnOutput();
             MarkTurnRunning();
-            await activeClient.StartTurnAsync(prompt, cancellationToken);
+            await activeClient.StartTurnAsync(
+                prompt,
+                repoRoot,
+                model,
+                NormalizeApprovalPolicy(approvalPolicy),
+                NormalizeSandbox(sandbox),
+                cancellationToken);
+            AddEvent(statusEvents, "TurnPolicy", "ok", "codex", $"Turn policy set to approval={NormalizeApprovalPolicy(approvalPolicy)}, sandbox={NormalizeSandbox(sandbox)}, reviewer=user.");
         }
         finally
         {
@@ -236,6 +245,8 @@ public sealed class CodexConnectionService : IAsyncDisposable
         CodexAppServerClient activeClient,
         string repoRoot,
         string model,
+        string approvalPolicy,
+        string sandbox,
         bool sendInitialContext,
         CancellationToken cancellationToken)
     {
@@ -243,10 +254,10 @@ public sealed class CodexConnectionService : IAsyncDisposable
         await activeClient.StartThreadAsync(
             repoRoot,
             model,
-            SupportedApprovalPolicy,
-            SupportedSandbox,
+            NormalizeApprovalPolicy(approvalPolicy),
+            NormalizeSandbox(sandbox),
             cancellationToken);
-        AddEvent(statusEvents, "ThreadPolicy", "ok", "codex", $"Thread policy forced to approval={SupportedApprovalPolicy}, sandbox={SupportedSandbox}.");
+        AddEvent(statusEvents, "ThreadPolicy", "ok", "codex", $"Thread policy set to approval={NormalizeApprovalPolicy(approvalPolicy)}, sandbox={NormalizeSandbox(sandbox)}.");
 
         if (!sendInitialContext)
         {
@@ -259,7 +270,14 @@ public sealed class CodexConnectionService : IAsyncDisposable
         {
             ClearTurnOutput();
             MarkTurnRunning();
-            await activeClient.StartTurnAsync(initialPrompt, cancellationToken);
+            await activeClient.StartTurnAsync(
+                initialPrompt,
+                repoRoot,
+                model,
+                NormalizeApprovalPolicy(approvalPolicy),
+                NormalizeSandbox(sandbox),
+                cancellationToken);
+            AddEvent(statusEvents, "TurnPolicy", "ok", "codex", $"Initial turn policy set to approval={NormalizeApprovalPolicy(approvalPolicy)}, sandbox={NormalizeSandbox(sandbox)}, reviewer=user.");
         }
     }
 
@@ -500,6 +518,29 @@ public sealed class CodexConnectionService : IAsyncDisposable
         }
 
         return false;
+    }
+
+    private static string NormalizeApprovalPolicy(string value)
+    {
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "untrusted" => "untrusted",
+            "on-failure" => "on-failure",
+            "on-request" => "on-request",
+            "never" => "never",
+            _ => "on-request"
+        };
+    }
+
+    private static string NormalizeSandbox(string value)
+    {
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "read-only" => "read-only",
+            "workspace-write" => "workspace-write",
+            "danger-full-access" => "danger-full-access",
+            _ => "read-only"
+        };
     }
 
     public async ValueTask DisposeAsync()
