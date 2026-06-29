@@ -10,8 +10,14 @@ public sealed class CodexAppServerClient : IAsyncDisposable
 {
     private readonly ConcurrentDictionary<int, TaskCompletionSource<JsonRpcResponse>> _pending = new();
     private readonly CancellationTokenSource _cts = new();
+    private readonly Func<string, CancellationToken, Task>? rawSender;
     private Process? _process;
     private int _nextId;
+
+    public CodexAppServerClient(Func<string, CancellationToken, Task>? rawSender = null)
+    {
+        this.rawSender = rawSender;
+    }
 
     public event Action<string>? RawProtocol;
     public event Action<string>? LogLine;
@@ -19,6 +25,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
     public event Action<TelemetryEvent>? Telemetry;
     public event Action<ToolEvent>? ToolActivity;
     public event Action<StatusEvent>? Status;
+    public event Action<CodexServerRequestEvent>? ServerRequest;
     public event Action<int>? Exited;
 
     public bool IsStarted => _process is { HasExited: false };
@@ -161,18 +168,36 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         }, cancellationToken);
     }
 
+    public Task RespondToServerRequestAsync(
+        int requestId,
+        object result,
+        CancellationToken cancellationToken = default)
+    {
+        return SendRawAsync(new
+        {
+            id = requestId,
+            result
+        }, cancellationToken);
+    }
+
     private async Task SendRawAsync(object message, CancellationToken cancellationToken)
     {
-        var process = _process ?? throw new InvalidOperationException("Codex app-server is not started.");
-        if (process.HasExited)
-            throw new InvalidOperationException("Codex app-server has exited.");
-
         var json = JsonSerializer.Serialize(message, new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         });
 
         RawProtocol?.Invoke("CLIENT: " + json);
+        if (rawSender is not null)
+        {
+            await rawSender(json, cancellationToken);
+            return;
+        }
+
+        var process = _process ?? throw new InvalidOperationException("Codex app-server is not started.");
+        if (process.HasExited)
+            throw new InvalidOperationException("Codex app-server has exited.");
+
         await process.StandardInput.WriteLineAsync(json.AsMemory(), cancellationToken);
         await process.StandardInput.FlushAsync(cancellationToken);
     }
@@ -192,7 +217,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
                     continue;
 
                 RawProtocol?.Invoke("SERVER: " + line);
-                DispatchServerMessage(line);
+                HandleServerMessage(line);
             }
         }
         catch (OperationCanceledException)
@@ -234,7 +259,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         }
     }
 
-    private void DispatchServerMessage(string line)
+    public void HandleServerMessage(string line)
     {
         JsonNode? node;
         try
@@ -250,7 +275,16 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         if (node is null)
             return;
 
+        var method = node["method"]?.GetValue<string>();
         var idNode = node["id"];
+        if (!string.IsNullOrWhiteSpace(method)
+            && idNode is not null
+            && idNode.GetValueKind() == JsonValueKind.Number)
+        {
+            EmitServerRequest(idNode.GetValue<int>(), method, node, line);
+            return;
+        }
+
         if (idNode is not null && idNode.GetValueKind() == JsonValueKind.Number)
         {
             var id = idNode.GetValue<int>();
@@ -267,9 +301,50 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             return;
         }
 
-        var method = node["method"]?.GetValue<string>();
         if (!string.IsNullOrWhiteSpace(method))
             ClassifyNotification(method, node);
+    }
+
+    private void EmitServerRequest(int requestId, string method, JsonNode node, string rawJson)
+    {
+        string summary = BuildServerRequestSummary(method, node);
+        ServerRequest?.Invoke(new CodexServerRequestEvent(
+            requestId,
+            method,
+            summary,
+            rawJson));
+        Status?.Invoke(new StatusEvent(method, summary));
+    }
+
+    private static string BuildServerRequestSummary(string method, JsonNode node)
+    {
+        JsonNode? parameters = node["params"];
+        string? reason = GetStringValue(parameters?["reason"]);
+        string? cwd = GetStringValue(parameters?["cwd"]);
+        string? command = GetStringValue(parameters?["command"]);
+
+        if (!string.IsNullOrWhiteSpace(reason))
+        {
+            return string.IsNullOrWhiteSpace(cwd)
+                ? reason
+                : $"{reason} (cwd: {cwd})";
+        }
+
+        if (!string.IsNullOrWhiteSpace(command))
+        {
+            return $"Approval requested for command: {command}";
+        }
+
+        return parameters is null
+            ? $"Server request: {method}"
+            : $"Server request: {method}: {parameters.ToJsonString(new JsonSerializerOptions { WriteIndented = false })}";
+    }
+
+    private static string? GetStringValue(JsonNode? node)
+    {
+        return node is not null && node.GetValueKind() == JsonValueKind.String
+            ? node.GetValue<string>()
+            : null;
     }
 
     private void ClassifyResponse(JsonRpcResponse response)

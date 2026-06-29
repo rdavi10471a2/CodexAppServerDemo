@@ -1,0 +1,68 @@
+@using CodexAppServerBlazor.Services
+
+<div class="tools-tab">
+    <section class="permission-shell">
+        <header>
+            <div>
+                <span>Permission Requests</span>
+                <strong>@PendingRequests.Count pending</strong>
+            </div>
+        </header>
+
+        @if (PendingRequests.Count == 0)
+        {
+            <div class="empty-permissions">No pending agent permission requests.</div>
+        }
+        else
+        {
+            <div class="permission-list">
+                @foreach (CodexPermissionRequest request in PendingRequests)
+                {
+                    <article class="permission-card">
+                        <div class="permission-main">
+                            <span>@request.Method</span>
+                            <strong>@request.Summary</strong>
+                            <code>#@request.RequestId</code>
+                        </div>
+                        <div class="permission-actions">
+                            <RadzenButton Text="Deny"
+                                          ButtonStyle="ButtonStyle.Light"
+                                          Size="ButtonSize.Small"
+                                          Disabled="@Busy"
+                                          Click="@(() => DenyPermission.InvokeAsync(request.RequestId))" />
+                            <RadzenButton Text="Cancel Turn"
+                                          ButtonStyle="ButtonStyle.Danger"
+                                          Size="ButtonSize.Small"
+                                          Disabled="@Busy"
+                                          Click="@(() => CancelPermission.InvokeAsync(request.RequestId))" />
+                        </div>
+                    </article>
+                }
+            </div>
+        }
+    </section>
+
+    <OutputTab Events="@Events" EmptyText="No tool events yet." />
+</div>
+
+@code {
+    [Parameter]
+    public IReadOnlyList<CodexPermissionRequest> PermissionRequests { get; set; } = [];
+
+    [Parameter]
+    public IReadOnlyList<CodexOutputEvent> Events { get; set; } = [];
+
+    [Parameter]
+    public bool Busy { get; set; }
+
+    [Parameter]
+    public EventCallback<int> DenyPermission { get; set; }
+
+    [Parameter]
+    public EventCallback<int> CancelPermission { get; set; }
+
+    private IReadOnlyList<CodexPermissionRequest> PendingRequests =>
+        PermissionRequests
+            .Where(request => request.Status.Equals("pending", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+}

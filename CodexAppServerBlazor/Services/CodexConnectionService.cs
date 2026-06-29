@@ -13,6 +13,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
     private readonly SemaphoreSlim operationGate = new(1, 1);
     private readonly WorkspaceState workspaceState;
     private readonly SourceWorkspaceService sourceWorkspaceService;
+    private readonly PermissionRequestService permissionRequestService = new();
     private CodexAppServerClient? client;
     private string assistantText = string.Empty;
     private bool isTurnRunning;
@@ -43,6 +44,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
                 StatusEvents: statusEvents.ToArray(),
                 TelemetryEvents: telemetryEvents.ToArray(),
                 ToolEvents: toolEvents.ToArray(),
+                PermissionRequests: permissionRequestService.GetSnapshot(),
                 RawLines: rawLines.ToArray());
         }
     }
@@ -68,6 +70,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
             client.Telemetry += OnTelemetry;
             client.ToolActivity += e => AddEvent(toolEvents, e.EventType, e.Status, e.Name, e.Detail ?? string.Empty);
             client.Status += OnStatus;
+            client.ServerRequest += OnServerRequest;
             client.Exited += code => AddEvent(statusEvents, "ServerExited", code == 0 ? "ok" : "error", "codex app-server", $"Exited with code {code}.");
 
             await client.StartAsync(codexExe, cancellationToken);
@@ -100,6 +103,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
                 assistantText = string.Empty;
                 telemetryEvents.Clear();
                 toolEvents.Clear();
+                permissionRequestService.Clear();
                 isTurnRunning = false;
             }
 
@@ -192,6 +196,30 @@ public sealed class CodexConnectionService : IAsyncDisposable
     public void ReportStatus(string type, string? status, string source, string detail)
     {
         AddEvent(statusEvents, type, status, source, detail);
+    }
+
+    public async Task DenyPermissionRequestAsync(
+        int requestId,
+        bool cancelTurn,
+        CancellationToken cancellationToken)
+    {
+        CodexAppServerClient activeClient = GetStartedClient();
+        CodexPermissionRequest? request = permissionRequestService.Resolve(
+            requestId,
+            cancelTurn ? "cancelled" : "denied");
+        if (request is null)
+        {
+            throw new InvalidOperationException($"No pending permission request found for id {requestId}.");
+        }
+
+        object response = PermissionRequestService.CreateDenyResponse(request.Method, cancelTurn);
+        await activeClient.RespondToServerRequestAsync(request.RequestId, response, cancellationToken);
+        AddEvent(
+            statusEvents,
+            "PermissionResponse",
+            request.Status,
+            "coding-services",
+            $"Responded to {request.Method} with {PermissionRequestService.DescribeResponse(response)}");
     }
 
     private CodexAppServerClient GetStartedClient()
@@ -361,6 +389,17 @@ public sealed class CodexConnectionService : IAsyncDisposable
         AddEvent(statusEvents, e.EventType, null, "codex", e.Summary);
     }
 
+    private void OnServerRequest(CodexServerRequestEvent e)
+    {
+        CodexPermissionRequest request = permissionRequestService.Add(e);
+        AddEvent(
+            statusEvents,
+            "PermissionRequest",
+            "pending",
+            "codex app-server",
+            $"{request.Method} #{request.RequestId}: {request.Summary}");
+    }
+
     private void OnTelemetry(TelemetryEvent e)
     {
         lock (gate)
@@ -483,6 +522,7 @@ public sealed record CodexConnectionSnapshot(
     IReadOnlyList<CodexOutputEvent> StatusEvents,
     IReadOnlyList<CodexOutputEvent> TelemetryEvents,
     IReadOnlyList<CodexOutputEvent> ToolEvents,
+    IReadOnlyList<CodexPermissionRequest> PermissionRequests,
     IReadOnlyList<string> RawLines);
 
 public sealed record CodexOutputEvent(

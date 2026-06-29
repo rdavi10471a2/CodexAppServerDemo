@@ -24,6 +24,7 @@ public partial class Home : IDisposable, IAsyncDisposable
         [],
         [],
         [],
+        [],
         []);
 
     private DirectoryBrowserSnapshot directorySnapshot = DirectoryBrowserSnapshot.Empty;
@@ -152,6 +153,22 @@ public partial class Home : IDisposable, IAsyncDisposable
             sandbox,
             CancellationToken.None));
         RenderAssistantSnapshot(isStreaming: snapshot.IsTurnRunning);
+    }
+
+    private async Task DenyPermissionRequest(int requestId)
+    {
+        await RunCommandAsync(() => ConnectionService.DenyPermissionRequestAsync(
+            requestId,
+            cancelTurn: false,
+            CancellationToken.None));
+    }
+
+    private async Task CancelPermissionRequest(int requestId)
+    {
+        await RunCommandAsync(() => ConnectionService.DenyPermissionRequestAsync(
+            requestId,
+            cancelTurn: true,
+            CancellationToken.None));
     }
 
     private async Task BrowseForDirectory()

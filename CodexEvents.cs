@@ -22,3 +22,9 @@ public sealed record ToolEvent(
 public sealed record StatusEvent(
     string EventType,
     string Summary);
+
+public sealed record CodexServerRequestEvent(
+    int RequestId,
+    string Method,
+    string Summary,
+    string RawJson);
