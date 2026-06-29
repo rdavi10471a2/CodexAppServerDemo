@@ -236,47 +236,16 @@ export function scrollElementToBottom(element) {
         return;
     }
 
-    window.requestAnimationFrame(() => {
-        element.scrollTop = element.scrollHeight;
-    });
-}
-
-export function scrollIframeToBottom(iframe) {
-    if (!iframe) {
-        return;
-    }
-
     const scroll = (attempt = 0) => {
         window.requestAnimationFrame(() => {
-            const documentElement = iframe.contentDocument?.documentElement;
-            const body = iframe.contentDocument?.body;
-            const target = body || documentElement;
-            if (!target) {
-                if (attempt < 8) {
-                    window.setTimeout(() => scroll(attempt + 1), 40);
-                }
-                return;
-            }
-
-            const height = Math.max(
-                body?.scrollHeight || 0,
-                documentElement?.scrollHeight || 0);
-            target.scrollTop = height;
-            if (documentElement) {
-                documentElement.scrollTop = height;
-            }
-            if (attempt < 8) {
+            element.scrollTop = element.scrollHeight;
+            if (attempt < 4) {
                 window.setTimeout(() => scroll(attempt + 1), 40);
             }
         });
     };
 
-    if (iframe.contentDocument?.readyState === "complete") {
-        scroll();
-        return;
-    }
-
-    iframe.addEventListener("load", scroll, { once: true });
+    scroll();
 }
 
 export async function copyTextToClipboard(text) {

@@ -27,11 +27,12 @@
                               Disabled="@(!HasTranscript || Busy)" />
             </div>
         </div>
-        <iframe class="transcript-webview"
-                @ref="transcriptWebView"
-                title="Completed Codex transcript"
-                sandbox="allow-scripts"
-                srcdoc="@TranscriptHtml"></iframe>
+        <div class="transcript-view"
+             @ref="transcriptView"
+             role="log"
+             aria-label="Completed Codex transcript">
+            <div class="transcript-body">@((MarkupString)TranscriptBodyHtml)</div>
+        </div>
     </section>
 
     <div class="stream-splitter" @ref="streamSplitter" title="Drag to resize chat and agent rail" aria-hidden="true"></div>
@@ -134,6 +135,9 @@
     public string TranscriptHtml { get; set; } = string.Empty;
 
     [Parameter]
+    public string TranscriptBodyHtml { get; set; } = string.Empty;
+
+    [Parameter]
     public string TranscriptText { get; set; } = string.Empty;
 
     [Parameter]
@@ -183,7 +187,7 @@
 
     private ElementReference assistantLayout;
     private ElementReference transcriptPanel;
-    private ElementReference transcriptWebView;
+    private ElementReference transcriptView;
     private ElementReference streamSplitter;
     private ElementReference currentTurnPanel;
     private ElementReference turnStreamRegion;
@@ -252,7 +256,7 @@
         }
 
         await resizeModule.InvokeVoidAsync("scrollElementToBottom", currentTurnBody);
-        await resizeModule.InvokeVoidAsync("scrollIframeToBottom", transcriptWebView);
+        await resizeModule.InvokeVoidAsync("scrollElementToBottom", transcriptView);
     }
 
     public async ValueTask DisposeAsync()

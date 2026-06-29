@@ -14,6 +14,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
     private readonly PermissionRequestService permissionRequestService = new();
     private CodexAppServerClient? client;
     private string assistantText = string.Empty;
+    private string currentTurnNoticeText = string.Empty;
     private bool isTurnRunning;
     private CodexTelemetrySummary telemetrySummary = CodexTelemetrySummary.Empty;
     private readonly List<CodexOutputEvent> statusEvents = [];
@@ -38,6 +39,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
                 ThreadId: client?.ThreadId,
                 IsTurnRunning: isTurnRunning,
                 AssistantText: assistantText,
+                CurrentTurnNoticeText: currentTurnNoticeText,
                 TelemetrySummary: telemetrySummary,
                 StatusEvents: statusEvents.ToArray(),
                 TelemetryEvents: telemetryEvents.ToArray(),
@@ -99,6 +101,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
             lock (gate)
             {
                 assistantText = string.Empty;
+                currentTurnNoticeText = string.Empty;
                 telemetryEvents.Clear();
                 toolEvents.Clear();
                 permissionRequestService.Clear();
@@ -223,6 +226,9 @@ public sealed class CodexConnectionService : IAsyncDisposable
 
         object response = PermissionRequestService.CreateDenyResponse(request.Method, cancelTurn);
         await activeClient.RespondToServerRequestAsync(request.RequestId, response, cancellationToken);
+        AddCurrentTurnNotice(cancelTurn
+            ? $"Cancelled request #{request.RequestId}; waiting for the turn to stop."
+            : $"Denied request #{request.RequestId}; waiting for the agent to continue.");
         AddEvent(
             statusEvents,
             "PermissionResponse",
@@ -250,6 +256,12 @@ public sealed class CodexConnectionService : IAsyncDisposable
 
         object response = PermissionRequestService.CreateApproveResponse(request.Method, request.RawJson, scope);
         await activeClient.RespondToServerRequestAsync(request.RequestId, response, cancellationToken);
+        AddCurrentTurnNotice(scope switch
+        {
+            PermissionApprovalScope.Session => $"Approved request #{request.RequestId} for this session; waiting for the command result.",
+            PermissionApprovalScope.Persistent => $"Approved request #{request.RequestId} always; waiting for the command result.",
+            _ => $"Approved request #{request.RequestId}; waiting for the command result."
+        });
         AddEvent(
             statusEvents,
             "PermissionResponse",
@@ -460,8 +472,22 @@ public sealed class CodexConnectionService : IAsyncDisposable
         lock (gate)
         {
             assistantText = string.Empty;
+            currentTurnNoticeText = string.Empty;
             telemetryEvents.Clear();
             toolEvents.Clear();
+        }
+
+        Changed?.Invoke();
+    }
+
+    private void AddCurrentTurnNotice(string detail)
+    {
+        lock (gate)
+        {
+            string line = $"[{DateTime.Now:HH:mm:ss}] {detail}";
+            currentTurnNoticeText = string.IsNullOrWhiteSpace(currentTurnNoticeText)
+                ? line
+                : $"{currentTurnNoticeText}{Environment.NewLine}{line}";
         }
 
         Changed?.Invoke();
@@ -586,6 +612,7 @@ public sealed record CodexConnectionSnapshot(
     string? ThreadId,
     bool IsTurnRunning,
     string AssistantText,
+    string CurrentTurnNoticeText,
     CodexTelemetrySummary TelemetrySummary,
     IReadOnlyList<CodexOutputEvent> StatusEvents,
     IReadOnlyList<CodexOutputEvent> TelemetryEvents,

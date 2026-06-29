@@ -272,14 +272,115 @@
     background: #ffffff;
 }
 
-.transcript-webview {
-    display: block;
+.transcript-view {
     flex: 1 1 auto;
     width: 100%;
-    height: auto;
     min-height: 0;
-    border: 0;
+    overflow: auto;
     background: #ffffff;
+}
+
+.transcript-body {
+    padding: 14px;
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.45;
+    color: #16202c;
+}
+
+.transcript-body ::deep .empty {
+    display: grid;
+    min-height: 100%;
+    place-content: center;
+    gap: 8px;
+    color: #6c7d8f;
+    text-align: center;
+}
+
+.transcript-body ::deep .empty-icon {
+    font-size: 34px;
+}
+
+.transcript-body ::deep .message {
+    max-width: 1180px;
+    margin: 0 0 12px;
+    border: 1px solid #d7e1ea;
+    border-radius: 7px;
+    background: #ffffff;
+    overflow: hidden;
+}
+
+.transcript-body ::deep .message.user {
+    background: #f7fafc;
+}
+
+.transcript-body ::deep .message.assistant {
+    background: #ffffff;
+}
+
+.transcript-body ::deep .message-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    border-bottom: 1px solid #e4ebf1;
+    padding: 7px 10px;
+    color: #526a82;
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.transcript-body ::deep .message-body {
+    padding: 10px 12px;
+    overflow-wrap: anywhere;
+}
+
+.transcript-body ::deep .message-body p:first-child {
+    margin-top: 0;
+}
+
+.transcript-body ::deep .message-body p:last-child {
+    margin-bottom: 0;
+}
+
+.transcript-body ::deep .message-body ul,
+.transcript-body ::deep .message-body ol {
+    padding-left: 22px;
+}
+
+.transcript-body ::deep .message-body a {
+    color: #4169e1;
+    text-decoration: none;
+}
+
+.transcript-body ::deep .message-body a:hover {
+    text-decoration: underline;
+}
+
+.transcript-body ::deep code,
+.transcript-body ::deep pre {
+    font-family: Consolas, "Courier New", monospace;
+}
+
+.transcript-body ::deep code {
+    border-radius: 4px;
+    padding: 1px 4px;
+    background: #eef3f7;
+}
+
+.transcript-body ::deep pre {
+    overflow: auto;
+    border-radius: 6px;
+    padding: 10px;
+    background: #0f1722;
+    color: #d9e6f2;
+    white-space: pre;
+}
+
+.transcript-body ::deep pre code {
+    padding: 0;
+    background: transparent;
+    color: inherit;
 }
 
 .current-turn-body {

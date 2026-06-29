@@ -20,6 +20,7 @@ public partial class Home : IDisposable, IAsyncDisposable
         null,
         false,
         string.Empty,
+        string.Empty,
         CodexTelemetrySummary.Empty,
         [],
         [],
@@ -61,6 +62,7 @@ public partial class Home : IDisposable, IAsyncDisposable
         .Build();
 
     private string TranscriptHtml => BuildTranscriptHtml();
+    private string TranscriptBodyHtml => BuildTranscriptBodyHtml();
     private string TranscriptText => BuildTranscriptText();
     private string CurrentTurnHtml => RenderMarkdown(GetCurrentTurnText());
 
@@ -161,6 +163,10 @@ public partial class Home : IDisposable, IAsyncDisposable
             requestId,
             cancelTurn: false,
             CancellationToken.None));
+        if (errorMessage is null)
+        {
+            NotifyPermissionAction("Permission denied", "The agent can continue with a different approach.", NotificationSeverity.Warning);
+        }
     }
 
     private async Task ApprovePermissionRequest(int requestId)
@@ -169,6 +175,10 @@ public partial class Home : IDisposable, IAsyncDisposable
             requestId,
             PermissionApprovalScope.Turn,
             CancellationToken.None));
+        if (errorMessage is null)
+        {
+            NotifyPermissionAction("Permission granted", "The agent can continue this turn.", NotificationSeverity.Success);
+        }
     }
 
     private async Task ApprovePermissionRequestForSession(int requestId)
@@ -177,6 +187,10 @@ public partial class Home : IDisposable, IAsyncDisposable
             requestId,
             PermissionApprovalScope.Session,
             CancellationToken.None));
+        if (errorMessage is null)
+        {
+            NotifyPermissionAction("Permission granted for session", "Matching requests can continue for this session.", NotificationSeverity.Success);
+        }
     }
 
     private async Task ApprovePermissionRequestAlways(int requestId)
@@ -185,6 +199,10 @@ public partial class Home : IDisposable, IAsyncDisposable
             requestId,
             PermissionApprovalScope.Persistent,
             CancellationToken.None));
+        if (errorMessage is null)
+        {
+            NotifyPermissionAction("Permission granted always", "The proposed persistent rule was accepted.", NotificationSeverity.Success);
+        }
     }
 
     private async Task CancelPermissionRequest(int requestId)
@@ -193,6 +211,10 @@ public partial class Home : IDisposable, IAsyncDisposable
             requestId,
             cancelTurn: true,
             CancellationToken.None));
+        if (errorMessage is null)
+        {
+            NotifyPermissionAction("Turn cancelled", "The permission request was denied and the turn was interrupted.", NotificationSeverity.Warning);
+        }
     }
 
     private async Task BrowseForDirectory()
@@ -454,7 +476,55 @@ public partial class Home : IDisposable, IAsyncDisposable
     private string BuildTranscriptHtml()
     {
         var html = new StringBuilder();
-        html.Append("""
+        html.Append(GetTranscriptDocumentStart());
+        html.Append(BuildTranscriptBodyHtml());
+        html.Append("</body></html>");
+        return html.ToString();
+    }
+
+    private string BuildTranscriptBodyHtml()
+    {
+        var html = new StringBuilder();
+
+        if (chatMessages.Count == 0)
+        {
+            html.Append("""
+            <div class="empty">
+                <div class="empty-icon">□</div>
+                <div>Start a workspace conversation.</div>
+            </div>
+            """);
+        }
+        else
+        {
+            foreach (TranscriptMessage message in chatMessages)
+            {
+                if (message.IsStreaming)
+                {
+                    continue;
+                }
+
+                string role = message.IsUser ? "user" : "assistant";
+                string label = message.IsUser ? "You" : "Codex";
+                string timestamp = WebUtility.HtmlEncode(message.Timestamp.ToString("HH:mm:ss"));
+                html.Append("<article class=\"message ");
+                html.Append(role);
+                html.Append("\"><header class=\"message-header\"><span>");
+                html.Append(label);
+                html.Append("</span><span>");
+                html.Append(timestamp);
+                html.Append("</span></header><div class=\"message-body\">");
+                html.Append(RenderMarkdown(message.Content));
+                html.Append("</div></article>");
+            }
+        }
+
+        return html.ToString();
+    }
+
+    private static string GetTranscriptDocumentStart()
+    {
+        return """
         <!doctype html>
         <html>
         <head>
@@ -476,8 +546,13 @@ public partial class Home : IDisposable, IAsyncDisposable
             line-height: 1.45;
         }
         .empty {
-            display: grid;
             min-height: calc(100vh - 28px);
+        }
+        .transcript-body {
+            padding: 14px;
+        }
+        .empty {
+            display: grid;
             place-content: center;
             gap: 8px;
             color: #6c7d8f;
@@ -556,43 +631,7 @@ public partial class Home : IDisposable, IAsyncDisposable
         </style>
         </head>
         <body>
-        """);
-
-        if (chatMessages.Count == 0)
-        {
-            html.Append("""
-            <div class="empty">
-                <div class="empty-icon">□</div>
-                <div>Start a workspace conversation.</div>
-            </div>
-            """);
-        }
-        else
-        {
-            foreach (TranscriptMessage message in chatMessages)
-            {
-                if (message.IsStreaming)
-                {
-                    continue;
-                }
-
-                string role = message.IsUser ? "user" : "assistant";
-                string label = message.IsUser ? "You" : "Codex";
-                string timestamp = WebUtility.HtmlEncode(message.Timestamp.ToString("HH:mm:ss"));
-                html.Append("<article class=\"message ");
-                html.Append(role);
-                html.Append("\"><header class=\"message-header\"><span>");
-                html.Append(label);
-                html.Append("</span><span>");
-                html.Append(timestamp);
-                html.Append("</span></header><div class=\"message-body\">");
-                html.Append(RenderMarkdown(message.Content));
-                html.Append("</div></article>");
-            }
-        }
-
-        html.Append("</body></html>");
-        return html.ToString();
+        """;
     }
 
     private string BuildTranscriptText()
@@ -623,16 +662,34 @@ public partial class Home : IDisposable, IAsyncDisposable
 
     private string GetCurrentTurnText()
     {
+        var text = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(snapshot.CurrentTurnNoticeText))
+        {
+            text.AppendLine(snapshot.CurrentTurnNoticeText);
+            text.AppendLine();
+        }
+
         if (!string.IsNullOrWhiteSpace(activeAssistantMessageId))
         {
             TranscriptMessage? message = chatMessages.FirstOrDefault(candidate => candidate.Id == activeAssistantMessageId);
             if (message?.IsStreaming == true)
             {
-                return message.Content;
+                text.Append(message.Content);
             }
         }
 
-        return string.Empty;
+        return text.ToString();
+    }
+
+    private void NotifyPermissionAction(string summary, string detail, NotificationSeverity severity)
+    {
+        NotificationService.Notify(new NotificationMessage
+        {
+            Severity = severity,
+            Summary = summary,
+            Detail = detail,
+            Duration = 3500
+        });
     }
 
     private static string RenderMarkdown(string markdown)
