@@ -165,6 +165,51 @@ export function attachStreamSplitter(layout, history, stream, splitter) {
     });
 }
 
+export function attachAgentSplitter(panel, stream, actions, splitter) {
+    if (!panel || !stream || !actions || !splitter || splitter.dataset.resizeAttached === "true") {
+        return;
+    }
+
+    splitter.dataset.resizeAttached = "true";
+
+    let startY = 0;
+    let startStreamHeight = 0;
+    let startActionsHeight = 0;
+
+    const minStream = 160;
+    const minActions = 120;
+
+    function onPointerMove(event) {
+        const delta = event.clientY - startY;
+        const nextStream = Math.max(minStream, startStreamHeight + delta);
+        const nextActions = Math.max(minActions, startActionsHeight - delta);
+        stream.style.flexBasis = `${nextStream}px`;
+        stream.style.height = `${nextStream}px`;
+        actions.style.flexBasis = `${nextActions}px`;
+        actions.style.height = `${nextActions}px`;
+    }
+
+    function onPointerUp() {
+        splitter.classList.remove("dragging");
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        window.removeEventListener("pointermove", onPointerMove);
+        window.removeEventListener("pointerup", onPointerUp);
+    }
+
+    splitter.addEventListener("pointerdown", event => {
+        event.preventDefault();
+        startY = event.clientY;
+        startStreamHeight = stream.getBoundingClientRect().height;
+        startActionsHeight = actions.getBoundingClientRect().height;
+        splitter.classList.add("dragging");
+        document.body.style.cursor = "row-resize";
+        document.body.style.userSelect = "none";
+        window.addEventListener("pointermove", onPointerMove);
+        window.addEventListener("pointerup", onPointerUp);
+    });
+}
+
 export function attachComposerAutoScroll(textarea) {
     if (!textarea || textarea.dataset.autoScrollAttached === "true") {
         return;
@@ -201,12 +246,15 @@ export function scrollIframeToBottom(iframe) {
         return;
     }
 
-    const scroll = () => {
+    const scroll = (attempt = 0) => {
         window.requestAnimationFrame(() => {
             const documentElement = iframe.contentDocument?.documentElement;
             const body = iframe.contentDocument?.body;
             const target = body || documentElement;
             if (!target) {
+                if (attempt < 8) {
+                    window.setTimeout(() => scroll(attempt + 1), 40);
+                }
                 return;
             }
 
@@ -216,6 +264,9 @@ export function scrollIframeToBottom(iframe) {
             target.scrollTop = height;
             if (documentElement) {
                 documentElement.scrollTop = height;
+            }
+            if (attempt < 8) {
+                window.setTimeout(() => scroll(attempt + 1), 40);
             }
         });
     };

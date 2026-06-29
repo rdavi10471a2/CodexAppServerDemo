@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace CodexAppServerBlazor.Services;
 
@@ -23,6 +24,8 @@ public sealed class PermissionRequestService
             Method: serverRequest.Method,
             Summary: serverRequest.Summary,
             RawJson: serverRequest.RawJson,
+            SupportsSessionApproval: SupportsSessionApproval(serverRequest.Method),
+            SupportsPersistentApproval: SupportsPersistentApproval(serverRequest.Method, serverRequest.RawJson),
             Status: "pending",
             CreatedAt: DateTimeOffset.Now,
             ResolvedAt: null);
@@ -107,6 +110,125 @@ public sealed class PermissionRequestService
         };
     }
 
+    public static object CreateApproveResponse(string method, string rawJson, PermissionApprovalScope scope)
+    {
+        if (method.Equals("mcpServer/elicitation/request", StringComparison.OrdinalIgnoreCase))
+        {
+            return new
+            {
+                action = "accept",
+                content = new { }
+            };
+        }
+
+        if (method.Equals("item/permissions/requestApproval", StringComparison.OrdinalIgnoreCase))
+        {
+            JsonNode? requestedPermissions = TryReadRequestedPermissions(rawJson);
+            return new
+            {
+                permissions = requestedPermissions ?? new JsonObject(),
+                scope = scope == PermissionApprovalScope.Session ? "session" : "turn",
+                strictAutoReview = true
+            };
+        }
+
+        if (method.Equals("item/commandExecution/requestApproval", StringComparison.OrdinalIgnoreCase))
+        {
+            if (scope == PermissionApprovalScope.Persistent)
+            {
+                JsonArray? amendment = TryReadProposedExecpolicyAmendment(rawJson);
+                if (amendment is not null)
+                {
+                    return new
+                    {
+                        decision = new
+                        {
+                            acceptWithExecpolicyAmendment = new
+                            {
+                                execpolicy_amendment = amendment
+                            }
+                        }
+                    };
+                }
+            }
+
+            return new
+            {
+                decision = scope == PermissionApprovalScope.Session ? "acceptForSession" : "accept"
+            };
+        }
+
+        if (method.Equals("item/fileChange/requestApproval", StringComparison.OrdinalIgnoreCase))
+        {
+            return new
+            {
+                decision = scope == PermissionApprovalScope.Session ? "acceptForSession" : "accept"
+            };
+        }
+
+        if (method.Equals("execCommandApproval", StringComparison.OrdinalIgnoreCase) ||
+            method.Equals("applyPatchApproval", StringComparison.OrdinalIgnoreCase))
+        {
+            return new
+            {
+                decision = scope == PermissionApprovalScope.Session ? "approved_for_session" : "approved"
+            };
+        }
+
+        return new
+        {
+            decision = "accept"
+        };
+    }
+
+    private static bool SupportsSessionApproval(string method)
+    {
+        return method.Equals("item/commandExecution/requestApproval", StringComparison.OrdinalIgnoreCase) ||
+            method.Equals("item/permissions/requestApproval", StringComparison.OrdinalIgnoreCase) ||
+            method.Equals("item/fileChange/requestApproval", StringComparison.OrdinalIgnoreCase) ||
+            method.Equals("execCommandApproval", StringComparison.OrdinalIgnoreCase) ||
+            method.Equals("applyPatchApproval", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool SupportsPersistentApproval(string method, string rawJson)
+    {
+        if (!method.Equals("item/commandExecution/requestApproval", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        JsonArray? amendment = TryReadProposedExecpolicyAmendment(rawJson);
+        return amendment is not null && amendment.Count > 0;
+    }
+
+    private static JsonNode? TryReadRequestedPermissions(string rawJson)
+    {
+        try
+        {
+            JsonNode? request = JsonNode.Parse(rawJson);
+            JsonNode? permissions = request?["params"]?["permissions"];
+            return permissions?.DeepClone();
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static JsonArray? TryReadProposedExecpolicyAmendment(string rawJson)
+    {
+        try
+        {
+            JsonNode? request = JsonNode.Parse(rawJson);
+            JsonArray? amendment = request?["params"]?["proposedExecpolicyAmendment"]?.AsArray();
+            return amendment?.DeepClone().AsArray();
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     public static string DescribeResponse(object response)
     {
         return JsonSerializer.Serialize(response, new JsonSerializerOptions
@@ -121,6 +243,15 @@ public sealed record CodexPermissionRequest(
     string Method,
     string Summary,
     string RawJson,
+    bool SupportsSessionApproval,
+    bool SupportsPersistentApproval,
     string Status,
     DateTimeOffset CreatedAt,
     DateTimeOffset? ResolvedAt);
+
+public enum PermissionApprovalScope
+{
+    Turn,
+    Session,
+    Persistent
+}

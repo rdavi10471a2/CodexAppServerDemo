@@ -1,6 +1,7 @@
 .assistant-layout {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: minmax(520px, 1fr) 12px minmax(340px, 28%);
+    grid-template-rows: minmax(220px, 1fr) 12px minmax(160px, 214px);
     gap: 8px;
     height: calc(98vh - 190px);
     min-height: 0;
@@ -19,7 +20,8 @@
 .transcript-panel {
     display: flex;
     flex-direction: column;
-    flex: 1 1 0;
+    grid-column: 1;
+    grid-row: 1;
     min-height: 0;
     border: 1px solid #d7e1ea;
     border-radius: 7px;
@@ -55,6 +57,8 @@
 .current-turn-panel {
     display: flex;
     flex-direction: column;
+    grid-column: 3;
+    grid-row: 1 / 4;
     min-width: 280px;
     min-height: 0;
     border: 1px solid #d7e1ea;
@@ -73,10 +77,9 @@
 
 .agent-request-region {
     display: flex;
-    flex: 0 0 220px;
+    flex: 0 0 240px;
     flex-direction: column;
-    min-height: 150px;
-    border-top: 1px solid #d7e1ea;
+    min-height: 120px;
     background: #fbfdff;
 }
 
@@ -163,6 +166,8 @@
 
 .stream-splitter {
     position: relative;
+    grid-column: 2;
+    grid-row: 1 / 4;
     min-width: 12px;
     border: 1px solid #c8d5df;
     border-radius: 6px;
@@ -202,9 +207,42 @@
     text-transform: uppercase;
 }
 
-.assistant-splitter {
+.agent-splitter {
     position: relative;
     flex: 0 0 12px;
+    min-height: 12px;
+    border-top: 1px solid #c8d5df;
+    border-bottom: 1px solid #c8d5df;
+    background: #e7edf3;
+    cursor: row-resize;
+}
+
+.agent-splitter:hover,
+.agent-splitter.dragging {
+    background: #5b82f1;
+}
+
+.agent-splitter::after {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 72px;
+    height: 3px;
+    border-radius: 999px;
+    background: #8aa0b6;
+    content: "";
+    transform: translate(-50%, -50%);
+}
+
+.agent-splitter:hover::after,
+.agent-splitter.dragging::after {
+    background: #ffffff;
+}
+
+.assistant-splitter {
+    position: relative;
+    grid-column: 1;
+    grid-row: 2;
     min-height: 12px;
     border: 1px solid #c8d5df;
     border-radius: 6px;
@@ -321,6 +359,8 @@
 
 .chat-composer {
     display: grid;
+    grid-column: 1;
+    grid-row: 3;
     grid-template-columns: minmax(0, 1fr) 44px;
     align-items: start;
     gap: 8px;
@@ -359,8 +399,9 @@
 }
 
 @media (max-width: 1100px) {
-    .assistant-main {
+    .assistant-layout {
         grid-template-columns: 1fr;
+        grid-template-rows: minmax(220px, 1fr) 12px minmax(160px, 214px) minmax(220px, 35vh);
     }
 
     .stream-splitter {
@@ -368,6 +409,8 @@
     }
 
     .current-turn-panel {
+        grid-column: 1;
+        grid-row: 4;
         min-height: 180px;
     }
 }

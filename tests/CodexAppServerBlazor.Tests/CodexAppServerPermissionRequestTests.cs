@@ -141,6 +141,93 @@ public sealed class CodexAppServerPermissionRequestTests
     }
 
     [Fact]
+    public async Task RespondToServerRequestAsync_writes_command_approval_response()
+    {
+        List<string> sentMessages = [];
+        CodexAppServerClient client = new((json, _) =>
+        {
+            sentMessages.Add(json);
+            return Task.CompletedTask;
+        });
+
+        object response = PermissionRequestService.CreateApproveResponse(
+            "item/commandExecution/requestApproval",
+            "{}",
+            PermissionApprovalScope.Turn);
+        await client.RespondToServerRequestAsync(43, response);
+
+        JsonNode? message = JsonNode.Parse(Assert.Single(sentMessages));
+        Assert.Equal(43, message?["id"]?.GetValue<int>());
+        Assert.Equal("accept", message?["result"]?["decision"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task RespondToServerRequestAsync_writes_command_session_approval_response()
+    {
+        List<string> sentMessages = [];
+        CodexAppServerClient client = new((json, _) =>
+        {
+            sentMessages.Add(json);
+            return Task.CompletedTask;
+        });
+
+        object response = PermissionRequestService.CreateApproveResponse(
+            "item/commandExecution/requestApproval",
+            "{}",
+            PermissionApprovalScope.Session);
+        await client.RespondToServerRequestAsync(44, response);
+
+        JsonNode? message = JsonNode.Parse(Assert.Single(sentMessages));
+        Assert.Equal(44, message?["id"]?.GetValue<int>());
+        Assert.Equal("acceptForSession", message?["result"]?["decision"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task RespondToServerRequestAsync_writes_command_persistent_approval_response()
+    {
+        List<string> sentMessages = [];
+        CodexAppServerClient client = new((json, _) =>
+        {
+            sentMessages.Add(json);
+            return Task.CompletedTask;
+        });
+
+        object response = PermissionRequestService.CreateApproveResponse(
+            "item/commandExecution/requestApproval",
+            """
+            {"params":{"proposedExecpolicyAmendment":["allowed-prefix"]}}
+            """,
+            PermissionApprovalScope.Persistent);
+        await client.RespondToServerRequestAsync(45, response);
+
+        JsonNode? message = JsonNode.Parse(Assert.Single(sentMessages));
+        JsonNode? amendment = message?["result"]?["decision"]?["acceptWithExecpolicyAmendment"]?["execpolicy_amendment"];
+        Assert.Equal(45, message?["id"]?.GetValue<int>());
+        Assert.Equal("allowed-prefix", amendment?[0]?.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task RespondToServerRequestAsync_writes_file_change_session_approval_response()
+    {
+        List<string> sentMessages = [];
+        CodexAppServerClient client = new((json, _) =>
+        {
+            sentMessages.Add(json);
+            return Task.CompletedTask;
+        });
+
+        object response = PermissionRequestService.CreateApproveResponse(
+            "item/fileChange/requestApproval",
+            "{}",
+            PermissionApprovalScope.Session);
+        await client.RespondToServerRequestAsync(46, response);
+
+        JsonNode? message = JsonNode.Parse(Assert.Single(sentMessages));
+        Assert.Equal(46, message?["id"]?.GetValue<int>());
+        Assert.Equal("acceptForSession", message?["result"]?["decision"]?.GetValue<string>());
+    }
+
+    [Fact]
     public async Task RespondToServerRequestAsync_writes_legacy_exec_denial_response()
     {
         List<string> sentMessages = [];
@@ -201,7 +288,7 @@ public sealed class CodexAppServerPermissionRequestTests
     }
 
     [Fact]
-    public async Task RespondToServerRequestAsync_writes_json_rpc_empty_permission_grant()
+    public async Task RespondToServerRequestAsync_writes_json_rpc_permission_denial()
     {
         List<string> sentMessages = [];
         CodexAppServerClient client = new((json, _) =>
@@ -222,5 +309,31 @@ public sealed class CodexAppServerPermissionRequestTests
         Assert.True(result?["strictAutoReview"]?.GetValue<bool>());
         Assert.Null(result?["permissions"]?["fileSystem"]);
         Assert.Null(result?["permissions"]?["network"]);
+    }
+
+    [Fact]
+    public async Task RespondToServerRequestAsync_writes_json_rpc_permission_grant()
+    {
+        List<string> sentMessages = [];
+        CodexAppServerClient client = new((json, _) =>
+        {
+            sentMessages.Add(json);
+            return Task.CompletedTask;
+        });
+
+        object response = PermissionRequestService.CreateApproveResponse(
+            "item/permissions/requestApproval",
+            """
+            {"params":{"permissions":{"network":{"enabled":true}}}}
+            """,
+            PermissionApprovalScope.Session);
+        await client.RespondToServerRequestAsync(8, response);
+
+        JsonNode? message = JsonNode.Parse(Assert.Single(sentMessages));
+        JsonNode? result = message?["result"];
+        Assert.Equal(8, message?["id"]?.GetValue<int>());
+        Assert.Equal("session", result?["scope"]?.GetValue<string>());
+        Assert.True(result?["strictAutoReview"]?.GetValue<bool>());
+        Assert.True(result?["permissions"]?["network"]?["enabled"]?.GetValue<bool>());
     }
 }

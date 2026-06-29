@@ -3,95 +3,116 @@
 @implements IAsyncDisposable
 
 <div class="assistant-layout" @ref="assistantLayout">
-    <div class="assistant-main" @ref="assistantMain">
-        <section class="transcript-panel" @ref="transcriptPanel" aria-label="Completed Codex transcript">
-            <div class="transcript-header">
-                <span>Chat History</span>
-                <div class="transcript-actions">
-                    <RadzenButton Icon="content_copy"
-                                  Text="Copy"
-                                  ButtonStyle="ButtonStyle.Light"
-                                  Size="ButtonSize.Small"
-                                  Click="@CopyTranscript"
-                                  Disabled="@(!HasTranscript)" />
-                    <RadzenButton Icon="open_in_new"
-                                  Text="Pop Out"
-                                  ButtonStyle="ButtonStyle.Light"
-                                  Size="ButtonSize.Small"
-                                  Click="@OpenTranscript"
-                                  Disabled="@(!HasTranscript)" />
-                    <RadzenButton Icon="delete_sweep"
-                                  Text="Clear"
-                                  ButtonStyle="ButtonStyle.Light"
-                                  Size="ButtonSize.Small"
-                                  Click="@ClearTranscript"
-                                  Disabled="@(!HasTranscript || Busy)" />
-                </div>
+    <section class="transcript-panel" @ref="transcriptPanel" aria-label="Completed Codex transcript">
+        <div class="transcript-header">
+            <span>Chat History</span>
+            <div class="transcript-actions">
+                <RadzenButton Icon="content_copy"
+                              Text="Copy"
+                              ButtonStyle="ButtonStyle.Light"
+                              Size="ButtonSize.Small"
+                              Click="@CopyTranscript"
+                              Disabled="@(!HasTranscript)" />
+                <RadzenButton Icon="open_in_new"
+                              Text="Pop Out"
+                              ButtonStyle="ButtonStyle.Light"
+                              Size="ButtonSize.Small"
+                              Click="@OpenTranscript"
+                              Disabled="@(!HasTranscript)" />
+                <RadzenButton Icon="delete_sweep"
+                              Text="Clear"
+                              ButtonStyle="ButtonStyle.Light"
+                              Size="ButtonSize.Small"
+                              Click="@ClearTranscript"
+                              Disabled="@(!HasTranscript || Busy)" />
             </div>
-            <iframe class="transcript-webview"
-                    @ref="transcriptWebView"
-                    title="Completed Codex transcript"
-                    sandbox="allow-scripts"
-                    srcdoc="@TranscriptHtml"></iframe>
-        </section>
+        </div>
+        <iframe class="transcript-webview"
+                @ref="transcriptWebView"
+                title="Completed Codex transcript"
+                sandbox="allow-scripts"
+                srcdoc="@TranscriptHtml"></iframe>
+    </section>
 
-        <div class="stream-splitter" @ref="streamSplitter" title="Drag to resize history and current turn" aria-hidden="true"></div>
+    <div class="stream-splitter" @ref="streamSplitter" title="Drag to resize chat and agent rail" aria-hidden="true"></div>
 
-        <aside class="current-turn-panel" @ref="currentTurnPanel" aria-label="Current turn stream and agent requests">
-            <section class="turn-stream-region">
-                <div class="current-turn-header">Current Turn</div>
-                <div class="current-turn-body" @ref="currentTurnBody">
-                    @if (string.IsNullOrWhiteSpace(CurrentTurnHtml))
-                    {
-                        <div class="current-turn-empty">Current turn stream will appear here.</div>
-                    }
-                    else
-                    {
-                        <div class="current-turn-markdown">@((MarkupString)CurrentTurnHtml)</div>
-                    }
-                </div>
-            </section>
-
-            <section class="agent-request-region" aria-label="Agent actions">
-                <div class="agent-request-header">
-                    <span>Agent Actions</span>
-                    <strong>@PendingRequests.Count pending</strong>
-                </div>
-
-                @if (PendingRequests.Count == 0)
+    <aside class="current-turn-panel" @ref="currentTurnPanel" aria-label="Current turn stream and agent requests">
+        <section class="turn-stream-region" @ref="turnStreamRegion">
+            <div class="current-turn-header">Current Turn</div>
+            <div class="current-turn-body" @ref="currentTurnBody">
+                @if (string.IsNullOrWhiteSpace(CurrentTurnHtml))
                 {
-                    <div class="agent-request-empty">Permission and elicitation actions will appear here.</div>
+                    <div class="current-turn-empty">Current turn stream will appear here.</div>
                 }
                 else
                 {
-                    <div class="agent-request-list">
-                        @foreach (CodexPermissionRequest request in PendingRequests)
-                        {
-                            <article class="agent-request-card">
-                                <div class="agent-request-main">
-                                    <span>@request.Method</span>
-                                    <strong>@request.Summary</strong>
-                                    <code>#@request.RequestId</code>
-                                </div>
-                                <div class="agent-request-actions">
-                                    <RadzenButton Text="Deny"
-                                                  ButtonStyle="ButtonStyle.Light"
-                                                  Size="ButtonSize.Small"
-                                                  Disabled="@Busy"
-                                                  Click="@(() => DenyPermission.InvokeAsync(request.RequestId))" />
-                                    <RadzenButton Text="Cancel Turn"
-                                                  ButtonStyle="ButtonStyle.Danger"
-                                                  Size="ButtonSize.Small"
-                                                  Disabled="@Busy"
-                                                  Click="@(() => CancelPermission.InvokeAsync(request.RequestId))" />
-                                </div>
-                            </article>
-                        }
-                    </div>
+                    <div class="current-turn-markdown">@((MarkupString)CurrentTurnHtml)</div>
                 }
-            </section>
-        </aside>
-    </div>
+            </div>
+        </section>
+
+        <div class="agent-splitter" @ref="agentSplitter" title="Drag to resize current turn and agent actions" aria-hidden="true"></div>
+
+        <section class="agent-request-region" @ref="agentRequestRegion" aria-label="Agent actions">
+            <div class="agent-request-header">
+                <span>Agent Actions</span>
+                <strong>@PendingRequests.Count pending</strong>
+            </div>
+
+            @if (PendingRequests.Count == 0)
+            {
+                <div class="agent-request-empty">Permission and elicitation actions will appear here.</div>
+            }
+            else
+            {
+                <div class="agent-request-list">
+                    @foreach (CodexPermissionRequest request in PendingRequests)
+                    {
+                        <article class="agent-request-card">
+                            <div class="agent-request-main">
+                                <span>@request.Method</span>
+                                <strong>@request.Summary</strong>
+                                <code>#@request.RequestId</code>
+                            </div>
+                            <div class="agent-request-actions">
+                                <RadzenButton Text="Allow"
+                                              ButtonStyle="ButtonStyle.Success"
+                                              Size="ButtonSize.Small"
+                                              Disabled="@Busy"
+                                              Click="@(() => ApprovePermission.InvokeAsync(request.RequestId))" />
+                                @if (request.SupportsSessionApproval)
+                                {
+                                    <RadzenButton Text="Allow Session"
+                                                  ButtonStyle="ButtonStyle.Success"
+                                                  Size="ButtonSize.Small"
+                                                  Disabled="@Busy"
+                                                  Click="@(() => ApprovePermissionForSession.InvokeAsync(request.RequestId))" />
+                                }
+                                @if (request.SupportsPersistentApproval)
+                                {
+                                    <RadzenButton Text="Allow Always"
+                                                  ButtonStyle="ButtonStyle.Warning"
+                                                  Size="ButtonSize.Small"
+                                                  Disabled="@Busy"
+                                                  Click="@(() => ApprovePermissionAlways.InvokeAsync(request.RequestId))" />
+                                }
+                                <RadzenButton Text="Deny"
+                                              ButtonStyle="ButtonStyle.Light"
+                                              Size="ButtonSize.Small"
+                                              Disabled="@Busy"
+                                              Click="@(() => DenyPermission.InvokeAsync(request.RequestId))" />
+                                <RadzenButton Text="Cancel Turn"
+                                              ButtonStyle="ButtonStyle.Danger"
+                                              Size="ButtonSize.Small"
+                                              Disabled="@Busy"
+                                              Click="@(() => CancelPermission.InvokeAsync(request.RequestId))" />
+                            </div>
+                        </article>
+                    }
+                </div>
+            }
+        </section>
+    </aside>
 
     <div class="assistant-splitter" @ref="assistantSplitter" title="Drag to resize transcript and input" aria-hidden="true"></div>
 
@@ -143,6 +164,15 @@
     public EventCallback<int> DenyPermission { get; set; }
 
     [Parameter]
+    public EventCallback<int> ApprovePermission { get; set; }
+
+    [Parameter]
+    public EventCallback<int> ApprovePermissionForSession { get; set; }
+
+    [Parameter]
+    public EventCallback<int> ApprovePermissionAlways { get; set; }
+
+    [Parameter]
     public EventCallback<int> CancelPermission { get; set; }
 
     private bool HasTranscript => !string.IsNullOrWhiteSpace(TranscriptText);
@@ -152,12 +182,14 @@
             .ToArray();
 
     private ElementReference assistantLayout;
-    private ElementReference assistantMain;
     private ElementReference transcriptPanel;
     private ElementReference transcriptWebView;
     private ElementReference streamSplitter;
     private ElementReference currentTurnPanel;
+    private ElementReference turnStreamRegion;
     private ElementReference currentTurnBody;
+    private ElementReference agentRequestRegion;
+    private ElementReference agentSplitter;
     private ElementReference chatComposer;
     private ElementReference assistantSplitter;
     private ElementReference chatInput;
@@ -201,15 +233,21 @@
             await resizeModule.InvokeVoidAsync(
                 "attachAssistantSplitter",
                 assistantLayout,
-                assistantMain,
+                transcriptPanel,
                 chatComposer,
                 assistantSplitter);
             await resizeModule.InvokeVoidAsync(
                 "attachStreamSplitter",
-                assistantMain,
+                assistantLayout,
                 transcriptPanel,
                 currentTurnPanel,
                 streamSplitter);
+            await resizeModule.InvokeVoidAsync(
+                "attachAgentSplitter",
+                currentTurnPanel,
+                turnStreamRegion,
+                agentRequestRegion,
+                agentSplitter);
             await resizeModule.InvokeVoidAsync("attachComposerAutoScroll", chatInput);
         }
 

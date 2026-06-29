@@ -231,6 +231,33 @@ public sealed class CodexConnectionService : IAsyncDisposable
             $"Responded to {request.Method} with {PermissionRequestService.DescribeResponse(response)}");
     }
 
+    public async Task ApprovePermissionRequestAsync(
+        int requestId,
+        PermissionApprovalScope scope,
+        CancellationToken cancellationToken)
+    {
+        CodexAppServerClient activeClient = GetStartedClient();
+        CodexPermissionRequest? request = permissionRequestService.Resolve(requestId, scope switch
+        {
+            PermissionApprovalScope.Session => "approved for session",
+            PermissionApprovalScope.Persistent => "approved always",
+            _ => "approved"
+        });
+        if (request is null)
+        {
+            throw new InvalidOperationException($"No pending permission request found for id {requestId}.");
+        }
+
+        object response = PermissionRequestService.CreateApproveResponse(request.Method, request.RawJson, scope);
+        await activeClient.RespondToServerRequestAsync(request.RequestId, response, cancellationToken);
+        AddEvent(
+            statusEvents,
+            "PermissionResponse",
+            request.Status,
+            "coding-services",
+            $"Responded to {request.Method} with {PermissionRequestService.DescribeResponse(response)}");
+    }
+
     private CodexAppServerClient GetStartedClient()
     {
         if (client is null || !client.IsStarted)

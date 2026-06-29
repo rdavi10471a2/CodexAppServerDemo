@@ -163,6 +163,30 @@ public partial class Home : IDisposable, IAsyncDisposable
             CancellationToken.None));
     }
 
+    private async Task ApprovePermissionRequest(int requestId)
+    {
+        await RunCommandAsync(() => ConnectionService.ApprovePermissionRequestAsync(
+            requestId,
+            PermissionApprovalScope.Turn,
+            CancellationToken.None));
+    }
+
+    private async Task ApprovePermissionRequestForSession(int requestId)
+    {
+        await RunCommandAsync(() => ConnectionService.ApprovePermissionRequestAsync(
+            requestId,
+            PermissionApprovalScope.Session,
+            CancellationToken.None));
+    }
+
+    private async Task ApprovePermissionRequestAlways(int requestId)
+    {
+        await RunCommandAsync(() => ConnectionService.ApprovePermissionRequestAsync(
+            requestId,
+            PermissionApprovalScope.Persistent,
+            CancellationToken.None));
+    }
+
     private async Task CancelPermissionRequest(int requestId)
     {
         await RunCommandAsync(() => ConnectionService.DenyPermissionRequestAsync(
