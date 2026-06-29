@@ -191,6 +191,11 @@ public sealed class CodexConnectionService : IAsyncDisposable
 
             ClearTurnOutput();
             MarkTurnRunning();
+            if (attachments is { Count: > 0 })
+            {
+                AddEvent(statusEvents, "TurnAttachments", "ok", "coding-services", BuildAttachmentStatus(attachments));
+            }
+
             await activeClient.StartTurnAsync(
                 prompt,
                 repoRoot,
@@ -205,6 +210,14 @@ public sealed class CodexConnectionService : IAsyncDisposable
         {
             operationGate.Release();
         }
+    }
+
+    private static string BuildAttachmentStatus(IReadOnlyList<CodexTurnAttachment> attachments)
+    {
+        return string.Join(
+            "; ",
+            attachments.Select(attachment =>
+                $"{(attachment.Kind == CodexTurnAttachmentKind.LocalImage ? "localImage" : "text")}: {attachment.Name} ({attachment.SizeBytes} bytes) -> {attachment.Path}"));
     }
 
     public void ReportStatus(string type, string? status, string source, string detail)

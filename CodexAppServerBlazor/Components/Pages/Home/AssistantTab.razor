@@ -128,14 +128,18 @@
 
     <div class="chat-composer" @ref="chatComposer">
         <div class="attachment-strip">
-            <label class="attachment-picker-label">
+            <label class="attachment-picker-label" title="Copy files into runtime and attach them to the next turn">
                 <span class="attachment-icon">+</span>
                 <span>Attach</span>
-                <InputFile class="attachment-picker"
-                           OnChange="@AttachFiles"
-                           multiple
-                           disabled="@Busy" />
+                @if (!Busy)
+                {
+                    <InputFile @key="AttachmentPickerKey"
+                               class="attachment-picker"
+                               OnChange="@AttachFiles"
+                               multiple />
+                }
             </label>
+            <span class="attachment-count">@GetAttachmentCountText()</span>
             @if (Attachments.Count > 0)
             {
                 <div class="attachment-chips" aria-label="Attached files">
@@ -184,6 +188,9 @@
 
     [Parameter]
     public IReadOnlyList<CodexTurnAttachment> Attachments { get; set; } = [];
+
+    [Parameter]
+    public string AttachmentPickerKey { get; set; } = string.Empty;
 
     [Parameter]
     public string ChatDraft { get; set; } = string.Empty;
@@ -307,6 +314,16 @@
         return attachment.Kind == CodexTurnAttachmentKind.LocalImage
             ? "IMG"
             : "FILE";
+    }
+
+    private string GetAttachmentCountText()
+    {
+        return Attachments.Count switch
+        {
+            0 => "No files attached",
+            1 => "1 file attached",
+            _ => $"{Attachments.Count} files attached"
+        };
     }
 
     private static string FormatAttachmentSize(long sizeBytes)

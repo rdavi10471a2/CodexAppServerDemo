@@ -140,8 +140,13 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         {
             foreach (CodexTurnAttachment attachment in attachments)
             {
-                input.Add(CreateTurnAttachmentInput(attachment));
+                input.Add(CreateTurnAttachmentInput(attachment, repoRoot));
             }
+        }
+
+        if (attachments is { Count: > 0 })
+        {
+            Status?.Invoke(new StatusEvent("turn/input", BuildTurnInputSummary(attachments, repoRoot)));
         }
 
         var response = await SendRequestAsync("turn/start", new
@@ -160,7 +165,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         LogLine?.Invoke("Turn started.");
     }
 
-    private static object CreateTurnAttachmentInput(CodexTurnAttachment attachment)
+    private static object CreateTurnAttachmentInput(CodexTurnAttachment attachment, string repoRoot)
     {
         return attachment.Kind switch
         {
@@ -171,11 +176,55 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             },
             _ => new
             {
-                type = "mention",
-                name = attachment.Name,
-                path = attachment.Path
+                type = "text",
+                text = BuildAttachmentText(attachment, repoRoot)
             }
         };
+    }
+
+    private static string BuildAttachmentText(CodexTurnAttachment attachment, string repoRoot)
+    {
+        string submittedPath = GetSubmittedPath(attachment.Path, repoRoot);
+        string content = File.ReadAllText(attachment.Path, Encoding.UTF8);
+        return $$"""
+        Attached file: {{attachment.Name}}
+        Path: {{submittedPath}}
+        Size: {{attachment.SizeBytes}} bytes
+
+        ```text
+        {{content}}
+        ```
+        """;
+    }
+
+    private static string BuildTurnInputSummary(IReadOnlyList<CodexTurnAttachment> attachments, string repoRoot)
+    {
+        List<string> parts = ["text: prompt"];
+        foreach (CodexTurnAttachment attachment in attachments)
+        {
+            string submittedPath = attachment.Kind == CodexTurnAttachmentKind.LocalImage
+                ? attachment.Path
+                : GetSubmittedPath(attachment.Path, repoRoot);
+            string inputType = attachment.Kind == CodexTurnAttachmentKind.LocalImage ? "localImage" : "text";
+            parts.Add($"{inputType}: {attachment.Name} ({attachment.SizeBytes} bytes) -> {submittedPath}");
+        }
+
+        return "Submitting turn inputs: " + string.Join("; ", parts);
+    }
+
+    private static string GetSubmittedPath(string attachmentPath, string repoRoot)
+    {
+        string fullRoot = Path.GetFullPath(repoRoot);
+        string fullPath = Path.GetFullPath(attachmentPath);
+        string relativePath = Path.GetRelativePath(fullRoot, fullPath);
+        if (relativePath == ".." ||
+            relativePath.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) ||
+            Path.IsPathRooted(relativePath))
+        {
+            return fullPath;
+        }
+
+        return relativePath;
     }
 
     private static object CreateSandboxPolicy(string sandbox)

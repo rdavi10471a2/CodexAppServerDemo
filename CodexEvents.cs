@@ -26,7 +26,7 @@ public sealed record StatusEvent(
 public enum CodexTurnAttachmentKind
 {
     LocalImage,
-    Mention
+    Text
 }
 
 public sealed record CodexTurnAttachment(

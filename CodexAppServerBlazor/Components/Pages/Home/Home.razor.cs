@@ -47,6 +47,7 @@ public partial class Home : IDisposable, IAsyncDisposable
     private string mcpUrl = McpHostFactory.DefaultLocalMcpUrl;
     private readonly List<TranscriptMessage> chatMessages = [];
     private readonly List<CodexTurnAttachment> turnAttachments = [];
+    private string attachmentPickerKey = Guid.NewGuid().ToString("N");
     private string chatDraft = "Inspect the current workspace. Start with discovery, propose the next safe step, and do not edit files unless explicitly asked.";
     private string? activeAssistantMessageId;
     private string renderedAssistantText = string.Empty;
@@ -183,6 +184,9 @@ public partial class Home : IDisposable, IAsyncDisposable
         {
             await SaveTurnAttachment(file);
         }
+
+        attachmentPickerKey = Guid.NewGuid().ToString("N");
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task SaveTurnAttachment(IBrowserFile file)
@@ -220,7 +224,7 @@ public partial class Home : IDisposable, IAsyncDisposable
 
             CodexTurnAttachmentKind kind = IsImageAttachment(safeName, file.ContentType)
                 ? CodexTurnAttachmentKind.LocalImage
-                : CodexTurnAttachmentKind.Mention;
+                : CodexTurnAttachmentKind.Text;
             turnAttachments.Add(new CodexTurnAttachment(
                 safeName,
                 destinationPath,
@@ -251,6 +255,7 @@ public partial class Home : IDisposable, IAsyncDisposable
             TryDeleteRuntimeAttachment(attachment.Path);
         }
 
+        attachmentPickerKey = Guid.NewGuid().ToString("N");
         return Task.CompletedTask;
     }
 

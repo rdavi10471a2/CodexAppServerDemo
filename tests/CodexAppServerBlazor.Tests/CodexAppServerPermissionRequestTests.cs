@@ -82,8 +82,15 @@ public sealed class CodexAppServerPermissionRequestTests
     }
 
     [Fact]
-    public async Task StartTurnAsync_sends_text_images_and_file_mentions()
+    public async Task StartTurnAsync_sends_text_images_and_text_file_contents()
     {
+        string repoRoot = Path.Combine(Path.GetTempPath(), "CodexAppServerTests", Guid.NewGuid().ToString("N"));
+        string attachmentRoot = Path.Combine(repoRoot, "runtime", "turn-attachments");
+        Directory.CreateDirectory(attachmentRoot);
+        string imagePath = Path.Combine(attachmentRoot, "screen.png");
+        string notesPath = Path.Combine(attachmentRoot, "notes.md");
+        await File.WriteAllTextAsync(notesPath, "hello from notes");
+
         List<string> sentMessages = [];
         CodexAppServerClient? client = null;
         client = new CodexAppServerClient((json, _) =>
@@ -121,22 +128,29 @@ public sealed class CodexAppServerPermissionRequestTests
             return Task.CompletedTask;
         });
 
-        await client.StartThreadAsync(
-            "C:\\Work",
-            "gpt-5.4",
-            "on-request",
-            "read-only");
+        try
+        {
+            await client.StartThreadAsync(
+                repoRoot,
+                "gpt-5.4",
+                "on-request",
+                "read-only");
 
-        await client.StartTurnAsync(
-            "review these",
-            "C:\\Work",
-            "gpt-5.4",
-            "on-request",
-            "read-only",
-            [
-                new CodexTurnAttachment("screen.png", "C:\\Work\\runtime\\turn-attachments\\screen.png", CodexTurnAttachmentKind.LocalImage, 1024),
-                new CodexTurnAttachment("notes.md", "C:\\Work\\runtime\\turn-attachments\\notes.md", CodexTurnAttachmentKind.Mention, 2048)
-            ]);
+            await client.StartTurnAsync(
+                "review these",
+                repoRoot,
+                "gpt-5.4",
+                "on-request",
+                "read-only",
+                [
+                    new CodexTurnAttachment("screen.png", imagePath, CodexTurnAttachmentKind.LocalImage, 1024),
+                    new CodexTurnAttachment("notes.md", notesPath, CodexTurnAttachmentKind.Text, 2048)
+                ]);
+        }
+        finally
+        {
+            Directory.Delete(repoRoot, recursive: true);
+        }
 
         JsonNode? turnStart = sentMessages
             .Select(messageJson => JsonNode.Parse(messageJson))
@@ -148,10 +162,11 @@ public sealed class CodexAppServerPermissionRequestTests
         Assert.Equal("text", input[0]?["type"]?.GetValue<string>());
         Assert.Equal("review these", input[0]?["text"]?.GetValue<string>());
         Assert.Equal("localImage", input[1]?["type"]?.GetValue<string>());
-        Assert.Equal("C:\\Work\\runtime\\turn-attachments\\screen.png", input[1]?["path"]?.GetValue<string>());
-        Assert.Equal("mention", input[2]?["type"]?.GetValue<string>());
-        Assert.Equal("notes.md", input[2]?["name"]?.GetValue<string>());
-        Assert.Equal("C:\\Work\\runtime\\turn-attachments\\notes.md", input[2]?["path"]?.GetValue<string>());
+        Assert.Equal(imagePath, input[1]?["path"]?.GetValue<string>());
+        Assert.Equal("text", input[2]?["type"]?.GetValue<string>());
+        Assert.Contains("Attached file: notes.md", input[2]?["text"]?.GetValue<string>());
+        Assert.Contains("Path: runtime\\turn-attachments\\notes.md", input[2]?["text"]?.GetValue<string>());
+        Assert.Contains("hello from notes", input[2]?["text"]?.GetValue<string>());
     }
 
     [Fact]
