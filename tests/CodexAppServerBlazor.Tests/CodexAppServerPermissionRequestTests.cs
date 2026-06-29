@@ -336,4 +336,31 @@ public sealed class CodexAppServerPermissionRequestTests
         Assert.True(result?["strictAutoReview"]?.GetValue<bool>());
         Assert.True(result?["permissions"]?["network"]?["enabled"]?.GetValue<bool>());
     }
+
+    [Fact]
+    public void ResolveLatestApproved_updates_only_latest_approved_request()
+    {
+        PermissionRequestService service = new();
+        service.Add(new CodexServerRequestEvent(
+            1,
+            "item/commandExecution/requestApproval",
+            "first",
+            "{}"));
+        service.Add(new CodexServerRequestEvent(
+            2,
+            "item/commandExecution/requestApproval",
+            "second",
+            "{}"));
+
+        Assert.NotNull(service.Resolve(1, "approved"));
+        Assert.NotNull(service.Resolve(2, "approved for session"));
+
+        CodexPermissionRequest? resolved = service.ResolveLatestApproved("command completed");
+
+        Assert.NotNull(resolved);
+        Assert.Equal(2, resolved.RequestId);
+        CodexPermissionRequest[] snapshot = service.GetSnapshot().ToArray();
+        Assert.Equal("approved", snapshot[0].Status);
+        Assert.Equal("command completed", snapshot[1].Status);
+    }
 }

@@ -68,7 +68,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
             client.LogLine += line => AddEvent(statusEvents, "Log", null, "app-server", line);
             client.AssistantText += OnAssistantText;
             client.Telemetry += OnTelemetry;
-            client.ToolActivity += e => AddEvent(toolEvents, e.EventType, e.Status, e.Name, e.Detail ?? string.Empty);
+            client.ToolActivity += OnToolActivity;
             client.Status += OnStatus;
             client.ServerRequest += OnServerRequest;
             client.Exited += code => AddEvent(statusEvents, "ServerExited", code == 0 ? "ok" : "error", "codex app-server", $"Exited with code {code}.");
@@ -457,6 +457,33 @@ public sealed class CodexConnectionService : IAsyncDisposable
             $"{request.Method} #{request.RequestId}: {request.Summary}");
     }
 
+    private void OnToolActivity(ToolEvent e)
+    {
+        AddEvent(toolEvents, e.EventType, e.Status, e.Name, e.Detail ?? string.Empty);
+
+        if (!e.EventType.Equals("command completed", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        string status = IsFailureStatus(e.Status) ? "command failed" : "command completed";
+        CodexPermissionRequest? request = permissionRequestService.ResolveLatestApproved(status);
+        if (request is null)
+        {
+            return;
+        }
+
+        AddCurrentTurnNotice(IsFailureStatus(e.Status)
+            ? $"Request #{request.RequestId} resumed after approval and the command failed."
+            : $"Request #{request.RequestId} resumed after approval and the command completed.");
+        AddEvent(
+            statusEvents,
+            "PermissionResult",
+            status,
+            "coding-services",
+            $"Request #{request.RequestId} {status} after approval.");
+    }
+
     private void OnTelemetry(TelemetryEvent e)
     {
         lock (gate)
@@ -571,6 +598,12 @@ public sealed class CodexConnectionService : IAsyncDisposable
         }
 
         return false;
+    }
+
+    private static bool IsFailureStatus(string? status)
+    {
+        return !string.IsNullOrWhiteSpace(status) &&
+            ContainsAny(status, "error", "fail", "failed", "cancel", "denied");
     }
 
     private static string NormalizeApprovalPolicy(string value)

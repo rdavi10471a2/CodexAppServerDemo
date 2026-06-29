@@ -63,12 +63,37 @@ public sealed class PermissionRequestService
         }
     }
 
+    public CodexPermissionRequest? ResolveLatestApproved(string status)
+    {
+        lock (gate)
+        {
+            int index = requests.FindLastIndex(IsApprovedAndWaiting);
+            if (index < 0)
+            {
+                return null;
+            }
+
+            CodexPermissionRequest resolved = requests[index] with
+            {
+                Status = status,
+                ResolvedAt = DateTimeOffset.Now
+            };
+            requests[index] = resolved;
+            return resolved;
+        }
+    }
+
     public void Clear()
     {
         lock (gate)
         {
             requests.Clear();
         }
+    }
+
+    private static bool IsApprovedAndWaiting(CodexPermissionRequest request)
+    {
+        return request.Status.Contains("approved", StringComparison.OrdinalIgnoreCase);
     }
 
     public static object CreateDenyResponse(string method, bool cancelTurn)

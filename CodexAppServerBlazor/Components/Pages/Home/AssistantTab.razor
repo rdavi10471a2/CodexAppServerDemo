@@ -60,54 +60,62 @@
                 <strong>@PendingRequests.Count pending</strong>
             </div>
 
-            @if (PendingRequests.Count == 0)
+            @if (VisibleRequests.Count == 0)
             {
                 <div class="agent-request-empty">Permission and elicitation actions will appear here.</div>
             }
             else
             {
                 <div class="agent-request-list">
-                    @foreach (CodexPermissionRequest request in PendingRequests)
+                    @foreach (CodexPermissionRequest request in VisibleRequests)
                     {
-                        <article class="agent-request-card">
+                        bool isPending = IsPending(request);
+                        <article class="@GetRequestCardClass(request)">
                             <div class="agent-request-main">
                                 <span>@request.Method</span>
                                 <strong>@request.Summary</strong>
                                 <code>#@request.RequestId</code>
+                                <div class="agent-request-state">
+                                    <span>@GetRequestStatusText(request)</span>
+                                    <time>@GetRequestTimeText(request)</time>
+                                </div>
                             </div>
-                            <div class="agent-request-actions">
-                                <RadzenButton Text="Allow"
-                                              ButtonStyle="ButtonStyle.Success"
-                                              Size="ButtonSize.Small"
-                                              Disabled="@Busy"
-                                              Click="@(() => ApprovePermission.InvokeAsync(request.RequestId))" />
-                                @if (request.SupportsSessionApproval)
-                                {
-                                    <RadzenButton Text="Allow Session"
+                            @if (isPending)
+                            {
+                                <div class="agent-request-actions">
+                                    <RadzenButton Text="Allow"
                                                   ButtonStyle="ButtonStyle.Success"
                                                   Size="ButtonSize.Small"
                                                   Disabled="@Busy"
-                                                  Click="@(() => ApprovePermissionForSession.InvokeAsync(request.RequestId))" />
-                                }
-                                @if (request.SupportsPersistentApproval)
-                                {
-                                    <RadzenButton Text="Allow Always"
-                                                  ButtonStyle="ButtonStyle.Warning"
+                                                  Click="@(() => ApprovePermission.InvokeAsync(request.RequestId))" />
+                                    @if (request.SupportsSessionApproval)
+                                    {
+                                        <RadzenButton Text="Allow Session"
+                                                      ButtonStyle="ButtonStyle.Success"
+                                                      Size="ButtonSize.Small"
+                                                      Disabled="@Busy"
+                                                      Click="@(() => ApprovePermissionForSession.InvokeAsync(request.RequestId))" />
+                                    }
+                                    @if (request.SupportsPersistentApproval)
+                                    {
+                                        <RadzenButton Text="Allow Always"
+                                                      ButtonStyle="ButtonStyle.Warning"
+                                                      Size="ButtonSize.Small"
+                                                      Disabled="@Busy"
+                                                      Click="@(() => ApprovePermissionAlways.InvokeAsync(request.RequestId))" />
+                                    }
+                                    <RadzenButton Text="Deny"
+                                                  ButtonStyle="ButtonStyle.Light"
                                                   Size="ButtonSize.Small"
                                                   Disabled="@Busy"
-                                                  Click="@(() => ApprovePermissionAlways.InvokeAsync(request.RequestId))" />
-                                }
-                                <RadzenButton Text="Deny"
-                                              ButtonStyle="ButtonStyle.Light"
-                                              Size="ButtonSize.Small"
-                                              Disabled="@Busy"
-                                              Click="@(() => DenyPermission.InvokeAsync(request.RequestId))" />
-                                <RadzenButton Text="Cancel Turn"
-                                              ButtonStyle="ButtonStyle.Danger"
-                                              Size="ButtonSize.Small"
-                                              Disabled="@Busy"
-                                              Click="@(() => CancelPermission.InvokeAsync(request.RequestId))" />
-                            </div>
+                                                  Click="@(() => DenyPermission.InvokeAsync(request.RequestId))" />
+                                    <RadzenButton Text="Cancel Turn"
+                                                  ButtonStyle="ButtonStyle.Danger"
+                                                  Size="ButtonSize.Small"
+                                                  Disabled="@Busy"
+                                                  Click="@(() => CancelPermission.InvokeAsync(request.RequestId))" />
+                                </div>
+                            }
                         </article>
                     }
                 </div>
@@ -182,8 +190,80 @@
     private bool HasTranscript => !string.IsNullOrWhiteSpace(TranscriptText);
     private IReadOnlyList<CodexPermissionRequest> PendingRequests =>
         PermissionRequests
-            .Where(request => request.Status.Equals("pending", StringComparison.OrdinalIgnoreCase))
+            .Where(IsPending)
             .ToArray();
+    private IReadOnlyList<CodexPermissionRequest> VisibleRequests =>
+        PermissionRequests
+            .OrderByDescending(request => request.ResolvedAt ?? request.CreatedAt)
+            .Take(1)
+            .ToArray();
+
+    private static bool IsPending(CodexPermissionRequest request)
+    {
+        return request.Status.Equals("pending", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetRequestCardClass(CodexPermissionRequest request)
+    {
+        if (IsPending(request))
+        {
+            return "agent-request-card pending";
+        }
+
+        if (request.Status.Contains("approved", StringComparison.OrdinalIgnoreCase))
+        {
+            return "agent-request-card approved";
+        }
+
+        if (request.Status.Contains("denied", StringComparison.OrdinalIgnoreCase) ||
+            request.Status.Contains("cancelled", StringComparison.OrdinalIgnoreCase))
+        {
+            return "agent-request-card denied";
+        }
+
+        return "agent-request-card resolved";
+    }
+
+    private static string GetRequestStatusText(CodexPermissionRequest request)
+    {
+        if (IsPending(request))
+        {
+            return "Awaiting user decision";
+        }
+
+        if (request.Status.Contains("approved", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Approved - waiting for command result";
+        }
+
+        if (request.Status.Contains("command completed", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Command completed after approval";
+        }
+
+        if (request.Status.Contains("command failed", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Command failed after approval";
+        }
+
+        if (request.Status.Contains("cancelled", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Cancelled - turn interruption requested";
+        }
+
+        if (request.Status.Contains("denied", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Denied - agent must choose another path";
+        }
+
+        return request.Status;
+    }
+
+    private static string GetRequestTimeText(CodexPermissionRequest request)
+    {
+        DateTimeOffset timestamp = request.ResolvedAt ?? request.CreatedAt;
+        return timestamp.ToLocalTime().ToString("HH:mm:ss");
+    }
 
     private ElementReference assistantLayout;
     private ElementReference transcriptPanel;

@@ -131,6 +131,21 @@
     background: #fff8f9;
 }
 
+.agent-request-card.approved {
+    border-color: #b8dfc4;
+    background: #f1fbf4;
+}
+
+.agent-request-card.denied {
+    border-color: #efc7cc;
+    background: #fff1f1;
+}
+
+.agent-request-card.resolved {
+    border-color: #d7e1ea;
+    background: #f8fbfd;
+}
+
 .agent-request-main {
     display: grid;
     gap: 4px;
@@ -156,6 +171,26 @@
     color: #526a82;
     font-family: Consolas, "Cascadia Mono", monospace;
     font-size: .75rem;
+}
+
+.agent-request-state {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    border-top: 1px solid rgba(215, 225, 234, .85);
+    margin-top: 4px;
+    padding-top: 6px;
+    color: #526a82;
+    font-size: .76rem;
+    font-weight: 700;
+}
+
+.agent-request-state time {
+    color: #6c7d8f;
+    font-family: Consolas, "Cascadia Mono", monospace;
+    font-weight: 600;
 }
 
 .agent-request-actions {
