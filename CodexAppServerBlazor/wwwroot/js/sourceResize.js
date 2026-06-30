@@ -125,20 +125,19 @@ export function attachAssistantSplitter(layout, transcript, composer, splitter) 
     splitter.dataset.resizeAttached = "true";
 
     let startY = 0;
-    let startTranscriptHeight = 0;
     let startComposerHeight = 0;
+    let layoutHeight = 0;
+    let splitterHeight = 12;
 
-    const minTranscript = 160;
-    const minComposer = 120;
+    const minTranscript = 220;
+    const minComposer = 150;
 
     function onPointerMove(event) {
         const delta = event.clientY - startY;
-        const nextTranscript = Math.max(minTranscript, startTranscriptHeight + delta);
-        const nextComposer = Math.max(minComposer, startComposerHeight - delta);
-        transcript.style.flexBasis = `${nextTranscript}px`;
-        transcript.style.height = `${nextTranscript}px`;
-        composer.style.flexBasis = `${nextComposer}px`;
-        composer.style.height = `${nextComposer}px`;
+        const maxComposer = Math.max(minComposer, layoutHeight - splitterHeight - minTranscript);
+        const nextComposer = Math.min(maxComposer, Math.max(minComposer, startComposerHeight - delta));
+        const nextTranscript = Math.max(minTranscript, layoutHeight - splitterHeight - nextComposer);
+        layout.style.gridTemplateRows = `${nextTranscript}px ${splitterHeight}px ${nextComposer}px`;
     }
 
     function onPointerUp() {
@@ -152,7 +151,8 @@ export function attachAssistantSplitter(layout, transcript, composer, splitter) 
     splitter.addEventListener("pointerdown", event => {
         event.preventDefault();
         startY = event.clientY;
-        startTranscriptHeight = transcript.getBoundingClientRect().height;
+        layoutHeight = layout.getBoundingClientRect().height;
+        splitterHeight = Math.max(8, splitter.getBoundingClientRect().height || 12);
         startComposerHeight = composer.getBoundingClientRect().height;
         splitter.classList.add("dragging");
         document.body.style.cursor = "row-resize";

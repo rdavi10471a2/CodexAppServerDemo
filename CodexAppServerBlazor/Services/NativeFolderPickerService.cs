@@ -16,17 +16,20 @@ public sealed class NativeFolderPickerService
         {
             try
             {
-                using FolderBrowserDialog dialog = new();
-                dialog.Description = "Choose Codex working directory";
-                dialog.UseDescriptionForTitle = true;
-                dialog.ShowNewFolderButton = true;
-                if (!string.IsNullOrWhiteSpace(initialPath) && Directory.Exists(initialPath))
+                Application.EnableVisualStyles();
+                using (FolderBrowserDialog dialog = new())
                 {
-                    dialog.SelectedPath = initialPath;
-                }
+                    dialog.Description = "Choose Codex working directory";
+                    dialog.UseDescriptionForTitle = true;
+                    dialog.ShowNewFolderButton = true;
+                    if (!string.IsNullOrWhiteSpace(initialPath) && Directory.Exists(initialPath))
+                    {
+                        dialog.SelectedPath = initialPath;
+                    }
 
-                DialogResult result = dialog.ShowDialog();
-                source.TrySetResult(result == DialogResult.OK ? dialog.SelectedPath : null);
+                    DialogResult result = dialog.ShowDialog();
+                    source.TrySetResult(result == DialogResult.OK ? dialog.SelectedPath : null);
+                }
             }
             catch (Exception ex)
             {

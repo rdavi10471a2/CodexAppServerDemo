@@ -329,10 +329,24 @@ public partial class Home : IDisposable, IAsyncDisposable
 
     private async Task BrowseForDirectory()
     {
-        string? selectedPath = await FolderPicker.PickFolderAsync(repoRoot, CancellationToken.None);
-        if (!string.IsNullOrWhiteSpace(selectedPath))
+        try
         {
-            SetWorkspace(selectedPath);
+            string? selectedPath = await FolderPicker.PickFolderAsync(repoRoot, CancellationToken.None);
+            if (!string.IsNullOrWhiteSpace(selectedPath))
+            {
+                SetWorkspace(selectedPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = "Browse folder failed: " + ex.Message;
+            NotificationService.Notify(new NotificationMessage
+            {
+                Severity = NotificationSeverity.Error,
+                Summary = "Browse failed",
+                Detail = errorMessage,
+                Duration = 7000
+            });
         }
     }
 

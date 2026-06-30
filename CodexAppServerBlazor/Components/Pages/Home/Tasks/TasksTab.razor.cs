@@ -17,7 +17,7 @@ public partial class TasksTab : ComponentBase, IAsyncDisposable
     private IJSObjectReference? taskResizeModule;
 
     private IReadOnlyList<TaskBoardColumnViewModel> BoardStateOptions =>
-        model.Columns.Where(column => !column.IsArchive).ToArray();
+        model.Columns.ToArray();
 
     [Parameter]
     public string WorkspaceRoot { get; set; } = string.Empty;
@@ -110,10 +110,28 @@ public partial class TasksTab : ComponentBase, IAsyncDisposable
     {
         Execute(() =>
         {
-            if (model.SelectedTask is not null
-                && !model.SelectedTask.StateCode.Equals(request.StateCode, StringComparison.Ordinal))
+            if (model.SelectedTask is not null)
             {
-                TaskBoardViewService.MoveTask(WorkspaceRoot, request.TaskId, request.StateCode);
+                if (request.StateCode.Equals("Archived", StringComparison.Ordinal))
+                {
+                    if (!model.SelectedTask.IsArchived)
+                    {
+                        TaskBoardViewService.ArchiveTask(WorkspaceRoot, request.TaskId);
+                    }
+                }
+                else
+                {
+                    if (model.SelectedTask.IsArchived)
+                    {
+                        TaskBoardViewService.RestoreTask(WorkspaceRoot, request.TaskId);
+                    }
+
+                    if (!model.SelectedTask.StateCode.Equals(request.StateCode, StringComparison.Ordinal)
+                        || model.SelectedTask.IsArchived)
+                    {
+                        TaskBoardViewService.MoveTask(WorkspaceRoot, request.TaskId, request.StateCode);
+                    }
+                }
             }
 
             TaskBoardViewService.UpdateTaskDetails(WorkspaceRoot, request.TaskId, request.Name, request.ShortName);

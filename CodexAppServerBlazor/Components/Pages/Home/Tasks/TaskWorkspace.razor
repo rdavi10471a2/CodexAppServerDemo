@@ -40,7 +40,7 @@
         <div class="task-pane-body">
             @if (IsPane("Task"))
             {
-                <section class="detail-section">
+                <section class="detail-section grow-section">
                     <div class="task-fields">
                         <label>
                             <span>Board location</span>
@@ -50,10 +50,10 @@
                                             ValueProperty="StateCode"
                                             Style="width: 100%;" />
                         </label>
-                        <label>
+                        <label class="description-label">
                             <span>Description</span>
-                            <RadzenTextBox @bind-Value="taskName"
-                                           Style="width: 100%;" />
+                            <textarea class="task-description"
+                                      @bind="taskName"></textarea>
                         </label>
                     </div>
                 </section>
@@ -61,9 +61,8 @@
             else if (IsPane("Notes"))
             {
                 <section class="detail-section grow-section">
-                    <RadzenTextArea @bind-Value="notesMarkdown"
-                                    class="task-notes"
-                                    Style="width: 100%;" />
+                    <textarea class="task-notes"
+                              @bind="notesMarkdown"></textarea>
                 </section>
             }
             else if (IsPane("Agent"))
@@ -83,7 +82,7 @@
             }
             else if (IsPane("Files"))
             {
-                <section class="detail-section">
+                <section class="detail-section grow-section">
                     <div class="file-form">
                         <RadzenTextBox @bind-Value="newFilePath"
                                        Placeholder="relative/path.cs"
@@ -123,7 +122,7 @@
             }
             else if (IsPane("Events"))
             {
-                <section class="detail-section">
+                <section class="detail-section grow-section">
                     <div class="comment-form">
                         <RadzenTextBox @bind-Value="newComment"
                                        Placeholder="Add a comment"

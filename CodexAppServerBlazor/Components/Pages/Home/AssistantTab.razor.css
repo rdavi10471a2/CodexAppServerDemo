@@ -1,7 +1,7 @@
 .assistant-layout {
     display: grid;
     grid-template-columns: minmax(520px, 1fr) 12px minmax(340px, 28%);
-    grid-template-rows: minmax(220px, 1fr) 12px minmax(160px, 214px);
+    grid-template-rows: minmax(220px, 1fr) 12px 214px;
     gap: 8px;
     height: calc(98vh - 190px);
     min-height: 0;
@@ -27,7 +27,6 @@
     border-radius: 7px;
     overflow: hidden;
     background: #ffffff;
-    resize: both;
 }
 
 .transcript-header {
@@ -535,9 +534,8 @@
     grid-template-rows: auto minmax(0, 1fr);
     align-items: start;
     gap: 8px;
-    flex: 0 0 214px;
-    min-height: 120px;
-    max-height: 50vh;
+    height: 100%;
+    min-height: 0;
     overflow: hidden;
 }
 
@@ -671,8 +669,8 @@
 .chat-composer-input {
     width: 100%;
     height: 100% !important;
-    min-height: 180px !important;
-    max-height: 48vh !important;
+    min-height: 0 !important;
+    max-height: none !important;
     overflow: auto !important;
     resize: vertical !important;
     border: 1px solid #d7e1ea;

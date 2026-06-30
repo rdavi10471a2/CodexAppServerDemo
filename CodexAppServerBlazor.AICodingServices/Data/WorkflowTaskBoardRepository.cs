@@ -29,10 +29,16 @@ public sealed class WorkflowTaskBoardRepository
         EnsureCreated();
         using (SqliteConnection connection = database.OpenConnection())
         {
+            IReadOnlyList<WorkflowTaskRow> tasks = LoadTasks(connection);
+            if (ReconcileAgentNoteFiles(connection, tasks))
+            {
+                tasks = LoadTasks(connection);
+            }
+
             return new WorkflowTaskBoardSnapshot(
                 LoadStates(connection),
                 LoadEventTypes(connection),
-                LoadTasks(connection),
+                tasks,
                 LoadFiles(connection),
                 LoadEvents(connection));
         }
@@ -262,10 +268,19 @@ public sealed class WorkflowTaskBoardRepository
         using (SqliteConnection connection = database.OpenConnection())
         {
             EnsureStateExists(connection, stateCode);
+            WorkflowTaskRow existing = LoadTask(connection, taskId);
             DateTime now = DateTime.Now;
             if (stateCode.Equals("Active", StringComparison.Ordinal) && HasOtherActiveTask(connection, taskId))
             {
                 throw new InvalidOperationException("Only one task can be Active. Move the current Active task first.");
+            }
+
+            if (existing.StateCode.Equals("Active", StringComparison.Ordinal)
+                && !stateCode.Equals("Active", StringComparison.Ordinal)
+                && HasOtherLiveTasks(connection, taskId)
+                && !HasOtherActiveTask(connection, taskId))
+            {
+                throw new InvalidOperationException("Move another task to Active before moving the current Active task.");
             }
 
             using (SqliteCommand command = connection.CreateCommand())
@@ -301,9 +316,9 @@ public sealed class WorkflowTaskBoardRepository
         using (SqliteConnection connection = database.OpenConnection())
         {
             WorkflowTaskRow existing = LoadTask(connection, taskId);
-            if (!existing.StateCode.Equals("Done", StringComparison.Ordinal))
+            if (existing.StateCode.Equals("Active", StringComparison.Ordinal))
             {
-                throw new InvalidOperationException("Only Done tasks can be archived.");
+                throw new InvalidOperationException("Move this task out of Active before archiving it.");
             }
 
             DateTime now = DateTime.Now;
@@ -499,6 +514,80 @@ public sealed class WorkflowTaskBoardRepository
         Directory.CreateDirectory(taskFolder);
         string fileName = taskId + "-" + (kind == TaskNoteKind.User ? "user" : "agent") + ".md";
         return Path.Combine(taskFolder, fileName);
+    }
+
+    private bool ReconcileAgentNoteFiles(SqliteConnection connection, IReadOnlyList<WorkflowTaskRow> tasks)
+    {
+        bool changed = false;
+        foreach (WorkflowTaskRow task in tasks)
+        {
+            string? notesPath = FindExistingTaskNotesPath(task, TaskNoteKind.Agent);
+            if (string.IsNullOrWhiteSpace(notesPath))
+            {
+                continue;
+            }
+
+            if (string.Equals(task.AgentNotesMarkdownPath, notesPath, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            DateTime now = DateTime.Now;
+            using (SqliteCommand command = connection.CreateCommand())
+            {
+                command.CommandText = """
+                    update workflow_tasks
+                    set agent_notes_markdown_path = $agentNotesMarkdownPath,
+                        updated_at = $updatedAt
+                    where id = $id;
+                    """;
+                command.Parameters.AddWithValue("$id", task.Id);
+                command.Parameters.AddWithValue("$agentNotesMarkdownPath", notesPath);
+                command.Parameters.AddWithValue("$updatedAt", now);
+                int updated = command.ExecuteNonQuery();
+                if (updated == 0)
+                {
+                    throw new InvalidOperationException("Task was not found: " + task.Id);
+                }
+            }
+
+            InsertEvent(connection, task.Id, "AgentNotesUpdated", "Agent notes linked from task-memory file.", null, now);
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private string? FindExistingTaskNotesPath(WorkflowTaskRow task, TaskNoteKind kind)
+    {
+        string expectedPath = GetTaskNotesPathWithoutCreatingDirectory(task.Id, task.TaskNumber, task.Slug, kind);
+        if (File.Exists(expectedPath))
+        {
+            return expectedPath;
+        }
+
+        if (!Directory.Exists(taskMemoryRoot))
+        {
+            return null;
+        }
+
+        string fileName = task.Id + "-" + (kind == TaskNoteKind.User ? "user" : "agent") + ".md";
+        return Directory
+            .EnumerateFiles(taskMemoryRoot, fileName, SearchOption.AllDirectories)
+            .OrderByDescending(File.GetLastWriteTimeUtc)
+            .FirstOrDefault();
+    }
+
+    private string GetTaskNotesPathWithoutCreatingDirectory(string taskId, int taskNumber, string slug, TaskNoteKind kind)
+    {
+        string folderName = "task-" + FormatTaskNumber(taskNumber);
+        if (!string.IsNullOrWhiteSpace(slug))
+        {
+            folderName += "-" + slug;
+        }
+
+        string fileName = taskId + "-" + (kind == TaskNoteKind.User ? "user" : "agent") + ".md";
+        return Path.Combine(taskMemoryRoot, folderName, fileName);
     }
 
     private static IReadOnlyList<WorkflowTaskStateRow> LoadStates(SqliteConnection connection)
@@ -746,6 +835,23 @@ public sealed class WorkflowTaskBoardRepository
         }
     }
 
+    private static bool HasOtherLiveTasks(
+        SqliteConnection connection,
+        string excludedTaskId)
+    {
+        using (SqliteCommand command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                select count(*)
+                from workflow_tasks
+                where is_archived = 0
+                  and id <> $id;
+                """;
+            command.Parameters.AddWithValue("$id", excludedTaskId);
+            return Convert.ToInt64(command.ExecuteScalar() ?? 0) > 0;
+        }
+    }
+
     private static int GetNextTaskNumber(SqliteConnection connection, SqliteTransaction transaction)
     {
         int current;
@@ -790,7 +896,19 @@ public sealed class WorkflowTaskBoardRepository
 
     private static string NormalizeRelativePath(string path)
     {
-        return path.Trim().Replace('\\', '/');
+        string normalized = path.Trim().Replace('\\', '/');
+        if (Path.IsPathRooted(path) || normalized.StartsWith("/", StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Task file paths must be relative to the task folder.", nameof(path));
+        }
+
+        string[] parts = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length == 0 || parts.Any(part => part.Equals("..", StringComparison.Ordinal)))
+        {
+            throw new ArgumentException("Task file paths cannot be empty or traverse parent folders.", nameof(path));
+        }
+
+        return string.Join('/', parts);
     }
 
     private static string CreateId()

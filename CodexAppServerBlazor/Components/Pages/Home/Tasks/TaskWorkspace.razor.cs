@@ -8,6 +8,7 @@ public partial class TaskWorkspace : ComponentBase
 {
     private static readonly MarkdownPipeline MarkdownPipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions()
+        .DisableHtml()
         .Build();
 
     private string taskName = string.Empty;
@@ -57,7 +58,7 @@ public partial class TaskWorkspace : ComponentBase
         loadedTaskId = Task.Id;
         taskName = Task.Name;
         notesMarkdown = Task.NotesMarkdown;
-        selectedStateCode = Task.StateCode;
+        selectedStateCode = Task.IsArchived ? "Archived" : Task.StateCode;
         newFilePath = string.Empty;
         newFileIntent = string.Empty;
         newFileRole = string.Empty;

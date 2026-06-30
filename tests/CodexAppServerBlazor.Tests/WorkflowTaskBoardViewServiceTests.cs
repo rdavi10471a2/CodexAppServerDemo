@@ -117,6 +117,34 @@ public sealed class WorkflowTaskBoardViewServiceTests
     }
 
     [Fact]
+    public void GetBoard_loads_agent_notes_written_directly_to_task_memory()
+    {
+        using (TemporaryRepository repository = TemporaryRepository.Create())
+        {
+            WorkflowTaskBoardViewService service = new(CreateProvider());
+            TaskBoardTaskViewModel created = service.CreateTask(
+                repository.RootPath,
+                "Summarize task memory",
+                null,
+                "User-authored intent.");
+            TaskBoardViewModel initial = service.GetBoard(repository.RootPath, created.Id);
+
+            Assert.NotNull(initial.SelectedTask);
+            Assert.NotNull(initial.SelectedTask.NotesMarkdownPath);
+            string? taskDirectory = Path.GetDirectoryName(initial.SelectedTask.NotesMarkdownPath);
+            Assert.NotNull(taskDirectory);
+            string agentNotesPath = Path.Combine(taskDirectory, initial.SelectedTask.Id + "-agent.md");
+            File.WriteAllText(agentNotesPath, "# Agent Notes" + Environment.NewLine + Environment.NewLine + "Loaded from disk.");
+
+            TaskBoardViewModel refreshed = service.GetBoard(repository.RootPath, created.Id);
+
+            Assert.NotNull(refreshed.SelectedTask);
+            Assert.Equal(agentNotesPath, refreshed.SelectedTask.AgentNotesMarkdownPath);
+            Assert.Contains("Loaded from disk.", refreshed.SelectedTask.AgentNotesMarkdown, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public void MoveTask_allows_only_one_active_task()
     {
         using (TemporaryRepository repository = TemporaryRepository.Create())
@@ -158,6 +186,26 @@ public sealed class WorkflowTaskBoardViewServiceTests
     }
 
     [Fact]
+    public void MoveTask_preserves_existing_active_pointer_when_other_live_tasks_exist()
+    {
+        using (TemporaryRepository repository = TemporaryRepository.Create())
+        {
+            WorkflowTaskBoardViewService service = new(CreateProvider());
+            TaskBoardViewModel initial = service.GetBoard(repository.RootPath, null);
+            Assert.NotNull(initial.SelectedTask);
+            service.CreateTask(repository.RootPath, "Waiting task", null, string.Empty);
+
+            InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+                service.MoveTask(repository.RootPath, initial.SelectedTask.Id, "Ready"));
+
+            Assert.Contains("Move another task to Active", ex.Message, StringComparison.Ordinal);
+            TaskBoardViewModel board = service.GetBoard(repository.RootPath, initial.SelectedTask.Id);
+            Assert.NotNull(board.SelectedTask);
+            Assert.Equal("Active", board.SelectedTask.StateCode);
+        }
+    }
+
+    [Fact]
     public void ArchiveTask_moves_done_task_out_of_normal_groups_and_restore_returns_it()
     {
         using (TemporaryRepository repository = TemporaryRepository.Create())
@@ -184,6 +232,62 @@ public sealed class WorkflowTaskBoardViewServiceTests
             TaskBoardViewModel restoredBoard = service.GetBoard(repository.RootPath, task.Id);
             TaskBoardColumnViewModel doneColumn = Assert.Single(restoredBoard.Columns, column => column.StateCode.Equals("Done", StringComparison.Ordinal));
             Assert.Contains(doneColumn.Tasks, restored => restored.Id.Equals(task.Id, StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public void ArchiveTask_moves_non_active_task_out_of_normal_groups()
+    {
+        using (TemporaryRepository repository = TemporaryRepository.Create())
+        {
+            WorkflowTaskBoardViewService service = new(CreateProvider());
+            TaskBoardTaskViewModel task = service.CreateTask(repository.RootPath, "Archive from ready", null, string.Empty);
+            service.MoveTask(repository.RootPath, task.Id, "Ready");
+
+            service.ArchiveTask(repository.RootPath, task.Id);
+
+            TaskBoardViewModel archivedBoard = service.GetBoard(repository.RootPath, task.Id);
+            Assert.NotNull(archivedBoard.SelectedTask);
+            Assert.True(archivedBoard.SelectedTask.IsArchived);
+            TaskBoardColumnViewModel archiveColumn = Assert.Single(archivedBoard.Columns, column => column.IsArchive);
+            Assert.Contains(archiveColumn.Tasks, archived => archived.Id.Equals(task.Id, StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public void ArchiveTask_rejects_active_task()
+    {
+        using (TemporaryRepository repository = TemporaryRepository.Create())
+        {
+            WorkflowTaskBoardViewService service = new(CreateProvider());
+            TaskBoardViewModel initial = service.GetBoard(repository.RootPath, null);
+            Assert.NotNull(initial.SelectedTask);
+
+            InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+                service.ArchiveTask(repository.RootPath, initial.SelectedTask.Id));
+
+            Assert.Contains("out of Active", ex.Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void AddFile_rejects_absolute_or_parent_traversal_paths()
+    {
+        using (TemporaryRepository repository = TemporaryRepository.Create())
+        {
+            WorkflowTaskBoardViewService service = new(CreateProvider());
+            TaskBoardTaskViewModel task = service.CreateTask(repository.RootPath, "Track file refs", null, string.Empty);
+
+            Assert.Throws<ArgumentException>(() =>
+                service.AddFile(repository.RootPath, task.Id, "C:/outside.txt", "bad", "input"));
+            Assert.Throws<ArgumentException>(() =>
+                service.AddFile(repository.RootPath, task.Id, "../outside.txt", "bad", "input"));
+
+            service.AddFile(repository.RootPath, task.Id, "docs/task-note.md", "good", "context");
+            TaskBoardViewModel board = service.GetBoard(repository.RootPath, task.Id);
+            Assert.NotNull(board.SelectedTask);
+            TaskBoardFileViewModel file = Assert.Single(board.SelectedTask.Files);
+            Assert.Equal("docs/task-note.md", file.RelativePath);
         }
     }
 

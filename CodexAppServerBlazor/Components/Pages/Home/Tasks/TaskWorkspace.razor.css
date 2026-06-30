@@ -21,6 +21,7 @@
     align-items: flex-start;
     border-bottom: 1px solid #d5e2ef;
     display: flex;
+    flex: 0 0 auto;
     gap: 1rem;
     justify-content: space-between;
     padding: 1rem;
@@ -60,8 +61,12 @@
 }
 
 .detail-section {
-    display: grid;
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
     gap: 0.65rem;
+    min-height: 0;
+    overflow: hidden;
     padding: 0.9rem 1rem;
 }
 
@@ -78,13 +83,25 @@
 .task-fields,
 .file-form,
 .comment-form {
-    display: grid;
+    display: flex;
+    flex-direction: column;
     gap: 0.55rem;
 }
 
+.task-fields {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
 .task-fields label {
-    display: grid;
+    display: flex;
+    flex-direction: column;
     gap: 0.3rem;
+}
+
+.description-label {
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
 .task-fields span {
@@ -94,18 +111,29 @@
 }
 
 .grow-section {
+    flex: 1 1 auto;
     min-height: 0;
 }
 
+.task-description,
 .task-notes {
-    min-height: 260px;
-    resize: vertical;
+    border: 1px solid #d7e1ea;
+    border-radius: 6px;
+    flex: 1 1 auto;
+    font: inherit;
+    line-height: 1.4;
+    min-height: 0;
+    overflow: auto;
+    padding: 0.65rem 0.75rem;
+    resize: none;
+    width: 100%;
 }
 
 .task-pane-tabs {
     background: #f6f9fc;
     border-bottom: 1px solid #d5e2ef;
     display: flex;
+    flex: 0 0 auto;
     gap: 0;
     padding: 0.35rem 0.5rem 0;
 }
@@ -127,21 +155,28 @@
 }
 
 .task-pane-body {
-    flex: 1;
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
     min-height: 0;
-    overflow: auto;
+    overflow: hidden;
 }
 
 .readonly-notes {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
     min-height: 0;
+    overflow: hidden;
 }
 
 .agent-markdown {
     background: #f8fbfe;
     border: 1px solid #d5e2ef;
     border-radius: 5px;
+    flex: 1 1 auto;
     margin: 0;
-    min-height: 260px;
+    min-height: 0;
     overflow: auto;
     padding: 0.8rem;
 }
@@ -185,6 +220,8 @@
 .event-list {
     display: grid;
     gap: 0.45rem;
+    min-height: 0;
+    overflow: auto;
 }
 
 .file-row,
