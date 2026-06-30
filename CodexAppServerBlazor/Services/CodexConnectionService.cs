@@ -1,4 +1,4 @@
-using System.Text.Json;
+using System.Text;
 using CodexAppServerBlazor.Mcp;
 
 namespace CodexAppServerBlazor.Services;
@@ -21,6 +21,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
     private readonly List<CodexOutputEvent> telemetryEvents = [];
     private readonly List<CodexOutputEvent> toolEvents = [];
     private readonly List<string> rawLines = [];
+    private bool workspaceContextSentForThread;
 
     public CodexConnectionService(WorkspaceState workspaceState, SourceWorkspaceService sourceWorkspaceService)
     {
@@ -106,6 +107,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
                 toolEvents.Clear();
                 permissionRequestService.Clear();
                 isTurnRunning = false;
+                workspaceContextSentForThread = false;
             }
 
             AddEvent(statusEvents, "ServerStopped", "ok", "codex app-server", "Stopped codex app-server.");
@@ -138,7 +140,6 @@ public sealed class CodexConnectionService : IAsyncDisposable
                 model,
                 approvalPolicy,
                 sandbox,
-                sendInitialContext: true,
                 cancellationToken);
         }
         finally
@@ -172,13 +173,20 @@ public sealed class CodexConnectionService : IAsyncDisposable
                     model,
                     approvalPolicy,
                     sandbox,
-                    sendInitialContext: true,
                     cancellationToken);
             }
 
             workspaceState.SetRepoRoot(repoRoot);
+            string? workspaceContext = TryBuildTurnWorkspaceContext(repoRoot, out string contextStatus);
+            if (!workspaceContextSentForThread)
+            {
+                AddEvent(statusEvents, "WorkspaceContext", workspaceContext is null ? "skipped" : "ok", "coding-services", contextStatus);
+            }
+
             string prompt = $$"""
         {{userPrompt}}
+
+        {{workspaceContext}}
 
         Codex cwd:
         {{repoRoot}}
@@ -187,6 +195,8 @@ public sealed class CodexConnectionService : IAsyncDisposable
         - Treat the cwd above as the loaded workspace.
         - Do not use selected-file assumptions for this turn.
         - Use discovery, proposal, edit/diff, compile, and reindex order when work is requested.
+        - Assume indexed MCP results are stale after any code edit. Re-run get_watched_solution_digest before using prior indexed structure, and re-run get_watched_solution_summary or get_test_project_summary after compile/reindex when relevant.
+        - When the user asks for tool results, report the results in the same response after the tool call completes; do not wait for a follow-up prompt.
         """;
 
             ClearTurnOutput();
@@ -204,6 +214,11 @@ public sealed class CodexConnectionService : IAsyncDisposable
                 NormalizeSandbox(sandbox),
                 attachments,
                 cancellationToken);
+            if (workspaceContext is not null)
+            {
+                workspaceContextSentForThread = true;
+            }
+
             AddEvent(statusEvents, "TurnPolicy", "ok", "codex", $"Turn policy set to approval={NormalizeApprovalPolicy(approvalPolicy)}, sandbox={NormalizeSandbox(sandbox)}, reviewer=user.");
         }
         finally
@@ -271,7 +286,9 @@ public sealed class CodexConnectionService : IAsyncDisposable
 
         object response = PermissionRequestService.CreateApproveResponse(request.Method, request.RawJson, scope);
         await activeClient.RespondToServerRequestAsync(request.RequestId, response, cancellationToken);
-        AddCurrentTurnNotice(scope switch
+        AddCurrentTurnNotice(PermissionRequestService.IsElicitationRequest(request.Method)
+            ? $"Answered elicitation request #{request.RequestId}; waiting for the agent to continue."
+            : scope switch
         {
             PermissionApprovalScope.Session => $"Approved request #{request.RequestId} for this session; waiting for the command result.",
             PermissionApprovalScope.Persistent => $"Approved request #{request.RequestId} always; waiting for the command result.",
@@ -301,7 +318,6 @@ public sealed class CodexConnectionService : IAsyncDisposable
         string model,
         string approvalPolicy,
         string sandbox,
-        bool sendInitialContext,
         CancellationToken cancellationToken)
     {
         workspaceState.SetRepoRoot(repoRoot);
@@ -311,33 +327,19 @@ public sealed class CodexConnectionService : IAsyncDisposable
             NormalizeApprovalPolicy(approvalPolicy),
             NormalizeSandbox(sandbox),
             cancellationToken);
+        workspaceContextSentForThread = false;
         AddEvent(statusEvents, "ThreadPolicy", "ok", "codex", $"Thread policy set to approval={NormalizeApprovalPolicy(approvalPolicy)}, sandbox={NormalizeSandbox(sandbox)}.");
-
-        if (!sendInitialContext)
-        {
-            return;
-        }
-
-        string? initialPrompt = TryBuildInitialWorkspacePrompt(repoRoot, out string contextStatus);
-        AddEvent(statusEvents, "WorkspaceContext", initialPrompt is null ? "skipped" : "ok", "coding-services", contextStatus);
-        if (initialPrompt is not null)
-        {
-            ClearTurnOutput();
-            MarkTurnRunning();
-            await activeClient.StartTurnAsync(
-                initialPrompt,
-                repoRoot,
-                model,
-                NormalizeApprovalPolicy(approvalPolicy),
-                NormalizeSandbox(sandbox),
-                null,
-                cancellationToken);
-            AddEvent(statusEvents, "TurnPolicy", "ok", "codex", $"Initial turn policy set to approval={NormalizeApprovalPolicy(approvalPolicy)}, sandbox={NormalizeSandbox(sandbox)}, reviewer=user.");
-        }
+        AddEvent(statusEvents, "WorkspaceContext", "ready", "coding-services", "Brief indexed workspace context will be attached to the next user turn; no automatic initialization turn was sent.");
     }
 
-    private string? TryBuildInitialWorkspacePrompt(string repoRoot, out string status)
+    private string? TryBuildTurnWorkspaceContext(string repoRoot, out string status)
     {
+        if (workspaceContextSentForThread)
+        {
+            status = "Workspace context was already attached for this thread.";
+            return null;
+        }
+
         if (!Directory.Exists(repoRoot))
         {
             status = $"CWD does not exist: {repoRoot}";
@@ -369,65 +371,43 @@ public sealed class CodexConnectionService : IAsyncDisposable
             return null;
         }
 
-        WorkspaceBootstrapContext context = new(
-            Cwd: Path.GetFullPath(repoRoot),
-            WatchedSolutionPath: snapshot.WatchedSolutionPath,
-            IndexDatabasePath: snapshot.IndexDatabasePath,
-            FileCount: snapshot.FileCount,
-            ProjectCount: snapshot.Tree.Count,
-            Projects: snapshot.Tree
-                .Where(node => node.Kind.Equals("project", StringComparison.OrdinalIgnoreCase))
-                .Select(ToBootstrapProject)
-                .ToArray());
+        StringBuilder builder = new();
+        builder.AppendLine("Indexed workspace context supplied by Coding Services:");
+        builder.AppendLine($"- CWD: {Path.GetFullPath(repoRoot)}");
+        builder.AppendLine($"- Watched solution: {snapshot.WatchedSolutionPath}");
+        builder.AppendLine($"- Index database: {snapshot.IndexDatabasePath}");
+        builder.AppendLine($"- Indexed product files: {snapshot.FileCount}");
+        builder.AppendLine($"- Product projects: {snapshot.Tree.Count}");
+        builder.AppendLine("- MCP discovery tools: get_workspace, get_watched_solution_digest, get_watched_solution_summary, get_test_project_summary");
+        builder.AppendLine("- Test projects are omitted from this startup context; call get_test_project_summary when tests matter.");
+        builder.AppendLine("- Product project/file map:");
 
-        string json = JsonSerializer.Serialize(context, new JsonSerializerOptions
+        foreach (SourceTreeNode project in snapshot.Tree.Where(node => node.Kind.Equals("project", StringComparison.OrdinalIgnoreCase)))
         {
-            WriteIndented = true
-        });
+            List<string> files = [];
+            CollectFilePaths(project, files);
+            builder.AppendLine($"  - {project.Name} ({files.Count} files)");
+            foreach (string file in files.OrderBy(file => file, StringComparer.OrdinalIgnoreCase))
+            {
+                builder.AppendLine($"    - {file}");
+            }
+        }
 
-        status = $"Injected product workspace context for {context.ProjectCount} projects and {context.FileCount} indexed files.";
-        return $$"""
-        Initial product workspace context:
-        ```json
-        {{json}}
-        ```
-
-        Use this compiler/index-backed product project/file map as initial orientation for this thread.
-        Test projects are intentionally not included in this initial context.
-        The local MCP discovery surface advertises GetWorkspace, GetWatchedSolutionDigest, GetWatchedSolutionSummary, and GetTestProjectSummary.
-        Call GetWatchedSolutionSummary when deeper full-solution type/member structure is needed.
-        Call GetTestProjectSummary when test project structure is relevant.
-        Treat the CWD as the loaded workspace.
-        Do not edit files during this initialization turn.
-        Reply with a concise workspace orientation: main projects, likely responsibility boundaries, and any context gaps.
-        """;
+        status = $"Attached brief indexed workspace context for {snapshot.Tree.Count} projects and {snapshot.FileCount} product files to the next user turn.";
+        return builder.ToString();
     }
 
-    private static BootstrapProject ToBootstrapProject(SourceTreeNode project)
-    {
-        List<BootstrapFile> files = [];
-        CollectBootstrapFiles(project, files);
-        return new BootstrapProject(
-            Name: project.Name,
-            Files: files
-                .OrderBy(file => file.Path, StringComparer.OrdinalIgnoreCase)
-                .ToArray(),
-            FileCount: files.Count);
-    }
-
-    private static void CollectBootstrapFiles(SourceTreeNode node, List<BootstrapFile> files)
+    private static void CollectFilePaths(SourceTreeNode node, List<string> files)
     {
         if (node.File is not null)
         {
-            files.Add(new BootstrapFile(
-                Path: node.File.RelativePath,
-                Language: node.File.Language));
+            files.Add(node.File.RelativePath);
             return;
         }
 
         foreach (SourceTreeNode child in node.Children)
         {
-            CollectBootstrapFiles(child, files);
+            CollectFilePaths(child, files);
         }
     }
 
@@ -451,7 +431,8 @@ public sealed class CodexConnectionService : IAsyncDisposable
     private void OnStatus(StatusEvent e)
     {
         if (e.EventType.Equals("turn/completed", StringComparison.OrdinalIgnoreCase)
-            || e.EventType.Equals("turn/failed", StringComparison.OrdinalIgnoreCase))
+            || e.EventType.Equals("turn/failed", StringComparison.OrdinalIgnoreCase)
+            || IsThreadIdleStatus(e))
         {
             lock (gate)
             {
@@ -460,6 +441,12 @@ public sealed class CodexConnectionService : IAsyncDisposable
         }
 
         AddEvent(statusEvents, e.EventType, null, "codex", e.Summary);
+    }
+
+    private static bool IsThreadIdleStatus(StatusEvent e)
+    {
+        return e.EventType.Equals("thread/status/changed", StringComparison.OrdinalIgnoreCase)
+            && e.Summary.Contains("\"type\":\"idle\"", StringComparison.OrdinalIgnoreCase);
     }
 
     private void OnServerRequest(CodexServerRequestEvent e)
@@ -516,8 +503,6 @@ public sealed class CodexConnectionService : IAsyncDisposable
         {
             assistantText = string.Empty;
             currentTurnNoticeText = string.Empty;
-            telemetryEvents.Clear();
-            toolEvents.Clear();
         }
 
         Changed?.Invoke();
@@ -709,20 +694,3 @@ public sealed record CodexTelemetrySummary(
         };
     }
 }
-
-public sealed record WorkspaceBootstrapContext(
-    string Cwd,
-    string WatchedSolutionPath,
-    string IndexDatabasePath,
-    int FileCount,
-    int ProjectCount,
-    IReadOnlyList<BootstrapProject> Projects);
-
-public sealed record BootstrapProject(
-    string Name,
-    IReadOnlyList<BootstrapFile> Files,
-    int FileCount);
-
-public sealed record BootstrapFile(
-    string Path,
-    string Language);

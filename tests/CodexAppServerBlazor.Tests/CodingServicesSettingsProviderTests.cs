@@ -1,6 +1,7 @@
 using CodexAppServerBlazor.AICodingServices.Core;
 using CodexAppServerBlazor.Mcp;
 using CodexAppServerBlazor.Services;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 
 namespace CodexAppServerBlazor.Tests;
@@ -137,6 +138,8 @@ internal sealed class TemporaryRepository : IDisposable
 
     public void Dispose()
     {
+        SqliteConnection.ClearAllPools();
+
         for (int attempt = 0; attempt < 10; attempt++)
         {
             if (!Directory.Exists(RootPath))

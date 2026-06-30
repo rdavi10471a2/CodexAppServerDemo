@@ -1,5 +1,6 @@
 using CodexAppServerBlazor.Components;
 using CodexAppServerBlazor.Services;
+using CodexAppServerBlazor.Services.Tasks;
 using CodexAppServerBlazor.Mcp;
 using Radzen;
 
@@ -25,6 +26,7 @@ public class Program
         builder.Services.AddSingleton<DirectoryBrowserService>();
         builder.Services.AddSingleton<CodingServicesSettingsProvider>();
         builder.Services.AddSingleton<SourceWorkspaceService>();
+        builder.Services.AddSingleton<IWorkflowTaskBoardViewService, WorkflowTaskBoardViewService>();
         builder.Services.AddSingleton<NativeFolderPickerService>();
         builder.Services.AddSingleton<HarnessMcpHostedService>();
         builder.Services.AddHostedService(services => services.GetRequiredService<HarnessMcpHostedService>());

@@ -66,6 +66,10 @@
 
             <RadzenTabs RenderMode="TabRenderMode.Client">
                 <Tabs>
+                    <RadzenTabsItem Text="Tasks">
+                        <TasksTab WorkspaceRoot="@repoRoot" />
+                    </RadzenTabsItem>
+
                     <RadzenTabsItem Text="Assistant">
                         <AssistantTab TranscriptHtml="@TranscriptHtml"
                                       TranscriptBodyHtml="@TranscriptBodyHtml"

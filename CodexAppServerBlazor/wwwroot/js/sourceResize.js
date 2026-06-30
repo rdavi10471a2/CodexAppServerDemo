@@ -78,6 +78,45 @@ export function attachMainSplitter(layout, connection, workPanel, splitter) {
     });
 }
 
+export function attachTaskSplitter(layout, navigator, workspace, splitter) {
+    if (!layout || !navigator || !workspace || !splitter || splitter.dataset.resizeAttached === "true") {
+        return;
+    }
+
+    splitter.dataset.resizeAttached = "true";
+
+    let startX = 0;
+    let startNavigatorWidth = 0;
+    const minNavigator = 280;
+    const maxNavigator = 680;
+
+    function onPointerMove(event) {
+        const delta = event.clientX - startX;
+        const nextNavigator = Math.min(maxNavigator, Math.max(minNavigator, startNavigatorWidth + delta));
+        navigator.style.flexBasis = `${nextNavigator}px`;
+        navigator.style.width = `${nextNavigator}px`;
+    }
+
+    function onPointerUp() {
+        splitter.classList.remove("dragging");
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        window.removeEventListener("pointermove", onPointerMove);
+        window.removeEventListener("pointerup", onPointerUp);
+    }
+
+    splitter.addEventListener("pointerdown", event => {
+        event.preventDefault();
+        startX = event.clientX;
+        startNavigatorWidth = navigator.getBoundingClientRect().width;
+        splitter.classList.add("dragging");
+        document.body.style.cursor = "col-resize";
+        document.body.style.userSelect = "none";
+        window.addEventListener("pointermove", onPointerMove);
+        window.addEventListener("pointerup", onPointerUp);
+    });
+}
+
 export function attachAssistantSplitter(layout, transcript, composer, splitter) {
     if (!layout || !transcript || !composer || !splitter || splitter.dataset.resizeAttached === "true") {
         return;
@@ -268,6 +307,32 @@ export async function copyTextToClipboard(text) {
     textarea.select();
     document.execCommand("copy");
     document.body.removeChild(textarea);
+}
+
+export function attachTranscriptCopyButtons(transcriptElement) {
+    if (!transcriptElement || transcriptElement.__codingServicesCopyAttached) {
+        return;
+    }
+
+    transcriptElement.__codingServicesCopyAttached = true;
+    transcriptElement.addEventListener("click", async event => {
+        const button = event.target && event.target.closest
+            ? event.target.closest(".message-copy")
+            : null;
+        if (!button || !transcriptElement.contains(button)) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        const text = button.getAttribute("data-copy-text") || "";
+        await copyTextToClipboard(text);
+        const originalText = button.textContent;
+        button.textContent = "Copied";
+        window.setTimeout(() => {
+            button.textContent = originalText || "Copy";
+        }, 1200);
+    });
 }
 
 export function openHtmlDocument(html, title) {

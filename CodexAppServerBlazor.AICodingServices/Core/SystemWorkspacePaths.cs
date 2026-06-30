@@ -3,7 +3,7 @@ using System.Text;
 
 namespace CodexAppServerBlazor.AICodingServices.Core;
 
-public static class MonitorWorkspacePaths
+public static class SystemWorkspacePaths
 {
     public static string GetWatchedSolutionWorkspaceRoot(CodingServicesSettings settings)
     {

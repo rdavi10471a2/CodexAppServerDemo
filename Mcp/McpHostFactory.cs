@@ -41,26 +41,28 @@ public static class McpHostFactory
             mcpEndpoint = endpointUrl,
             transport = "streamable-http",
             stateless = true,
+            requiredAccept = "application/json, text/event-stream",
+            responseFormat = "Successful MCP calls are returned as text/event-stream frames with JSON content in event: message payloads.",
             tools = new[]
             {
                 new
                 {
-                    name = nameof(WorkspaceMcpTools.GetWorkspace),
+                    name = "get_workspace",
                     description = "Returns the current workspace CWD selected in the Coding Services Blazor control surface."
                 },
                 new
                 {
-                    name = nameof(WorkspaceMcpTools.GetWatchedSolutionDigest),
+                    name = "get_watched_solution_digest",
                     description = "Cheap readiness and change-detection metadata for the watched solution: counts, summary size, hash, and index paths."
                 },
                 new
                 {
-                    name = nameof(WorkspaceMcpTools.GetWatchedSolutionSummary),
-                    description = "Full indexed project/file/type/member tree for on-demand discovery. Does not include source file bodies."
+                    name = "get_watched_solution_summary",
+                    description = "Product-source indexed project/file/type/member tree for on-demand discovery. Does not include source file bodies or configured test projects."
                 },
                 new
                 {
-                    name = nameof(WorkspaceMcpTools.GetTestProjectSummary),
+                    name = "get_test_project_summary",
                     description = "Indexed project/file/type/member tree for configured test projects only. Does not include source file bodies."
                 }
             }

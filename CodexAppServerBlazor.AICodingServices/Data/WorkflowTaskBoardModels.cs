@@ -13,14 +13,20 @@ public sealed record WorkflowTaskEventTypeRow(
 
 public sealed record WorkflowTaskRow(
     string Id,
+    int TaskNumber,
     string Name,
+    string ShortName,
+    string Slug,
     string StateCode,
     string StateName,
     string? NotesMarkdownPath,
+    string? AgentNotesMarkdownPath,
+    bool IsArchived,
     DateTime CreatedAt,
     DateTime UpdatedAt,
     DateTime? ActivatedAt,
-    DateTime? CompletedAt);
+    DateTime? CompletedAt,
+    DateTime? ArchivedAt);
 
 public sealed record WorkflowTaskFileRow(
     string Id,

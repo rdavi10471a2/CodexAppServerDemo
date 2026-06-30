@@ -535,7 +535,10 @@ public sealed class CodexAppServerClient : IAsyncDisposable
 
     private void EmitAssistantDelta(JsonNode node)
     {
-        var delta = node["params"]?["delta"]?.GetValue<string>();
+        string? delta = ExtractAssistantText(
+            node["params"]?["delta"] ??
+            node["params"]?["content"] ??
+            node["params"]?["item"]);
         if (!string.IsNullOrEmpty(delta))
             AssistantText?.Invoke(new AssistantTextEvent(delta, IsFinal: false));
     }
@@ -585,10 +588,17 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         switch (type)
         {
             case "agentMessage":
-                var text = item?["text"]?.GetValue<string>();
+                string? text = ExtractAssistantText(item);
                 if (!string.IsNullOrEmpty(text))
+                {
                     AssistantText?.Invoke(new AssistantTextEvent(text, IsFinal: true));
-                Status?.Invoke(new StatusEvent("assistant", "Assistant response completed."));
+                    Status?.Invoke(new StatusEvent("assistant", "Assistant response completed."));
+                }
+                else
+                {
+                    Status?.Invoke(new StatusEvent("assistant", $"Assistant response completed without extractable text: {Compact(node)}"));
+                }
+
                 break;
 
             case "commandExecution":
@@ -610,6 +620,61 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             default:
                 Status?.Invoke(new StatusEvent("item completed", type));
                 break;
+        }
+    }
+
+    private static string? ExtractAssistantText(JsonNode? node)
+    {
+        if (node is null)
+            return null;
+
+        if (node is JsonValue value && value.TryGetValue<string>(out string? directText))
+            return directText;
+
+        List<string> parts = [];
+        CollectAssistantText(node, parts);
+        string text = string.Concat(parts);
+        return string.IsNullOrWhiteSpace(text) ? null : text;
+    }
+
+    private static void CollectAssistantText(JsonNode? node, List<string> parts)
+    {
+        if (node is JsonArray array)
+        {
+            foreach (JsonNode? child in array)
+            {
+                CollectAssistantText(child, parts);
+            }
+
+            return;
+        }
+
+        if (node is not JsonObject obj)
+            return;
+
+        AddStringProperty(obj, "text", parts);
+        AddStringProperty(obj, "delta", parts);
+        AddStringProperty(obj, "output_text", parts);
+        AddStringProperty(obj, "outputText", parts);
+        AddStringProperty(obj, "markdown", parts);
+        AddStringProperty(obj, "message", parts);
+        AddStringProperty(obj, "value", parts);
+
+        foreach (KeyValuePair<string, JsonNode?> property in obj)
+        {
+            if (property.Value is JsonArray or JsonObject)
+            {
+                CollectAssistantText(property.Value, parts);
+            }
+        }
+    }
+
+    private static void AddStringProperty(JsonObject obj, string propertyName, List<string> parts)
+    {
+        JsonNode? value = obj[propertyName];
+        if (value is JsonValue textValue && textValue.TryGetValue<string>(out string? text))
+        {
+            parts.Add(text);
         }
     }
 

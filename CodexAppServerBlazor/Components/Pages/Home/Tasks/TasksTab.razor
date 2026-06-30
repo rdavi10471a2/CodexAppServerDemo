@@ -1,0 +1,50 @@
+@using CodexAppServerBlazor.AICodingServices.Workflow.Tasks
+@using CodexAppServerBlazor.Services.Tasks
+@inject IJSRuntime JS
+@inject IWorkflowTaskBoardViewService TaskBoardViewService
+
+<section class="tasks-tab">
+    <div class="tasks-header">
+        <RadzenButton Icon="dock_to_left"
+                      Text="@(isNavigatorVisible ? "Hide Task List" : "Show Task List")"
+                      ButtonStyle="ButtonStyle.Light"
+                      Size="ButtonSize.Small"
+                      Click="@ToggleNavigator" />
+        <RadzenButton Icon="refresh"
+                      Text="Refresh"
+                      ButtonStyle="ButtonStyle.Light"
+                      Size="ButtonSize.Small"
+                      Click="@Refresh" />
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(errorMessage))
+    {
+        <div class="task-error">@errorMessage</div>
+    }
+
+    <div class="task-layout @(isNavigatorVisible ? string.Empty : "task-layout-navigator-hidden")" @ref="taskLayout">
+        @if (isNavigatorVisible)
+        {
+            <div class="task-navigator-shell" @ref="taskNavigatorPane">
+                <TaskNavigator Columns="@model.Columns"
+                               SelectedTaskId="@selectedTaskId"
+                               OnSelectTask="@SelectTask"
+                               OnCreateTask="@CreateTask"
+                               OnMoveTask="@MoveTask"
+                               OnArchiveTask="@ArchiveTask"
+                               OnRestoreTask="@RestoreTask" />
+            </div>
+
+            <div class="task-splitter" @ref="taskSplitter" title="Drag to resize task list" aria-hidden="true"></div>
+        }
+
+        <div class="task-workspace-shell" @ref="taskWorkspacePane">
+            <TaskWorkspace Task="@model.SelectedTask"
+                           StateOptions="@BoardStateOptions"
+                           OnSaveDetails="@SaveTaskDetails"
+                           OnSaveNotes="@SaveNotes"
+                           OnAddFile="@AddFile"
+                           OnAddComment="@AddComment" />
+        </div>
+    </div>
+</section>

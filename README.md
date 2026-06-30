@@ -45,16 +45,18 @@ http://localhost:6278/health
 ```
 
 The health response advertises the local MCP discovery surface. It includes the
-endpoint metadata plus tool names and descriptions:
+endpoint metadata plus wire tool names and descriptions. Streamable HTTP MCP
+calls should use `Accept: application/json, text/event-stream`.
 
-- `GetWorkspace`: returns the current workspace CWD selected in the Blazor UI.
-- `GetWatchedSolutionDigest`: returns cheap readiness and change-detection
+- `get_workspace`: returns the current workspace CWD selected in the Blazor UI.
+- `get_watched_solution_digest`: returns cheap readiness and change-detection
   metadata for the watched solution, including counts, summary size, hash, and
   index paths.
-- `GetWatchedSolutionSummary`: returns the full indexed project/file/type/member
-  tree for on-demand discovery. It does not include source file bodies.
-- `GetTestProjectSummary`: returns the indexed project/file/type/member tree for
-  configured test projects only. It does not include source file bodies.
+- `get_watched_solution_summary`: returns the product-source indexed
+  project/file/type/member tree for on-demand discovery. It does not include
+  source file bodies or configured test projects.
+- `get_test_project_summary`: returns the indexed project/file/type/member tree
+  for configured test projects only. It does not include source file bodies.
 
 The Source tab and startup context use the product-source projection by default.
 Configured test projects stay indexed and editable, but are shown separately in
@@ -79,3 +81,6 @@ choose CWD -> discovery -> proposal -> edit/diff -> compile -> reindex
 ```
 
 The UI should stay focused on that order. Avoid rebuilding selected-file assumptions into the prompt path.
+After source edits, treat prior MCP summaries as stale. Build, reindex, then use
+`get_watched_solution_digest` as the freshness gate before reloading summary or
+test-summary context.

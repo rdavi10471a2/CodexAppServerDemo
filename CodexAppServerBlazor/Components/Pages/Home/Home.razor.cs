@@ -48,9 +48,10 @@ public partial class Home : IDisposable, IAsyncDisposable
     private readonly List<TranscriptMessage> chatMessages = [];
     private readonly List<CodexTurnAttachment> turnAttachments = [];
     private string attachmentPickerKey = Guid.NewGuid().ToString("N");
-    private string chatDraft = "Inspect the current workspace. Start with discovery, propose the next safe step, and do not edit files unless explicitly asked.";
+    private string chatDraft = string.Empty;
     private string? activeAssistantMessageId;
     private string renderedAssistantText = string.Empty;
+    private string? lastPermissionResultToastKey;
     private string? errorMessage;
     private bool busy;
     private bool isRebuildingSourceIndex;
@@ -66,7 +67,7 @@ public partial class Home : IDisposable, IAsyncDisposable
         .Build();
 
     private string TranscriptHtml => BuildTranscriptHtml();
-    private string TranscriptBodyHtml => BuildTranscriptBodyHtml();
+    private string TranscriptBodyHtml => BuildTranscriptBodyHtml(includeMessageCopyButtons: true);
     private string TranscriptText => BuildTranscriptText();
     private string CurrentTurnHtml => RenderMarkdown(GetCurrentTurnText());
 
@@ -131,9 +132,16 @@ public partial class Home : IDisposable, IAsyncDisposable
 
     private async Task SendChatDraft()
     {
-        if (busy)
+        if (busy || snapshot.IsTurnRunning)
         {
-            errorMessage = "A Codex operation is already running.";
+            errorMessage = "A Codex turn is already running. Wait for it to finish or resolve the pending agent action.";
+            NotificationService.Notify(new NotificationMessage
+            {
+                Severity = NotificationSeverity.Warning,
+                Summary = "Turn still running",
+                Detail = errorMessage,
+                Duration = 5000
+            });
             return;
         }
 
@@ -516,7 +524,11 @@ public partial class Home : IDisposable, IAsyncDisposable
     {
         snapshot = ConnectionService.GetSnapshot();
         RenderAssistantSnapshot(isStreaming: snapshot.IsTurnRunning);
-        _ = InvokeAsync(StateHasChanged);
+        _ = InvokeAsync(() =>
+        {
+            NotifyLatestPermissionResult();
+            StateHasChanged();
+        });
     }
 
     private void AddUserMessage(string content)
@@ -550,7 +562,7 @@ public partial class Home : IDisposable, IAsyncDisposable
 
     private void RenderAssistantSnapshot(bool isStreaming)
     {
-        if (string.IsNullOrEmpty(activeAssistantMessageId) || string.IsNullOrEmpty(snapshot.AssistantText))
+        if (string.IsNullOrEmpty(activeAssistantMessageId))
         {
             return;
         }
@@ -561,13 +573,17 @@ public partial class Home : IDisposable, IAsyncDisposable
             return;
         }
 
-        renderedAssistantText = snapshot.AssistantText;
-        message.Content = renderedAssistantText;
-        message.IsStreaming = isStreaming;
-        if (!isStreaming)
+        if (!string.IsNullOrEmpty(snapshot.AssistantText))
         {
-            activeAssistantMessageId = null;
+            renderedAssistantText = snapshot.AssistantText;
+            message.Content = renderedAssistantText;
         }
+        else if (!isStreaming && string.IsNullOrWhiteSpace(message.Content))
+        {
+            message.Content = "_Awaiting assistant response..._";
+        }
+
+        message.IsStreaming = isStreaming;
     }
 
     private static string JoinLines(IEnumerable<string> lines)
@@ -579,12 +595,12 @@ public partial class Home : IDisposable, IAsyncDisposable
     {
         var html = new StringBuilder();
         html.Append(GetTranscriptDocumentStart());
-        html.Append(BuildTranscriptBodyHtml());
+        html.Append(BuildTranscriptBodyHtml(includeMessageCopyButtons: false));
         html.Append("</body></html>");
         return html.ToString();
     }
 
-    private string BuildTranscriptBodyHtml()
+    private string BuildTranscriptBodyHtml(bool includeMessageCopyButtons)
     {
         var html = new StringBuilder();
 
@@ -601,21 +617,25 @@ public partial class Home : IDisposable, IAsyncDisposable
         {
             foreach (TranscriptMessage message in chatMessages)
             {
-                if (message.IsStreaming)
-                {
-                    continue;
-                }
-
                 string role = message.IsUser ? "user" : "assistant";
                 string label = message.IsUser ? "You" : "Codex";
                 string timestamp = WebUtility.HtmlEncode(message.Timestamp.ToString("HH:mm:ss"));
+                string messageText = WebUtility.HtmlEncode(message.Content);
                 html.Append("<article class=\"message ");
                 html.Append(role);
                 html.Append("\"><header class=\"message-header\"><span>");
                 html.Append(label);
-                html.Append("</span><span>");
+                html.Append("</span><div class=\"message-meta\"><span>");
                 html.Append(timestamp);
-                html.Append("</span></header><div class=\"message-body\">");
+                html.Append("</span>");
+                if (includeMessageCopyButtons)
+                {
+                    html.Append("<button type=\"button\" class=\"message-copy\" data-copy-text=\"");
+                    html.Append(messageText);
+                    html.Append("\" title=\"Copy this message\">Copy</button>");
+                }
+
+                html.Append("</div></header><div class=\"message-body\">");
                 html.Append(RenderMarkdown(message.Content));
                 html.Append("</div></article>");
             }
@@ -741,11 +761,6 @@ public partial class Home : IDisposable, IAsyncDisposable
         var text = new StringBuilder();
         foreach (TranscriptMessage message in chatMessages)
         {
-            if (message.IsStreaming)
-            {
-                continue;
-            }
-
             string label = message.IsUser ? "You" : "Codex";
             if (text.Length > 0)
             {
@@ -909,6 +924,37 @@ public partial class Home : IDisposable, IAsyncDisposable
             Detail = detail,
             Duration = 3500
         });
+    }
+
+    private void NotifyLatestPermissionResult()
+    {
+        CodexPermissionRequest? request = snapshot.PermissionRequests
+            .Where(candidate => candidate.ResolvedAt is not null)
+            .OrderBy(candidate => candidate.ResolvedAt)
+            .LastOrDefault();
+        if (request is null)
+        {
+            return;
+        }
+
+        bool completed = request.Status.Contains("command completed", StringComparison.OrdinalIgnoreCase);
+        bool failed = request.Status.Contains("command failed", StringComparison.OrdinalIgnoreCase);
+        if (!completed && !failed)
+        {
+            return;
+        }
+
+        string key = $"{request.RequestId}:{request.Status}:{request.ResolvedAt:O}";
+        if (string.Equals(lastPermissionResultToastKey, key, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        lastPermissionResultToastKey = key;
+        NotifyPermissionAction(
+            completed ? "Approved command completed" : "Approved command failed",
+            $"Request #{request.RequestId} resumed after approval.",
+            completed ? NotificationSeverity.Success : NotificationSeverity.Error);
     }
 
     private static string RenderMarkdown(string markdown)

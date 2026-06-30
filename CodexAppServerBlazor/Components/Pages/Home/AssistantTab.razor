@@ -38,92 +38,117 @@
 
     <div class="stream-splitter" @ref="streamSplitter" title="Drag to resize chat and agent rail" aria-hidden="true"></div>
 
-    <aside class="current-turn-panel" @ref="currentTurnPanel" aria-label="Current turn stream and agent requests">
-        <section class="turn-stream-region" @ref="turnStreamRegion">
-            <div class="current-turn-header">Current Turn</div>
-            <div class="current-turn-body" @ref="currentTurnBody">
-                @if (string.IsNullOrWhiteSpace(CurrentTurnHtml))
+    <aside class="current-turn-panel" @ref="currentTurnPanel" aria-label="Agent rail">
+        <div class="rail-tabs" role="tablist" aria-label="Agent rail views">
+            <button type="button"
+                    class="@GetRailTabClass(RailTab.AgentActions)"
+                    role="tab"
+                    aria-selected="@(activeRailTab == RailTab.AgentActions)"
+                    @onclick="@(() => SelectRailTab(RailTab.AgentActions))">
+                Agent Actions
+                <strong>@PendingRequests.Count</strong>
+            </button>
+            <button type="button"
+                    class="@GetRailTabClass(RailTab.CurrentTurn)"
+                    role="tab"
+                    aria-selected="@(activeRailTab == RailTab.CurrentTurn)"
+                    @onclick="@(() => SelectRailTab(RailTab.CurrentTurn))">
+                Current Turn
+            </button>
+        </div>
+
+        @if (activeRailTab == RailTab.CurrentTurn)
+        {
+            <section class="turn-stream-region" @ref="turnStreamRegion" role="tabpanel" aria-label="Current turn stream">
+                <div class="current-turn-body" @ref="currentTurnBody">
+                    @if (string.IsNullOrWhiteSpace(CurrentTurnHtml))
+                    {
+                        <div class="current-turn-empty">Current turn stream will appear here.</div>
+                    }
+                    else
+                    {
+                        <div class="current-turn-markdown">@((MarkupString)CurrentTurnHtml)</div>
+                    }
+                </div>
+            </section>
+        }
+        else
+        {
+            <section class="agent-request-region" @ref="agentRequestRegion" role="tabpanel" aria-label="Agent actions">
+                <div class="agent-request-header">
+                    <span>Agent Actions</span>
+                    <strong>@PendingRequests.Count pending</strong>
+                </div>
+
+                @if (VisibleRequests.Count == 0)
                 {
-                    <div class="current-turn-empty">Current turn stream will appear here.</div>
+                    <div class="agent-request-empty">Permission and elicitation actions will appear here.</div>
                 }
                 else
                 {
-                    <div class="current-turn-markdown">@((MarkupString)CurrentTurnHtml)</div>
-                }
-            </div>
-        </section>
-
-        <div class="agent-splitter" @ref="agentSplitter" title="Drag to resize current turn and agent actions" aria-hidden="true"></div>
-
-        <section class="agent-request-region" @ref="agentRequestRegion" aria-label="Agent actions">
-            <div class="agent-request-header">
-                <span>Agent Actions</span>
-                <strong>@PendingRequests.Count pending</strong>
-            </div>
-
-            @if (VisibleRequests.Count == 0)
-            {
-                <div class="agent-request-empty">Permission and elicitation actions will appear here.</div>
-            }
-            else
-            {
-                <div class="agent-request-list">
-                    @foreach (CodexPermissionRequest request in VisibleRequests)
-                    {
-                        bool isPending = IsPending(request);
-                        <article class="@GetRequestCardClass(request)">
-                            <div class="agent-request-main">
-                                <span>@request.Method</span>
-                                <strong>@request.Summary</strong>
-                                <code>#@request.RequestId</code>
-                                <div class="agent-request-state">
-                                    <span>@GetRequestStatusText(request)</span>
-                                    <time>@GetRequestTimeText(request)</time>
+                    <div class="agent-request-list">
+                        @foreach (CodexPermissionRequest request in VisibleRequests)
+                        {
+                            bool isPending = IsPending(request);
+                            <article class="@GetRequestCardClass(request)">
+                                <div class="agent-request-main">
+                                    <span>@request.Method</span>
+                                    <strong>@request.Summary</strong>
+                                    <code>#@request.RequestId</code>
+                                    <div class="agent-request-state">
+                                        <span>@GetRequestStatusText(request)</span>
+                                        <time>@GetRequestTimeText(request)</time>
+                                    </div>
                                 </div>
-                            </div>
-                            @if (isPending)
-                            {
-                                <div class="agent-request-actions">
-                                    <RadzenButton Text="Allow"
-                                                  ButtonStyle="ButtonStyle.Success"
-                                                  Size="ButtonSize.Small"
-                                                  Disabled="@Busy"
-                                                  Click="@(() => ApprovePermission.InvokeAsync(request.RequestId))" />
-                                    @if (request.SupportsSessionApproval)
-                                    {
-                                        <RadzenButton Text="Allow Session"
+                                @if (isPending)
+                                {
+                                    <div class="agent-request-actions">
+                                        <RadzenButton Text="@GetApproveButtonText(request)"
                                                       ButtonStyle="ButtonStyle.Success"
                                                       Size="ButtonSize.Small"
                                                       Disabled="@Busy"
-                                                      Click="@(() => ApprovePermissionForSession.InvokeAsync(request.RequestId))" />
-                                    }
-                                    @if (request.SupportsPersistentApproval)
-                                    {
-                                        <RadzenButton Text="Allow Always"
-                                                      ButtonStyle="ButtonStyle.Warning"
+                                                      Click="@(() => ApprovePermission.InvokeAsync(request.RequestId))" />
+                                        @if (request.SupportsSessionApproval)
+                                        {
+                                            <RadzenButton Text="Allow Session"
+                                                          ButtonStyle="ButtonStyle.Success"
+                                                          Size="ButtonSize.Small"
+                                                          Disabled="@Busy"
+                                                          Click="@(() => ApprovePermissionForSession.InvokeAsync(request.RequestId))" />
+                                        }
+                                        @if (request.SupportsPersistentApproval)
+                                        {
+                                            <RadzenButton Text="Allow Always"
+                                                          ButtonStyle="ButtonStyle.Warning"
+                                                          Size="ButtonSize.Small"
+                                                          Disabled="@Busy"
+                                                          Click="@(() => ApprovePermissionAlways.InvokeAsync(request.RequestId))" />
+                                        }
+                                        <RadzenButton Text="Deny"
+                                                      ButtonStyle="ButtonStyle.Light"
                                                       Size="ButtonSize.Small"
                                                       Disabled="@Busy"
-                                                      Click="@(() => ApprovePermissionAlways.InvokeAsync(request.RequestId))" />
+                                                      Click="@(() => DenyPermission.InvokeAsync(request.RequestId))" />
+                                        <RadzenButton Text="Cancel Turn"
+                                                      ButtonStyle="ButtonStyle.Danger"
+                                                      Size="ButtonSize.Small"
+                                                      Disabled="@Busy"
+                                                      Click="@(() => CancelPermission.InvokeAsync(request.RequestId))" />
+                                    </div>
+                                    @if (!request.SupportsSessionApproval && !request.SupportsPersistentApproval)
+                                    {
+                                        <div class="agent-request-scope-note">
+                                            One-shot response only for this request type.
+                                        </div>
                                     }
-                                    <RadzenButton Text="Deny"
-                                                  ButtonStyle="ButtonStyle.Light"
-                                                  Size="ButtonSize.Small"
-                                                  Disabled="@Busy"
-                                                  Click="@(() => DenyPermission.InvokeAsync(request.RequestId))" />
-                                    <RadzenButton Text="Cancel Turn"
-                                                  ButtonStyle="ButtonStyle.Danger"
-                                                  Size="ButtonSize.Small"
-                                                  Disabled="@Busy"
-                                                  Click="@(() => CancelPermission.InvokeAsync(request.RequestId))" />
-                                </div>
-                            }
-                        </article>
-                    }
-                </div>
-            }
-        </section>
+                                }
+                            </article>
+                        }
+                    </div>
+                }
+            </section>
+        }
     </aside>
-
     <div class="assistant-splitter" @ref="assistantSplitter" title="Drag to resize transcript and input" aria-hidden="true"></div>
 
     <div class="chat-composer" @ref="chatComposer">
@@ -232,6 +257,8 @@
     public EventCallback<int> CancelPermission { get; set; }
 
     private bool HasTranscript => !string.IsNullOrWhiteSpace(TranscriptText);
+    private RailTab activeRailTab = RailTab.AgentActions;
+
     private IReadOnlyList<CodexPermissionRequest> PendingRequests =>
         PermissionRequests
             .Where(IsPending)
@@ -241,6 +268,18 @@
             .OrderByDescending(request => request.ResolvedAt ?? request.CreatedAt)
             .Take(1)
             .ToArray();
+
+    private void SelectRailTab(RailTab tab)
+    {
+        activeRailTab = tab;
+    }
+
+    private string GetRailTabClass(RailTab tab)
+    {
+        return activeRailTab == tab
+            ? "rail-tab active"
+            : "rail-tab";
+    }
 
     private static bool IsPending(CodexPermissionRequest request)
     {
@@ -275,11 +314,6 @@
             return "Awaiting user decision";
         }
 
-        if (request.Status.Contains("approved", StringComparison.OrdinalIgnoreCase))
-        {
-            return "Approved - waiting for command result";
-        }
-
         if (request.Status.Contains("command completed", StringComparison.OrdinalIgnoreCase))
         {
             return "Command completed after approval";
@@ -288,6 +322,21 @@
         if (request.Status.Contains("command failed", StringComparison.OrdinalIgnoreCase))
         {
             return "Command failed after approval";
+        }
+
+        if (request.Status.Contains("resumed", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Request resumed after approval";
+        }
+
+        if (request.Status.Contains("approved", StringComparison.OrdinalIgnoreCase))
+        {
+            if (PermissionRequestService.IsElicitationRequest(request.Method))
+            {
+                return "Elicitation answered - waiting for agent";
+            }
+
+            return "Approved - waiting for command result";
         }
 
         if (request.Status.Contains("cancelled", StringComparison.OrdinalIgnoreCase))
@@ -301,6 +350,13 @@
         }
 
         return request.Status;
+    }
+
+    private static string GetApproveButtonText(CodexPermissionRequest request)
+    {
+        return request.SupportsSessionApproval || request.SupportsPersistentApproval
+            ? "Allow"
+            : "Allow Once";
     }
 
     private static string GetRequestTimeText(CodexPermissionRequest request)
@@ -349,7 +405,6 @@
     private ElementReference turnStreamRegion;
     private ElementReference currentTurnBody;
     private ElementReference agentRequestRegion;
-    private ElementReference agentSplitter;
     private ElementReference chatComposer;
     private ElementReference assistantSplitter;
     private ElementReference chatInput;
@@ -402,16 +457,15 @@
                 transcriptPanel,
                 currentTurnPanel,
                 streamSplitter);
-            await resizeModule.InvokeVoidAsync(
-                "attachAgentSplitter",
-                currentTurnPanel,
-                turnStreamRegion,
-                agentRequestRegion,
-                agentSplitter);
             await resizeModule.InvokeVoidAsync("attachComposerAutoScroll", chatInput);
+            await resizeModule.InvokeVoidAsync("attachTranscriptCopyButtons", transcriptView);
         }
 
-        await resizeModule.InvokeVoidAsync("scrollElementToBottom", currentTurnBody);
+        if (activeRailTab == RailTab.CurrentTurn)
+        {
+            await resizeModule.InvokeVoidAsync("scrollElementToBottom", currentTurnBody);
+        }
+
         await resizeModule.InvokeVoidAsync("scrollElementToBottom", transcriptView);
     }
 
@@ -427,5 +481,11 @@
             {
             }
         }
+    }
+
+    private enum RailTab
+    {
+        AgentActions,
+        CurrentTurn
     }
 }

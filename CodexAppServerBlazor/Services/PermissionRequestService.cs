@@ -96,9 +96,14 @@ public sealed class PermissionRequestService
         return request.Status.Contains("approved", StringComparison.OrdinalIgnoreCase);
     }
 
+    public static bool IsElicitationRequest(string method)
+    {
+        return method.Equals("mcpServer/elicitation/request", StringComparison.OrdinalIgnoreCase);
+    }
+
     public static object CreateDenyResponse(string method, bool cancelTurn)
     {
-        if (method.Equals("mcpServer/elicitation/request", StringComparison.OrdinalIgnoreCase))
+        if (IsElicitationRequest(method))
         {
             return new
             {
@@ -137,7 +142,7 @@ public sealed class PermissionRequestService
 
     public static object CreateApproveResponse(string method, string rawJson, PermissionApprovalScope scope)
     {
-        if (method.Equals("mcpServer/elicitation/request", StringComparison.OrdinalIgnoreCase))
+        if (IsElicitationRequest(method))
         {
             return new
             {

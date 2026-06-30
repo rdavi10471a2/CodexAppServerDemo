@@ -15,6 +15,9 @@ The primary workflow is CWD/workspace based:
 
 - Keep changes small and explicit.
 - Prefer workflow order: discovery, proposal, edit/diff, compile, reindex.
+- Treat indexed MCP summaries as stale after source edits. Build and reindex
+  before trusting them again, and use `get_watched_solution_digest` as the
+  freshness gate before reloading product or test summaries.
 - Make context sources visible in the UI or logs.
 - Keep UI, MCP, and Codex app-server connection code separated by service boundaries.
 
@@ -23,8 +26,8 @@ The primary workflow is CWD/workspace based:
 - `CodexAppServerBlazor/`: Blazor Server control UI and app host.
 - `CodexAppServerClient.cs`: JSON-RPC client for `codex app-server`, protocol events, and token usage handling.
 - `Mcp/`: local MCP HTTP host and workspace metadata tools. The health endpoint
-  under configured `Mcp:Url` advertises available MCP discovery tools and
-  descriptions.
+  under configured `Mcp:Url` advertises available MCP discovery tool wire names
+  and descriptions.
 - `CodexAppServerWinForms_corrected.slnx`: root solution pointing at the Blazor project.
 
 ## Build And Run

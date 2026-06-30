@@ -50,17 +50,13 @@ public sealed class HarnessWorkspaceWorkflow
             return Task.FromResult(WatchedSolutionDigestResult.Fail($"Workspace CWD no longer exists: {repoRoot}", repoRoot));
         }
 
-        SourceWorkspaceStructureSnapshot snapshot = sourceWorkspaceService.BuildStructureSnapshot(repoRoot, filter: null);
+        SourceWorkspaceStructureSnapshot snapshot = sourceWorkspaceService.BuildProductStructureSnapshot(repoRoot, filter: null);
         string summaryHash = ComputeSummaryHash(snapshot);
         long summaryBytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(snapshot).LongLength;
-        bool ready = File.Exists(snapshot.WatchedSolutionPath)
-            && File.Exists(snapshot.IndexDatabasePath)
-            && snapshot.FileCount > 0
-            && snapshot.Tree.Count > 0
-            && string.IsNullOrWhiteSpace(snapshot.Message);
+        bool ready = IsSnapshotReady(snapshot);
 
         return Task.FromResult(new WatchedSolutionDigestResult(
-            Success: true,
+            Success: ready,
             RepoRoot: repoRoot,
             WorkspaceRoot: snapshot.WorkspaceRoot,
             WatchedSolutionPath: snapshot.WatchedSolutionPath,
@@ -71,7 +67,7 @@ public sealed class HarnessWorkspaceWorkflow
             SummaryHash: summaryHash,
             Ready: ready,
             Message: snapshot.Message,
-            Error: null));
+            Error: ready ? null : snapshot.Message));
     }
 
     public Task<WatchedSolutionSummaryResult> GetWatchedSolutionSummaryAsync(CancellationToken cancellationToken)
@@ -87,17 +83,19 @@ public sealed class HarnessWorkspaceWorkflow
             return Task.FromResult(WatchedSolutionSummaryResult.Fail($"Workspace CWD no longer exists: {repoRoot}", repoRoot));
         }
 
-        SourceWorkspaceStructureSnapshot snapshot = sourceWorkspaceService.BuildStructureSnapshot(repoRoot, filter: null);
+        SourceWorkspaceStructureSnapshot snapshot = sourceWorkspaceService.BuildProductStructureSnapshot(repoRoot, filter: null);
+        bool ready = IsSnapshotReady(snapshot);
         return Task.FromResult(new WatchedSolutionSummaryResult(
-            Success: true,
+            Success: ready,
             RepoRoot: repoRoot,
             WorkspaceRoot: snapshot.WorkspaceRoot,
             WatchedSolutionPath: snapshot.WatchedSolutionPath,
             IndexDatabasePath: snapshot.IndexDatabasePath,
             FileCount: snapshot.FileCount,
+            Ready: ready,
             Tree: snapshot.Tree,
             Message: snapshot.Message,
-            Error: null));
+            Error: ready ? null : snapshot.Message));
     }
 
     public Task<WatchedSolutionSummaryResult> GetTestProjectSummaryAsync(CancellationToken cancellationToken)
@@ -114,16 +112,27 @@ public sealed class HarnessWorkspaceWorkflow
         }
 
         SourceWorkspaceStructureSnapshot snapshot = sourceWorkspaceService.BuildTestProjectStructureSnapshot(repoRoot, filter: null);
+        bool ready = IsSnapshotReady(snapshot);
         return Task.FromResult(new WatchedSolutionSummaryResult(
-            Success: true,
+            Success: ready,
             RepoRoot: repoRoot,
             WorkspaceRoot: snapshot.WorkspaceRoot,
             WatchedSolutionPath: snapshot.WatchedSolutionPath,
             IndexDatabasePath: snapshot.IndexDatabasePath,
             FileCount: snapshot.FileCount,
+            Ready: ready,
             Tree: snapshot.Tree,
             Message: snapshot.Message,
-            Error: null));
+            Error: ready ? null : snapshot.Message));
+    }
+
+    private static bool IsSnapshotReady(SourceWorkspaceStructureSnapshot snapshot)
+    {
+        return File.Exists(snapshot.WatchedSolutionPath)
+            && File.Exists(snapshot.IndexDatabasePath)
+            && snapshot.FileCount > 0
+            && snapshot.Tree.Count > 0
+            && string.IsNullOrWhiteSpace(snapshot.Message);
     }
 
     private static string ComputeSummaryHash(SourceWorkspaceStructureSnapshot snapshot)
@@ -157,6 +166,7 @@ public sealed record WatchedSolutionSummaryResult(
     string? WatchedSolutionPath,
     string? IndexDatabasePath,
     int FileCount,
+    bool Ready,
     IReadOnlyList<SourceTreeNode> Tree,
     string? Message,
     string? Error)
@@ -170,6 +180,7 @@ public sealed record WatchedSolutionSummaryResult(
             WatchedSolutionPath: null,
             IndexDatabasePath: null,
             FileCount: 0,
+            Ready: false,
             Tree: [],
             Message: null,
             Error: error);

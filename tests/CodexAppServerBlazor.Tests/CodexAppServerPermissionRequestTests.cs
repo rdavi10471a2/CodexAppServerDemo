@@ -209,6 +209,38 @@ public sealed class CodexAppServerPermissionRequestTests
     }
 
     [Fact]
+    public void HandleServerMessage_emits_assistant_text_from_completed_content_blocks()
+    {
+        CodexAppServerClient client = new();
+        List<AssistantTextEvent> assistantEvents = [];
+        client.AssistantText += assistantEvents.Add;
+
+        client.HandleServerMessage("""
+            {"method":"item/completed","params":{"item":{"type":"agentMessage","content":[{"type":"output_text","text":"hello "},{"type":"text","text":"world"}]}}}
+            """);
+
+        AssistantTextEvent observed = Assert.Single(assistantEvents);
+        Assert.True(observed.IsFinal);
+        Assert.Equal("hello world", observed.Text);
+    }
+
+    [Fact]
+    public void HandleServerMessage_emits_assistant_delta_from_content_block_delta()
+    {
+        CodexAppServerClient client = new();
+        List<AssistantTextEvent> assistantEvents = [];
+        client.AssistantText += assistantEvents.Add;
+
+        client.HandleServerMessage("""
+            {"method":"item/agentMessage/delta","params":{"delta":{"type":"output_text","text":"streamed text"}}}
+            """);
+
+        AssistantTextEvent observed = Assert.Single(assistantEvents);
+        Assert.False(observed.IsFinal);
+        Assert.Equal("streamed text", observed.Text);
+    }
+
+    [Fact]
     public async Task RespondToServerRequestAsync_writes_json_rpc_denial_response()
     {
         List<string> sentMessages = [];

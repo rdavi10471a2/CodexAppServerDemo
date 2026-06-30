@@ -1,0 +1,87 @@
+.tasks-tab {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    height: 100%;
+    min-height: 0;
+    padding: 12px;
+    width: 100%;
+}
+
+.tasks-header {
+    align-items: center;
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+}
+
+.task-error {
+    background: #fff1f2;
+    border: 1px solid #e4a0a6;
+    border-radius: 6px;
+    color: #8a1f28;
+    padding: 9px 11px;
+}
+
+.task-layout {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    width: 100%;
+}
+
+.task-layout-navigator-hidden {
+    display: flex;
+}
+
+.task-navigator-shell {
+    display: flex;
+    flex: 0 0 390px;
+    min-width: 280px;
+    max-width: 680px;
+    min-height: 0;
+}
+
+.task-workspace-shell {
+    display: flex;
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 0;
+    width: 100%;
+}
+
+.task-layout-navigator-hidden .task-workspace-shell {
+    height: 100%;
+    width: 100%;
+}
+
+.task-splitter {
+    align-self: stretch;
+    flex: 0 0 10px;
+    margin: 0 8px;
+    border-radius: 999px;
+    background: #d7e1ea;
+    cursor: col-resize;
+}
+
+.task-splitter:hover,
+.task-splitter.dragging {
+    background: #5b82f1;
+}
+
+@media (max-width: 1100px) {
+    .task-layout {
+        display: block;
+    }
+
+    .task-navigator-shell,
+    .task-workspace-shell {
+        display: block;
+        width: 100%;
+    }
+
+    .task-splitter {
+        display: none;
+    }
+}
