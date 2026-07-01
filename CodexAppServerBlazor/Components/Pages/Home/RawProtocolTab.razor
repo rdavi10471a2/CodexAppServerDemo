@@ -1,0 +1,23 @@
+<div class="event-grid-shell">
+    @if (Lines.Count == 0)
+    {
+        <div class="empty-events">@EmptyText</div>
+    }
+    else
+    {
+        <div style="display:flex; flex-direction:column; gap:0.5rem; max-height:32rem; overflow:auto; padding:0.25rem 0;">
+            @foreach (string line in Lines.Reverse())
+            {
+                <pre style="margin:0; white-space:pre-wrap; word-break:break-word; background:#f8fafc; border:1px solid #dbe4f0; border-radius:8px; padding:0.75rem; font-size:0.8rem;">@line</pre>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public IReadOnlyList<string> Lines { get; set; } = [];
+
+    [Parameter]
+    public string EmptyText { get; set; } = "No protocol lines yet.";
+}

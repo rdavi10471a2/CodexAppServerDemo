@@ -1,59 +1,232 @@
+@using CodexAppServerBlazor.Services
+@using CodexAppServerBlazor.Services.Workflow
+@using Microsoft.AspNetCore.Components.Forms
 @inject IJSRuntime JS
 @implements IAsyncDisposable
 
 <div class="assistant-layout" @ref="assistantLayout">
-    <div class="assistant-main" @ref="assistantMain">
-        <section class="transcript-panel" @ref="transcriptPanel" aria-label="Completed Codex transcript">
-            <div class="transcript-header">
-                <span>Chat History</span>
-                <div class="transcript-actions">
-                    <RadzenButton Icon="content_copy"
-                                  Text="Copy"
-                                  ButtonStyle="ButtonStyle.Light"
-                                  Size="ButtonSize.Small"
-                                  Click="@CopyTranscript"
-                                  Disabled="@(!HasTranscript)" />
-                    <RadzenButton Icon="open_in_new"
-                                  Text="Pop Out"
-                                  ButtonStyle="ButtonStyle.Light"
-                                  Size="ButtonSize.Small"
-                                  Click="@OpenTranscript"
-                                  Disabled="@(!HasTranscript)" />
-                    <RadzenButton Icon="delete_sweep"
-                                  Text="Clear"
-                                  ButtonStyle="ButtonStyle.Light"
-                                  Size="ButtonSize.Small"
-                                  Click="@ClearTranscript"
-                                  Disabled="@(!HasTranscript || Busy)" />
-                </div>
+    <section class="transcript-panel" @ref="transcriptPanel" aria-label="Completed Codex transcript">
+        <div class="transcript-header">
+            <span>Chat History</span>
+            <div class="transcript-actions">
+                <RadzenButton Icon="content_copy"
+                              Text="Copy"
+                              ButtonStyle="ButtonStyle.Light"
+                              Size="ButtonSize.Small"
+                              Click="@CopyTranscript"
+                              Disabled="@(!HasTranscript)" />
+                <RadzenButton Icon="open_in_new"
+                              Text="Pop Out"
+                              ButtonStyle="ButtonStyle.Light"
+                              Size="ButtonSize.Small"
+                              Click="@OpenTranscript"
+                              Disabled="@(!HasTranscript)" />
+                <RadzenButton Icon="delete_sweep"
+                              Text="Start New Conversation"
+                              ButtonStyle="ButtonStyle.Light"
+                              Size="ButtonSize.Small"
+                              Title="Starts a fresh conversation by clearing the visible chat, removing pending attachments, and resetting the active Codex thread."
+                              Click="@ClearTranscript"
+                              Disabled="@(!HasTranscript || Busy || IsTurnRunning)" />
+                <RadzenButton Icon="assignment_add"
+                              Text="New Task"
+                              ButtonStyle="ButtonStyle.Secondary"
+                              Size="ButtonSize.Small"
+                              Click="@ShowCreateTaskPanel"
+                              Disabled="@(!CanCreateTaskFromTranscript)" />
             </div>
-            <iframe class="transcript-webview"
-                    @ref="transcriptWebView"
-                    title="Completed Codex transcript"
-                    sandbox="allow-scripts"
-                    srcdoc="@TranscriptHtml"></iframe>
-        </section>
-
-        <div class="stream-splitter" @ref="streamSplitter" title="Drag to resize history and current turn" aria-hidden="true"></div>
-
-        <aside class="current-turn-panel" @ref="currentTurnPanel" aria-label="Current turn stream">
-            <div class="current-turn-header">Current Turn</div>
-            <div class="current-turn-body" @ref="currentTurnBody">
-                @if (string.IsNullOrWhiteSpace(CurrentTurnHtml))
+        </div>
+        @if (HasPendingRequests)
+        {
+            <div class="permission-waiting-banner">
+                Agent is waiting for your approval in <strong>Agent Actions</strong>.
+            </div>
+        }
+        @if (isCreateTaskPanelVisible)
+        {
+            <div class="transcript-task-panel">
+                <label class="transcript-task-field">
+                    <span>Task title</span>
+                    <input type="text"
+                           value="@taskTitleDraft"
+                           placeholder="Promote this discussion into a task..."
+                           @oninput="OnTaskTitleInput" />
+                </label>
+                <div class="transcript-task-actions">
+                    <RadzenButton Icon="add_task"
+                                  Text="Create In New Task"
+                                  ButtonStyle="ButtonStyle.Primary"
+                                  Size="ButtonSize.Small"
+                                  Click="@CreateTask"
+                                  Disabled="@(!CanSubmitTaskCreation)" />
+                    <RadzenButton Icon="close"
+                                  Text="Cancel"
+                                  ButtonStyle="ButtonStyle.Light"
+                                  Size="ButtonSize.Small"
+                                  Click="@HideCreateTaskPanel"
+                                  Disabled="@Busy" />
+                </div>
+                @if (!IsDiscussMode)
                 {
-                    <div class="current-turn-empty">Current turn stream will appear here.</div>
+                    <div class="transcript-task-note">Switch to Discuss mode before promoting chat into a new task.</div>
+                }
+            </div>
+        }
+        <div class="transcript-view"
+             @ref="transcriptView"
+             role="log"
+             aria-label="Completed Codex transcript">
+            <div class="transcript-body">@((MarkupString)TranscriptBodyHtml)</div>
+        </div>
+    </section>
+
+    <div class="stream-splitter" @ref="streamSplitter" title="Drag to resize chat and agent rail" aria-hidden="true"></div>
+
+    <aside class="current-turn-panel" @ref="currentTurnPanel" aria-label="Agent rail">
+        <div class="rail-tabs" role="tablist" aria-label="Agent rail views">
+            <button type="button"
+                    class="@GetRailTabClass(RailTab.AgentActions)"
+                    role="tab"
+                    aria-selected="@(activeRailTab == RailTab.AgentActions)"
+                    @onclick="@(() => SelectRailTab(RailTab.AgentActions))">
+                Agent Actions
+                <strong>@PendingRequests.Count</strong>
+            </button>
+            <button type="button"
+                    class="@GetRailTabClass(RailTab.CurrentTurn)"
+                    role="tab"
+                    aria-selected="@(activeRailTab == RailTab.CurrentTurn)"
+                    @onclick="@(() => SelectRailTab(RailTab.CurrentTurn))">
+                Current Turn
+            </button>
+        </div>
+
+        @if (activeRailTab == RailTab.CurrentTurn)
+        {
+            <section class="turn-stream-region" @ref="turnStreamRegion" role="tabpanel" aria-label="Current turn stream">
+                <div class="current-turn-body" @ref="currentTurnBody">
+                    @if (string.IsNullOrWhiteSpace(CurrentTurnHtml))
+                    {
+                        <div class="current-turn-empty">Current turn stream will appear here.</div>
+                    }
+                    else
+                    {
+                        <div class="current-turn-markdown">@((MarkupString)CurrentTurnHtml)</div>
+                    }
+                </div>
+            </section>
+        }
+        else
+        {
+            <section class="agent-request-region" @ref="agentRequestRegion" role="tabpanel" aria-label="Agent actions">
+                <div class="agent-request-header">
+                    <span>Agent Actions</span>
+                    <strong>@GetPendingHeaderText()</strong>
+                </div>
+
+                @if (VisibleRequests.Count == 0)
+                {
+                    <div class="agent-request-empty">Permission and elicitation actions will appear here.</div>
                 }
                 else
                 {
-                    <div class="current-turn-markdown">@((MarkupString)CurrentTurnHtml)</div>
+                    <div class="agent-request-list">
+                        @foreach (CodexPermissionRequest request in VisibleRequests)
+                        {
+                            bool isPending = IsPending(request);
+                            <article class="@GetRequestCardClass(request)">
+                                <div class="agent-request-main">
+                                    <span>@request.Method</span>
+                                    <strong>@request.Summary</strong>
+                                    <code>#@request.RequestId</code>
+                                    <div class="agent-request-state">
+                                        <span>@GetRequestStatusText(request)</span>
+                                        <time>@GetRequestTimeText(request)</time>
+                                    </div>
+                                </div>
+                                @if (isPending)
+                                {
+                                    <div class="agent-request-actions">
+                                        <RadzenButton Text="@GetApproveButtonText(request)"
+                                                      ButtonStyle="ButtonStyle.Success"
+                                                      Size="ButtonSize.Small"
+                                                      Disabled="@Busy"
+                                                      Click="@(() => ApprovePermission.InvokeAsync(request.RequestId))" />
+                                        @if (request.SupportsSessionApproval)
+                                        {
+                                            <RadzenButton Text="Allow Session"
+                                                          ButtonStyle="ButtonStyle.Success"
+                                                          Size="ButtonSize.Small"
+                                                          Disabled="@Busy"
+                                                          Click="@(() => ApprovePermissionForSession.InvokeAsync(request.RequestId))" />
+                                        }
+                                        @if (request.SupportsPersistentApproval)
+                                        {
+                                            <RadzenButton Text="Allow Always"
+                                                          ButtonStyle="ButtonStyle.Warning"
+                                                          Size="ButtonSize.Small"
+                                                          Disabled="@Busy"
+                                                          Click="@(() => ApprovePermissionAlways.InvokeAsync(request.RequestId))" />
+                                        }
+                                        <RadzenButton Text="Deny"
+                                                      ButtonStyle="ButtonStyle.Light"
+                                                      Size="ButtonSize.Small"
+                                                      Disabled="@Busy"
+                                                      Click="@(() => DenyPermission.InvokeAsync(request.RequestId))" />
+                                        <RadzenButton Text="Cancel Turn"
+                                                      ButtonStyle="ButtonStyle.Danger"
+                                                      Size="ButtonSize.Small"
+                                                      Disabled="@Busy"
+                                                      Click="@(() => CancelPermission.InvokeAsync(request.RequestId))" />
+                                    </div>
+                                    @if (!request.SupportsSessionApproval && !request.SupportsPersistentApproval)
+                                    {
+                                        <div class="agent-request-scope-note">
+                                            One-shot response only for this request type.
+                                        </div>
+                                    }
+                                }
+                            </article>
+                        }
+                    </div>
                 }
-            </div>
-        </aside>
-    </div>
-
+            </section>
+        }
+    </aside>
     <div class="assistant-splitter" @ref="assistantSplitter" title="Drag to resize transcript and input" aria-hidden="true"></div>
 
     <div class="chat-composer" @ref="chatComposer">
+        <div class="attachment-strip">
+            <label class="attachment-picker-label" title="Copy files into runtime and attach them to the next turn">
+                <span class="attachment-icon">+</span>
+                <span>Attach</span>
+                @if (!Busy)
+                {
+                    <InputFile @key="AttachmentPickerKey"
+                               class="attachment-picker"
+                               OnChange="@AttachFiles"
+                               multiple />
+                }
+            </label>
+            <span class="attachment-count">@GetAttachmentCountText()</span>
+            @if (Attachments.Count > 0)
+            {
+                <div class="attachment-chips" aria-label="Attached files">
+                    @foreach (CodexTurnAttachment attachment in Attachments)
+                    {
+                        <span class="attachment-chip" title="@attachment.Path">
+                            <span class="attachment-kind">@GetAttachmentKindText(attachment)</span>
+                            <span>@attachment.Name</span>
+                            <small>@FormatAttachmentSize(attachment.SizeBytes)</small>
+                            <button type="button"
+                                    title="Remove attachment"
+                                    disabled="@Busy"
+                                    @onclick="@(() => RemoveAttachment.InvokeAsync(attachment.Path))">x</button>
+                        </span>
+                    }
+                </div>
+            }
+        </div>
         <textarea @ref="chatInput"
                   class="chat-composer-input"
                   value="@ChatDraft"
@@ -62,7 +235,7 @@
         <RadzenButton Icon="send"
                       ButtonStyle="ButtonStyle.Primary"
                       Click="@SendChatDraft"
-                      Disabled="@(!IsServerStarted || Busy || string.IsNullOrWhiteSpace(ChatDraft))" />
+                      Disabled="@(!IsServerStarted || Busy || (string.IsNullOrWhiteSpace(ChatDraft) && Attachments.Count == 0))" />
     </div>
 </div>
 
@@ -71,10 +244,25 @@
     public string TranscriptHtml { get; set; } = string.Empty;
 
     [Parameter]
+    public string TranscriptBodyHtml { get; set; } = string.Empty;
+
+    [Parameter]
     public string TranscriptText { get; set; } = string.Empty;
 
     [Parameter]
     public string CurrentTurnHtml { get; set; } = string.Empty;
+
+    [Parameter]
+    public WorkflowTurnMode TurnMode { get; set; }
+
+    [Parameter]
+    public IReadOnlyList<CodexPermissionRequest> PermissionRequests { get; set; } = [];
+
+    [Parameter]
+    public IReadOnlyList<CodexTurnAttachment> Attachments { get; set; } = [];
+
+    [Parameter]
+    public string AttachmentPickerKey { get; set; } = string.Empty;
 
     [Parameter]
     public string ChatDraft { get; set; } = string.Empty;
@@ -86,23 +274,257 @@
     public bool IsServerStarted { get; set; }
 
     [Parameter]
+    public bool IsTurnRunning { get; set; }
+
+    [Parameter]
     public bool Busy { get; set; }
+
+    [Parameter]
+    public EventCallback<string> CreateTaskFromTranscript { get; set; }
 
     [Parameter]
     public EventCallback SendChatDraft { get; set; }
 
     [Parameter]
+    public EventCallback<InputFileChangeEventArgs> AttachFiles { get; set; }
+
+    [Parameter]
+    public EventCallback<string> RemoveAttachment { get; set; }
+
+    [Parameter]
     public EventCallback ClearHistory { get; set; }
 
+    [Parameter]
+    public EventCallback<int> DenyPermission { get; set; }
+
+    [Parameter]
+    public EventCallback<int> ApprovePermission { get; set; }
+
+    [Parameter]
+    public EventCallback<int> ApprovePermissionForSession { get; set; }
+
+    [Parameter]
+    public EventCallback<int> ApprovePermissionAlways { get; set; }
+
+    [Parameter]
+    public EventCallback<int> CancelPermission { get; set; }
+
     private bool HasTranscript => !string.IsNullOrWhiteSpace(TranscriptText);
+    private bool HasPendingRequests => PendingRequests.Count > 0;
+    private bool IsDiscussMode => TurnMode == WorkflowTurnMode.Discuss;
+    private bool CanCreateTaskFromTranscript => HasTranscript && IsDiscussMode && !Busy;
+    private bool CanSubmitTaskCreation => CanCreateTaskFromTranscript && !string.IsNullOrWhiteSpace(taskTitleDraft);
+    private RailTab activeRailTab = RailTab.AgentActions;
+    private bool isCreateTaskPanelVisible;
+    private string taskTitleDraft = string.Empty;
+    private int? lastPendingRequestId;
+
+    private IReadOnlyList<CodexPermissionRequest> PendingRequests =>
+        PermissionRequests
+            .Where(IsPending)
+            .ToArray();
+    private IReadOnlyList<CodexPermissionRequest> VisibleRequests =>
+        PendingRequests
+            .OrderBy(request => request.CreatedAt)
+            .Concat(PermissionRequests
+                .Where(request => !IsPending(request))
+                .OrderByDescending(request => request.ResolvedAt ?? request.CreatedAt)
+                .Take(5))
+            .DistinctBy(request => request.RequestId)
+            .ToArray();
+
+    private void SelectRailTab(RailTab tab)
+    {
+        activeRailTab = tab;
+    }
+
+    protected override void OnParametersSet()
+    {
+        CodexPermissionRequest? latestPending = PendingRequests
+            .OrderByDescending(request => request.CreatedAt)
+            .FirstOrDefault();
+        if (latestPending is not null)
+        {
+            if (lastPendingRequestId != latestPending.RequestId)
+            {
+                activeRailTab = RailTab.AgentActions;
+                lastPendingRequestId = latestPending.RequestId;
+            }
+        }
+        else
+        {
+            lastPendingRequestId = null;
+        }
+    }
+
+    private void ShowCreateTaskPanel()
+    {
+        isCreateTaskPanelVisible = true;
+        if (string.IsNullOrWhiteSpace(taskTitleDraft))
+        {
+            taskTitleDraft = "Promote current discussion";
+        }
+    }
+
+    private void HideCreateTaskPanel()
+    {
+        isCreateTaskPanelVisible = false;
+        taskTitleDraft = string.Empty;
+    }
+
+    private string GetRailTabClass(RailTab tab)
+    {
+        bool isActive = activeRailTab == tab;
+        bool isWaitingTab = tab == RailTab.AgentActions && HasPendingRequests;
+        if (isActive && isWaitingTab)
+        {
+            return "rail-tab active waiting";
+        }
+
+        if (isActive)
+        {
+            return "rail-tab active";
+        }
+
+        return isWaitingTab
+            ? "rail-tab waiting"
+            : "rail-tab";
+    }
+
+    private string GetPendingHeaderText()
+    {
+        return PendingRequests.Count switch
+        {
+            0 => "No pending requests",
+            1 => "Waiting for you",
+            _ => $"{PendingRequests.Count} waiting for you"
+        };
+    }
+
+    private static bool IsPending(CodexPermissionRequest request)
+    {
+        return request.Status.Equals("pending", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetRequestCardClass(CodexPermissionRequest request)
+    {
+        if (IsPending(request))
+        {
+            return "agent-request-card pending";
+        }
+
+        if (request.Status.Contains("approved", StringComparison.OrdinalIgnoreCase))
+        {
+            return "agent-request-card approved";
+        }
+
+        if (request.Status.Contains("denied", StringComparison.OrdinalIgnoreCase) ||
+            request.Status.Contains("cancelled", StringComparison.OrdinalIgnoreCase))
+        {
+            return "agent-request-card denied";
+        }
+
+        return "agent-request-card resolved";
+    }
+
+    private static string GetRequestStatusText(CodexPermissionRequest request)
+    {
+        if (IsPending(request))
+        {
+            return "Awaiting user decision";
+        }
+
+        if (request.Status.Contains("command completed", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Command completed after approval";
+        }
+
+        if (request.Status.Contains("command failed", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Command failed after approval";
+        }
+
+        if (request.Status.Contains("resumed", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Request resumed after approval";
+        }
+
+        if (request.Status.Contains("approved", StringComparison.OrdinalIgnoreCase))
+        {
+            if (PermissionRequestService.IsElicitationRequest(request.Method))
+            {
+                return "Elicitation answered - waiting for agent";
+            }
+
+            return "Approved - waiting for command result";
+        }
+
+        if (request.Status.Contains("cancelled", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Cancelled - turn interruption requested";
+        }
+
+        if (request.Status.Contains("denied", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Denied - agent must choose another path";
+        }
+
+        return request.Status;
+    }
+
+    private static string GetApproveButtonText(CodexPermissionRequest request)
+    {
+        return request.SupportsSessionApproval || request.SupportsPersistentApproval
+            ? "Allow"
+            : "Allow Once";
+    }
+
+    private static string GetRequestTimeText(CodexPermissionRequest request)
+    {
+        DateTimeOffset timestamp = request.ResolvedAt ?? request.CreatedAt;
+        return timestamp.ToLocalTime().ToString("HH:mm:ss");
+    }
+
+    private static string GetAttachmentKindText(CodexTurnAttachment attachment)
+    {
+        return attachment.Kind == CodexTurnAttachmentKind.LocalImage
+            ? "IMG"
+            : "FILE";
+    }
+
+    private string GetAttachmentCountText()
+    {
+        return Attachments.Count switch
+        {
+            0 => "No files attached",
+            1 => "1 file attached",
+            _ => $"{Attachments.Count} files attached"
+        };
+    }
+
+    private static string FormatAttachmentSize(long sizeBytes)
+    {
+        if (sizeBytes >= 1024L * 1024L)
+        {
+            return $"{sizeBytes / 1024d / 1024d:0.##} MB";
+        }
+
+        if (sizeBytes >= 1024L)
+        {
+            return $"{sizeBytes / 1024d:0.##} KB";
+        }
+
+        return $"{sizeBytes} B";
+    }
 
     private ElementReference assistantLayout;
-    private ElementReference assistantMain;
     private ElementReference transcriptPanel;
-    private ElementReference transcriptWebView;
+    private ElementReference transcriptView;
     private ElementReference streamSplitter;
     private ElementReference currentTurnPanel;
+    private ElementReference turnStreamRegion;
     private ElementReference currentTurnBody;
+    private ElementReference agentRequestRegion;
     private ElementReference chatComposer;
     private ElementReference assistantSplitter;
     private ElementReference chatInput;
@@ -111,6 +533,23 @@
     private Task OnChatInput(ChangeEventArgs args)
     {
         return ChatDraftChanged.InvokeAsync(args.Value?.ToString() ?? string.Empty);
+    }
+
+    private Task OnTaskTitleInput(ChangeEventArgs args)
+    {
+        taskTitleDraft = args.Value?.ToString() ?? string.Empty;
+        return Task.CompletedTask;
+    }
+
+    private async Task CreateTask()
+    {
+        if (!CanSubmitTaskCreation)
+        {
+            return;
+        }
+
+        await CreateTaskFromTranscript.InvokeAsync(taskTitleDraft);
+        HideCreateTaskPanel();
     }
 
     private async Task CopyTranscript()
@@ -146,20 +585,25 @@
             await resizeModule.InvokeVoidAsync(
                 "attachAssistantSplitter",
                 assistantLayout,
-                assistantMain,
+                transcriptPanel,
                 chatComposer,
                 assistantSplitter);
             await resizeModule.InvokeVoidAsync(
                 "attachStreamSplitter",
-                assistantMain,
+                assistantLayout,
                 transcriptPanel,
                 currentTurnPanel,
                 streamSplitter);
             await resizeModule.InvokeVoidAsync("attachComposerAutoScroll", chatInput);
+            await resizeModule.InvokeVoidAsync("attachTranscriptCopyButtons", transcriptView);
         }
 
-        await resizeModule.InvokeVoidAsync("scrollElementToBottom", currentTurnBody);
-        await resizeModule.InvokeVoidAsync("scrollIframeToBottom", transcriptWebView);
+        if (activeRailTab == RailTab.CurrentTurn)
+        {
+            await resizeModule.InvokeVoidAsync("scrollElementToBottom", currentTurnBody);
+        }
+
+        await resizeModule.InvokeVoidAsync("scrollElementToBottom", transcriptView);
     }
 
     public async ValueTask DisposeAsync()
@@ -174,5 +618,11 @@
             {
             }
         }
+    }
+
+    private enum RailTab
+    {
+        AgentActions,
+        CurrentTurn
     }
 }

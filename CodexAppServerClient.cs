@@ -10,8 +10,14 @@ public sealed class CodexAppServerClient : IAsyncDisposable
 {
     private readonly ConcurrentDictionary<int, TaskCompletionSource<JsonRpcResponse>> _pending = new();
     private readonly CancellationTokenSource _cts = new();
+    private readonly Func<string, CancellationToken, Task>? rawSender;
     private Process? _process;
     private int _nextId;
+
+    public CodexAppServerClient(Func<string, CancellationToken, Task>? rawSender = null)
+    {
+        this.rawSender = rawSender;
+    }
 
     public event Action<string>? RawProtocol;
     public event Action<string>? LogLine;
@@ -19,10 +25,16 @@ public sealed class CodexAppServerClient : IAsyncDisposable
     public event Action<TelemetryEvent>? Telemetry;
     public event Action<ToolEvent>? ToolActivity;
     public event Action<StatusEvent>? Status;
+    public event Action<CodexServerRequestEvent>? ServerRequest;
     public event Action<int>? Exited;
 
     public bool IsStarted => _process is { HasExited: false };
     public string? ThreadId { get; private set; }
+
+    public void ResetThreadState()
+    {
+        ThreadId = null;
+    }
 
     public async Task StartAsync(string codexExe = "codex", CancellationToken cancellationToken = default)
     {
@@ -68,6 +80,10 @@ public sealed class CodexAppServerClient : IAsyncDisposable
     {
         var init = await SendRequestAsync("initialize", new
         {
+            capabilities = new
+            {
+                experimentalApi = true
+            },
             clientInfo = new
             {
                 name = "codex_app_server_blazor",
@@ -90,14 +106,18 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         string sandbox,
         CancellationToken cancellationToken = default)
     {
-        var response = await SendRequestAsync("thread/start", new
+        object approvalPolicyPayload = CreateApprovalPolicy(approvalPolicy);
+        object payload = new
         {
             model,
             cwd = repoRoot,
-            approvalPolicy,
+            approvalPolicy = approvalPolicyPayload,
+            approvalsReviewer = "user",
             sandbox,
             serviceName = "codex_app_server_blazor"
-        }, cancellationToken);
+        };
+        LogLine?.Invoke("thread/start payload: " + JsonSerializer.Serialize(payload));
+        var response = await SendRequestAsync("thread/start", payload, cancellationToken);
 
         ThrowIfRpcError(response);
 
@@ -111,23 +131,165 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         return threadId;
     }
 
-    public async Task StartTurnAsync(string prompt, CancellationToken cancellationToken = default)
+    public async Task StartTurnAsync(
+        string prompt,
+        string repoRoot,
+        string model,
+        string approvalPolicy,
+        string sandbox,
+        IReadOnlyList<CodexTurnAttachment>? attachments = null,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(ThreadId))
             throw new InvalidOperationException("Start a thread first.");
 
-        var response = await SendRequestAsync("turn/start", new
+        List<object> input =
+        [
+            new { type = "text", text = prompt }
+        ];
+
+        if (attachments is not null)
+        {
+            foreach (CodexTurnAttachment attachment in attachments)
+            {
+                input.Add(CreateTurnAttachmentInput(attachment, repoRoot));
+            }
+        }
+
+        if (attachments is { Count: > 0 })
+        {
+            Status?.Invoke(new StatusEvent("turn/input", BuildTurnInputSummary(attachments, repoRoot)));
+        }
+
+        object approvalPolicyPayload = CreateApprovalPolicy(approvalPolicy);
+        object sandboxPolicyPayload = CreateSandboxPolicy(sandbox, repoRoot);
+        object payload = new
         {
             threadId = ThreadId,
-            input = new object[]
-            {
-                new { type = "text", text = prompt }
-            }
-        }, cancellationToken);
+            cwd = repoRoot,
+            model,
+            approvalPolicy = approvalPolicyPayload,
+            approvalsReviewer = "user",
+            sandboxPolicy = sandboxPolicyPayload,
+            input
+        };
+        LogLine?.Invoke("turn/start payload: " + JsonSerializer.Serialize(payload));
+        var response = await SendRequestAsync("turn/start", payload, cancellationToken);
 
         ThrowIfRpcError(response);
         Status?.Invoke(new StatusEvent("turn", "Turn accepted by app-server."));
         LogLine?.Invoke("Turn started.");
+    }
+
+    private static object CreateApprovalPolicy(string approvalPolicy)
+    {
+        return approvalPolicy.Trim().ToLowerInvariant() switch
+        {
+            "on-request" => new
+            {
+                granular = new
+                {
+                    mcp_elicitations = false,
+                    rules = false,
+                    sandbox_approval = true
+                }
+            },
+            "untrusted" => "untrusted",
+            "on-failure" => "on-failure",
+            "never" => "never",
+            _ => "on-request"
+        };
+    }
+
+    private static object CreateTurnAttachmentInput(CodexTurnAttachment attachment, string repoRoot)
+    {
+        return attachment.Kind switch
+        {
+            CodexTurnAttachmentKind.LocalImage => new
+            {
+                type = "localImage",
+                path = attachment.Path
+            },
+            _ => new
+            {
+                type = "text",
+                text = BuildAttachmentText(attachment, repoRoot)
+            }
+        };
+    }
+
+    private static string BuildAttachmentText(CodexTurnAttachment attachment, string repoRoot)
+    {
+        string submittedPath = GetSubmittedPath(attachment.Path, repoRoot);
+        string content = File.ReadAllText(attachment.Path, Encoding.UTF8);
+        return $$"""
+        Attached file: {{attachment.Name}}
+        Path: {{submittedPath}}
+        Size: {{attachment.SizeBytes}} bytes
+
+        ```text
+        {{content}}
+        ```
+        """;
+    }
+
+    private static string BuildTurnInputSummary(IReadOnlyList<CodexTurnAttachment> attachments, string repoRoot)
+    {
+        List<string> parts = ["text: prompt"];
+        foreach (CodexTurnAttachment attachment in attachments)
+        {
+            string submittedPath = attachment.Kind == CodexTurnAttachmentKind.LocalImage
+                ? attachment.Path
+                : GetSubmittedPath(attachment.Path, repoRoot);
+            string inputType = attachment.Kind == CodexTurnAttachmentKind.LocalImage ? "localImage" : "text";
+            parts.Add($"{inputType}: {attachment.Name} ({attachment.SizeBytes} bytes) -> {submittedPath}");
+        }
+
+        return "Submitting turn inputs: " + string.Join("; ", parts);
+    }
+
+    private static string GetSubmittedPath(string attachmentPath, string repoRoot)
+    {
+        string fullRoot = Path.GetFullPath(repoRoot);
+        string fullPath = Path.GetFullPath(attachmentPath);
+        string relativePath = Path.GetRelativePath(fullRoot, fullPath);
+        if (relativePath == ".." ||
+            relativePath.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) ||
+            Path.IsPathRooted(relativePath))
+        {
+            return fullPath;
+        }
+
+        return relativePath;
+    }
+
+    private static object CreateSandboxPolicy(string sandbox, string repoRoot)
+    {
+        return sandbox.Trim().ToLowerInvariant() switch
+        {
+            "read-only" => new
+            {
+                type = "readOnly",
+                networkAccess = false
+            },
+            "workspace-write" => new
+            {
+                type = "workspaceWrite",
+                networkAccess = false,
+                writableRoots = new[] { repoRoot },
+                excludeTmpdirEnvVar = false,
+                excludeSlashTmp = false
+            },
+            "danger-full-access" => new
+            {
+                type = "dangerFullAccess"
+            },
+            _ => new
+            {
+                type = "readOnly",
+                networkAccess = false
+            }
+        };
     }
 
     public async Task<JsonRpcResponse> SendRequestAsync(string method, object parameters, CancellationToken cancellationToken = default)
@@ -161,18 +323,36 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         }, cancellationToken);
     }
 
+    public Task RespondToServerRequestAsync(
+        int requestId,
+        object result,
+        CancellationToken cancellationToken = default)
+    {
+        return SendRawAsync(new
+        {
+            id = requestId,
+            result
+        }, cancellationToken);
+    }
+
     private async Task SendRawAsync(object message, CancellationToken cancellationToken)
     {
-        var process = _process ?? throw new InvalidOperationException("Codex app-server is not started.");
-        if (process.HasExited)
-            throw new InvalidOperationException("Codex app-server has exited.");
-
         var json = JsonSerializer.Serialize(message, new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         });
 
         RawProtocol?.Invoke("CLIENT: " + json);
+        if (rawSender is not null)
+        {
+            await rawSender(json, cancellationToken);
+            return;
+        }
+
+        var process = _process ?? throw new InvalidOperationException("Codex app-server is not started.");
+        if (process.HasExited)
+            throw new InvalidOperationException("Codex app-server has exited.");
+
         await process.StandardInput.WriteLineAsync(json.AsMemory(), cancellationToken);
         await process.StandardInput.FlushAsync(cancellationToken);
     }
@@ -192,7 +372,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
                     continue;
 
                 RawProtocol?.Invoke("SERVER: " + line);
-                DispatchServerMessage(line);
+                HandleServerMessage(line);
             }
         }
         catch (OperationCanceledException)
@@ -234,7 +414,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         }
     }
 
-    private void DispatchServerMessage(string line)
+    public void HandleServerMessage(string line)
     {
         JsonNode? node;
         try
@@ -250,7 +430,16 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         if (node is null)
             return;
 
+        var method = node["method"]?.GetValue<string>();
         var idNode = node["id"];
+        if (!string.IsNullOrWhiteSpace(method)
+            && idNode is not null
+            && idNode.GetValueKind() == JsonValueKind.Number)
+        {
+            EmitServerRequest(idNode.GetValue<int>(), method, node, line);
+            return;
+        }
+
         if (idNode is not null && idNode.GetValueKind() == JsonValueKind.Number)
         {
             var id = idNode.GetValue<int>();
@@ -267,9 +456,53 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             return;
         }
 
-        var method = node["method"]?.GetValue<string>();
         if (!string.IsNullOrWhiteSpace(method))
             ClassifyNotification(method, node);
+    }
+
+    private void EmitServerRequest(int requestId, string method, JsonNode node, string rawJson)
+    {
+        JsonNode? parameters = node["params"];
+        string summary = BuildServerRequestSummary(method, node);
+        ServerRequest?.Invoke(new CodexServerRequestEvent(
+            requestId,
+            method,
+            summary,
+            rawJson,
+            GetStringValue(parameters?["itemId"]) ?? GetStringValue(parameters?["callId"]),
+            GetStringValue(parameters?["approvalId"])));
+        Status?.Invoke(new StatusEvent(method, summary));
+    }
+
+    private static string BuildServerRequestSummary(string method, JsonNode node)
+    {
+        JsonNode? parameters = node["params"];
+        string? reason = GetStringValue(parameters?["reason"]);
+        string? cwd = GetStringValue(parameters?["cwd"]);
+        string? command = GetStringValue(parameters?["command"]);
+
+        if (!string.IsNullOrWhiteSpace(reason))
+        {
+            return string.IsNullOrWhiteSpace(cwd)
+                ? reason
+                : $"{reason} (cwd: {cwd})";
+        }
+
+        if (!string.IsNullOrWhiteSpace(command))
+        {
+            return $"Approval requested for command: {command}";
+        }
+
+        return parameters is null
+            ? $"Server request: {method}"
+            : $"Server request: {method}: {parameters.ToJsonString(new JsonSerializerOptions { WriteIndented = false })}";
+    }
+
+    private static string? GetStringValue(JsonNode? node)
+    {
+        return node is not null && node.GetValueKind() == JsonValueKind.String
+            ? node.GetValue<string>()
+            : null;
     }
 
     private void ClassifyResponse(JsonRpcResponse response)
@@ -341,7 +574,10 @@ public sealed class CodexAppServerClient : IAsyncDisposable
 
     private void EmitAssistantDelta(JsonNode node)
     {
-        var delta = node["params"]?["delta"]?.GetValue<string>();
+        string? delta = ExtractAssistantText(
+            node["params"]?["delta"] ??
+            node["params"]?["content"] ??
+            node["params"]?["item"]);
         if (!string.IsNullOrEmpty(delta))
             AssistantText?.Invoke(new AssistantTextEvent(delta, IsFinal: false));
     }
@@ -360,11 +596,23 @@ public sealed class CodexAppServerClient : IAsyncDisposable
                     "command started",
                     item?["command"]?.GetValue<string>() ?? "command",
                     item?["status"]?.GetValue<string>(),
-                    item?["cwd"]?.GetValue<string>()));
+                    BuildCommandExecutionDetail(item),
+                    item?["id"]?.GetValue<string>(),
+                    item?["approvalId"]?.GetValue<string>()));
                 break;
 
             case "reasoning":
                 Status?.Invoke(new StatusEvent("reasoning", "Reasoning item started."));
+                break;
+
+            case "fileChange":
+                ToolActivity?.Invoke(new ToolEvent(
+                    "file change started",
+                    "file change",
+                    item?["status"]?.GetValue<string>(),
+                    item?["changes"]?.ToJsonString(),
+                    item?["id"]?.GetValue<string>(),
+                    null));
                 break;
 
             case "agentMessage":
@@ -391,10 +639,17 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         switch (type)
         {
             case "agentMessage":
-                var text = item?["text"]?.GetValue<string>();
+                string? text = ExtractAssistantText(item);
                 if (!string.IsNullOrEmpty(text))
+                {
                     AssistantText?.Invoke(new AssistantTextEvent(text, IsFinal: true));
-                Status?.Invoke(new StatusEvent("assistant", "Assistant response completed."));
+                    Status?.Invoke(new StatusEvent("assistant", "Assistant response completed."));
+                }
+                else
+                {
+                    Status?.Invoke(new StatusEvent("assistant", $"Assistant response completed without extractable text: {Compact(node)}"));
+                }
+
                 break;
 
             case "commandExecution":
@@ -402,11 +657,23 @@ public sealed class CodexAppServerClient : IAsyncDisposable
                     "command completed",
                     item?["command"]?.GetValue<string>() ?? "command",
                     item?["status"]?.GetValue<string>(),
-                    item?["aggregatedOutput"]?.GetValue<string>()));
+                    BuildCommandExecutionDetail(item),
+                    item?["id"]?.GetValue<string>(),
+                    item?["approvalId"]?.GetValue<string>()));
                 break;
 
             case "reasoning":
                 Status?.Invoke(new StatusEvent("reasoning", "Reasoning item completed."));
+                break;
+
+            case "fileChange":
+                ToolActivity?.Invoke(new ToolEvent(
+                    "file change completed",
+                    "file change",
+                    item?["status"]?.GetValue<string>(),
+                    item?["changes"]?.ToJsonString(),
+                    item?["id"]?.GetValue<string>(),
+                    null));
                 break;
 
             case "userMessage":
@@ -416,6 +683,61 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             default:
                 Status?.Invoke(new StatusEvent("item completed", type));
                 break;
+        }
+    }
+
+    private static string? ExtractAssistantText(JsonNode? node)
+    {
+        if (node is null)
+            return null;
+
+        if (node is JsonValue value && value.TryGetValue<string>(out string? directText))
+            return directText;
+
+        List<string> parts = [];
+        CollectAssistantText(node, parts);
+        string text = string.Concat(parts);
+        return string.IsNullOrWhiteSpace(text) ? null : text;
+    }
+
+    private static void CollectAssistantText(JsonNode? node, List<string> parts)
+    {
+        if (node is JsonArray array)
+        {
+            foreach (JsonNode? child in array)
+            {
+                CollectAssistantText(child, parts);
+            }
+
+            return;
+        }
+
+        if (node is not JsonObject obj)
+            return;
+
+        AddStringProperty(obj, "text", parts);
+        AddStringProperty(obj, "delta", parts);
+        AddStringProperty(obj, "output_text", parts);
+        AddStringProperty(obj, "outputText", parts);
+        AddStringProperty(obj, "markdown", parts);
+        AddStringProperty(obj, "message", parts);
+        AddStringProperty(obj, "value", parts);
+
+        foreach (KeyValuePair<string, JsonNode?> property in obj)
+        {
+            if (property.Value is JsonArray or JsonObject)
+            {
+                CollectAssistantText(property.Value, parts);
+            }
+        }
+    }
+
+    private static void AddStringProperty(JsonObject obj, string propertyName, List<string> parts)
+    {
+        JsonNode? value = obj[propertyName];
+        if (value is JsonValue textValue && textValue.TryGetValue<string>(out string? text))
+        {
+            parts.Add(text);
         }
     }
 
@@ -430,7 +752,9 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             "mcp status",
             name,
             status,
-            error));
+            error,
+            null,
+            null));
     }
 
     private void EmitTokenTelemetry(JsonNode node)
@@ -494,6 +818,85 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         {
             return node.ToJsonString();
         }
+    }
+
+    private static string BuildCommandExecutionDetail(JsonNode? item)
+    {
+        if (item is null)
+        {
+            return string.Empty;
+        }
+
+        List<string> metadata = [];
+        string? cwd = GetStringValue(item["cwd"]);
+        if (!string.IsNullOrWhiteSpace(cwd))
+        {
+            metadata.Add("cwd: " + cwd);
+        }
+
+        string? processId = GetStringValue(item["processId"]);
+        if (!string.IsNullOrWhiteSpace(processId))
+        {
+            metadata.Add("pid: " + processId);
+        }
+
+        if (TryGetInt32(item["exitCode"], out int exitCode))
+        {
+            metadata.Add("exit: " + exitCode);
+        }
+
+        if (TryGetInt64(item["durationMs"], out long durationMs))
+        {
+            metadata.Add("duration: " + durationMs + " ms");
+        }
+
+        string output = TruncateMultiline(GetStringValue(item["aggregatedOutput"]), 2400);
+        if (metadata.Count == 0)
+        {
+            return output;
+        }
+
+        return string.IsNullOrWhiteSpace(output)
+            ? string.Join(" | ", metadata)
+            : string.Join(" | ", metadata) + Environment.NewLine + Environment.NewLine + output;
+    }
+
+    private static string TruncateMultiline(string? value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        string normalized = value.Replace("\r\n", "\n", StringComparison.Ordinal).Trim();
+        if (normalized.Length <= maxLength)
+        {
+            return normalized;
+        }
+
+        return normalized[..maxLength].TrimEnd() + Environment.NewLine + "... output truncated ...";
+    }
+
+    private static bool TryGetInt32(JsonNode? node, out int value)
+    {
+        if (node is JsonValue jsonValue && jsonValue.TryGetValue<int>(out value))
+        {
+            return true;
+        }
+
+        value = default;
+        return false;
+    }
+
+    private static bool TryGetInt64(JsonNode? node, out long value)
+    {
+        if (node is JsonValue jsonValue && jsonValue.TryGetValue<long>(out value))
+        {
+            return true;
+        }
+
+        value = default;
+        return false;
     }
 
     private static string StripAnsi(string value)

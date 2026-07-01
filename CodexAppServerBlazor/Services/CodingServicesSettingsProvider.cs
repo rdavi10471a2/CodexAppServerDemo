@@ -5,12 +5,10 @@ namespace CodexAppServerBlazor.Services;
 public sealed class CodingServicesSettingsProvider
 {
     private readonly IConfiguration configuration;
-    private readonly IHostEnvironment environment;
 
-    public CodingServicesSettingsProvider(IConfiguration configuration, IHostEnvironment environment)
+    public CodingServicesSettingsProvider(IConfiguration configuration)
     {
         this.configuration = configuration;
-        this.environment = environment;
     }
 
     public CodingServicesSettings GetSettings(string workspaceRoot)
@@ -21,7 +19,7 @@ public sealed class CodingServicesSettingsProvider
         }
 
         string fullWorkspaceRoot = Path.GetFullPath(workspaceRoot);
-        string repositoryRoot = ResolveRepositoryRoot();
+        string repositoryRoot = fullWorkspaceRoot;
         string runtimeRoot = ResolveConfiguredPath("CodingServices:RuntimeRoot", "runtime", repositoryRoot);
         string watchedSolutionPath = ResolveWatchedSolutionPath(fullWorkspaceRoot);
         string[]? winMergeCandidatePaths = configuration
@@ -29,7 +27,7 @@ public sealed class CodingServicesSettingsProvider
             .Get<string[]>();
         string[] testProjectPaths = ResolveConfiguredPaths(
             "CodingServices:TestProjectPaths",
-            repositoryRoot);
+            fullWorkspaceRoot);
 
         return CodingServicesSettings.Create(
             repositoryRoot,
@@ -90,22 +88,5 @@ public sealed class CodingServicesSettingsProvider
         }
 
         return Path.GetFullPath(Path.Combine(basePath, path));
-    }
-
-    private string ResolveRepositoryRoot()
-    {
-        string current = environment.ContentRootPath;
-        DirectoryInfo? directory = new(current);
-        while (directory is not null)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "CodexAppServerWinForms_corrected.slnx")))
-            {
-                return directory.FullName;
-            }
-
-            directory = directory.Parent;
-        }
-
-        return current;
     }
 }

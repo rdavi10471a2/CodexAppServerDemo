@@ -65,7 +65,7 @@ public sealed class PreMergeValidationService
         }
 
         string validationWorkspaceRoot = Path.Combine(
-            MonitorWorkspacePaths.GetWatchedSolutionWorkspaceRoot(settings),
+            SystemWorkspacePaths.GetWatchedSolutionWorkspaceRoot(settings),
             "validation",
             $"{DateTimeOffset.UtcNow:yyyyMMddTHHmmssfff}-{Guid.NewGuid():N}"[..42]);
         string sourceRoot = settings.WatchedProjectFolder;

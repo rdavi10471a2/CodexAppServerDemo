@@ -16,7 +16,7 @@ public static class McpHostFactory
         SourceWorkspaceService sourceWorkspaceService,
         string? localMcpUrl)
     {
-        string endpointUrl = NormalizeUrl(localMcpUrl, DefaultLocalMcpUrl);
+        string endpointUrl = NormalizeLocalUrl(localMcpUrl, DefaultLocalMcpUrl);
         var builder = WebApplication.CreateBuilder();
 
         builder.WebHost.UseUrls(endpointUrl);
@@ -41,26 +41,28 @@ public static class McpHostFactory
             mcpEndpoint = endpointUrl,
             transport = "streamable-http",
             stateless = true,
+            requiredAccept = "application/json, text/event-stream",
+            responseFormat = "Successful MCP calls are returned as text/event-stream frames with JSON content in event: message payloads.",
             tools = new[]
             {
                 new
                 {
-                    name = nameof(WorkspaceMcpTools.GetWorkspace),
+                    name = "get_workspace",
                     description = "Returns the current workspace CWD selected in the Coding Services Blazor control surface."
                 },
                 new
                 {
-                    name = nameof(WorkspaceMcpTools.GetWatchedSolutionDigest),
+                    name = "get_watched_solution_digest",
                     description = "Cheap readiness and change-detection metadata for the watched solution: counts, summary size, hash, and index paths."
                 },
                 new
                 {
-                    name = nameof(WorkspaceMcpTools.GetWatchedSolutionSummary),
-                    description = "Full indexed project/file/type/member tree for on-demand discovery. Does not include source file bodies."
+                    name = "get_watched_solution_summary",
+                    description = "Product-source indexed project/file/type/member tree for on-demand discovery. Does not include source file bodies or configured test projects."
                 },
                 new
                 {
-                    name = nameof(WorkspaceMcpTools.GetTestProjectSummary),
+                    name = "get_test_project_summary",
                     description = "Indexed project/file/type/member tree for configured test projects only. Does not include source file bodies."
                 }
             }
@@ -70,13 +72,36 @@ public static class McpHostFactory
         return app;
     }
 
-    private static string NormalizeUrl(string? configuredUrl, string fallbackUrl)
+    public static string NormalizeLocalUrl(string? configuredUrl, string fallbackUrl)
     {
         if (string.IsNullOrWhiteSpace(configuredUrl))
         {
-            return fallbackUrl;
+            configuredUrl = fallbackUrl;
         }
 
-        return configuredUrl.Trim().TrimEnd('/');
+        string endpointUrl = configuredUrl.Trim().TrimEnd('/');
+        if (!Uri.TryCreate(endpointUrl, UriKind.Absolute, out Uri? uri)
+            || string.IsNullOrWhiteSpace(uri.Host))
+        {
+            throw new InvalidOperationException($"MCP URL must be an absolute local HTTP URL: {endpointUrl}");
+        }
+
+        if (!uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+            && !uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"MCP URL must use http or https: {endpointUrl}");
+        }
+
+        if (!uri.IsLoopback)
+        {
+            throw new InvalidOperationException($"MCP URL must bind to loopback only by default: {endpointUrl}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(uri.AbsolutePath) && uri.AbsolutePath != "/")
+        {
+            throw new InvalidOperationException($"MCP URL must not include a path: {endpointUrl}");
+        }
+
+        return endpointUrl;
     }
 }

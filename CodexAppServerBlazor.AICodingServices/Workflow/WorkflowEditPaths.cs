@@ -12,26 +12,26 @@ public sealed class WorkflowEditPaths
     public CodingServicesSettings Settings { get; }
 
     public string WorkingRoot => Path.Combine(
-        MonitorWorkspacePaths.GetWatchedSolutionWorkspaceRoot(Settings),
+        SystemWorkspacePaths.GetWatchedSolutionWorkspaceRoot(Settings),
         "working");
 
     public string MetadataRoot => Path.Combine(
-        MonitorWorkspacePaths.GetWatchedSolutionWorkspaceRoot(Settings),
+        SystemWorkspacePaths.GetWatchedSolutionWorkspaceRoot(Settings),
         "workflow",
         "edits");
 
     public string HistoryRoot => Path.Combine(
-        MonitorWorkspacePaths.GetWatchedSolutionWorkspaceRoot(Settings),
+        SystemWorkspacePaths.GetWatchedSolutionWorkspaceRoot(Settings),
         "workflow",
         "history");
 
     public string StagedRoot => Path.Combine(
-        MonitorWorkspacePaths.GetWatchedSolutionWorkspaceRoot(Settings),
+        SystemWorkspacePaths.GetWatchedSolutionWorkspaceRoot(Settings),
         "workflow",
         "staged");
 
     public string RetrievalBackupsRoot => Path.Combine(
-        MonitorWorkspacePaths.GetWatchedSolutionWorkspaceRoot(Settings),
+        SystemWorkspacePaths.GetWatchedSolutionWorkspaceRoot(Settings),
         "retrieval-backups");
 
     public string StagedRecordsRoot => Path.Combine(StagedRoot, "records");

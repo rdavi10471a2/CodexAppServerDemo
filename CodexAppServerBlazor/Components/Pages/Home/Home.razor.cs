@@ -1,8 +1,12 @@
 using CodexAppServerBlazor.Mcp;
 using CodexAppServerBlazor.Services;
+using CodexAppServerBlazor.Services.ArchivedDiscussions;
+using CodexAppServerBlazor.Services.Tasks;
+using CodexAppServerBlazor.Services.Workflow;
 using Markdig;
 using Markdig.Extensions.MediaLinks;
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.JSInterop;
 using Radzen;
 using System.Net;
@@ -14,13 +18,16 @@ public partial class Home : IDisposable, IAsyncDisposable
 {
     private const string CurrentUserId = "operator";
     private const string AssistantUserId = "codex";
+    private const long MaxAttachmentBytes = 25L * 1024L * 1024L;
 
     private CodexConnectionSnapshot snapshot = new(
         false,
         null,
         false,
         string.Empty,
+        string.Empty,
         CodexTelemetrySummary.Empty,
+        [],
         [],
         [],
         [],
@@ -38,17 +45,22 @@ public partial class Home : IDisposable, IAsyncDisposable
     private string? selectedTestSourcePath;
     private int? selectedTestSourceLine;
     private string model = "gpt-5.4";
-    private string approvalPolicy = "never";
-    private string sandbox = "danger-full-access";
+    private string approvalPolicy = "on-request";
+    private string sandbox = "read-only";
+    private WorkflowTurnMode turnMode = WorkflowTurnMode.Discuss;
     private string mcpUrl = McpHostFactory.DefaultLocalMcpUrl;
     private readonly List<TranscriptMessage> chatMessages = [];
-    private string chatDraft = "Inspect the current workspace. Start with discovery, propose the next safe step, and do not edit files unless explicitly asked.";
+    private readonly List<CodexTurnAttachment> turnAttachments = [];
+    private string attachmentPickerKey = Guid.NewGuid().ToString("N");
+    private string chatDraft = string.Empty;
     private string? activeAssistantMessageId;
     private string renderedAssistantText = string.Empty;
+    private string? lastPermissionResultToastKey;
     private string? errorMessage;
     private bool busy;
     private bool isRebuildingSourceIndex;
     private bool isConnectionPanelVisible = true;
+    private bool isDirectoryBrowserVisible;
     private ElementReference controlGrid;
     private ElementReference connectionPane;
     private ElementReference workPanel;
@@ -60,6 +72,7 @@ public partial class Home : IDisposable, IAsyncDisposable
         .Build();
 
     private string TranscriptHtml => BuildTranscriptHtml();
+    private string TranscriptBodyHtml => BuildTranscriptBodyHtml(includeMessageCopyButtons: true);
     private string TranscriptText => BuildTranscriptText();
     private string CurrentTurnHtml => RenderMarkdown(GetCurrentTurnText());
 
@@ -73,13 +86,19 @@ public partial class Home : IDisposable, IAsyncDisposable
     public SourceWorkspaceService SourceWorkspace { get; set; } = default!;
 
     [Inject]
-    public NativeFolderPickerService FolderPicker { get; set; } = default!;
-
-    [Inject]
     public IConfiguration Configuration { get; set; } = default!;
 
     [Inject]
     public NotificationService NotificationService { get; set; } = default!;
+
+    [Inject]
+    public ITranscriptTaskPromotionService TranscriptTaskPromotionService { get; set; } = default!;
+
+    [Inject]
+    public IArchivedDiscussionService ArchivedDiscussionService { get; set; } = default!;
+
+    [Inject]
+    public DialogService DialogService { get; set; } = default!;
 
     protected override void OnInitialized()
     {
@@ -94,7 +113,7 @@ public partial class Home : IDisposable, IAsyncDisposable
     {
         if (snapshot.IsServerStarted)
         {
-            await RunCommandAsync(() => ConnectionService.StopServerAsync(CancellationToken.None));
+            await RequestConversationDispositionAsync(ConversationContinuation.StopServer);
         }
         else
         {
@@ -107,31 +126,23 @@ public partial class Home : IDisposable, IAsyncDisposable
         }
     }
 
-    private async Task StartThread()
-    {
-        if (!ValidateWorkspaceForOperation("start a Codex thread"))
-        {
-            return;
-        }
-
-        await RunCommandAsync(() => ConnectionService.StartThreadAsync(
-            repoRoot,
-            model,
-            approvalPolicy,
-            sandbox,
-            CancellationToken.None));
-    }
-
     private async Task SendChatDraft()
     {
-        if (busy)
+        if (busy || snapshot.IsTurnRunning)
         {
-            errorMessage = "A Codex operation is already running.";
+            errorMessage = "A Codex turn is already running. Wait for it to finish or resolve the pending agent action.";
+            NotificationService.Notify(new NotificationMessage
+            {
+                Severity = NotificationSeverity.Warning,
+                Summary = "Turn still running",
+                Detail = errorMessage,
+                Duration = 5000
+            });
             return;
         }
 
         string content = chatDraft;
-        if (string.IsNullOrWhiteSpace(content))
+        if (string.IsNullOrWhiteSpace(content) && turnAttachments.Count == 0)
         {
             return;
         }
@@ -141,26 +152,242 @@ public partial class Home : IDisposable, IAsyncDisposable
             return;
         }
 
-        chatDraft = string.Empty;
-        AddUserMessage(content);
-        StartAssistantMessage();
+        CodexTurnAttachment[] attachments = turnAttachments.ToArray();
+        if (!ValidateAttachmentsForSend(attachments))
+        {
+            return;
+        }
+
+        string transcriptContent = BuildUserTranscriptContent(content, attachments);
         await RunCommandAsync(() => ConnectionService.SendTurnAsync(
             repoRoot,
             content,
             model,
             approvalPolicy,
             sandbox,
+            turnMode,
+            attachments,
             CancellationToken.None));
-        RenderAssistantSnapshot(isStreaming: snapshot.IsTurnRunning);
+        if (errorMessage is not null)
+        {
+            return;
+        }
+
+        chatDraft = string.Empty;
+        turnAttachments.Clear();
+        attachmentPickerKey = Guid.NewGuid().ToString("N");
+        AddUserMessage(transcriptContent);
+        StartAssistantMessage("_Awaiting assistant response..._", snapshot.IsTurnRunning);
+        RenderAssistantSnapshot(snapshot.IsTurnRunning);
     }
 
-    private async Task BrowseForDirectory()
+    private async Task CreateTaskFromTranscript(string taskName)
     {
-        string? selectedPath = await FolderPicker.PickFolderAsync(repoRoot, CancellationToken.None);
-        if (!string.IsNullOrWhiteSpace(selectedPath))
+        if (!ValidateWorkspaceForOperation("create a task from chat"))
         {
-            SetWorkspace(selectedPath);
+            return;
         }
+
+        if (turnMode != WorkflowTurnMode.Discuss)
+        {
+            errorMessage = "Create Task From Chat is only available in Discuss mode.";
+            NotificationService.Notify(new NotificationMessage
+            {
+                Severity = NotificationSeverity.Warning,
+                Summary = "Discuss mode required",
+                Detail = errorMessage,
+                Duration = 5000
+            });
+            return;
+        }
+
+        await RunCommandAsync(() =>
+        {
+            TranscriptTaskPromotionService.CreateTaskFromTranscript(
+                repoRoot,
+                taskName,
+                TranscriptText);
+            NotificationService.Notify(new NotificationMessage
+            {
+                Severity = NotificationSeverity.Success,
+                Summary = "Task created",
+                Detail = "Created a new task in New Task using the current chat transcript as user notes.",
+                Duration = 5000
+            });
+            return Task.CompletedTask;
+        });
+    }
+
+    private async Task AttachTurnFiles(InputFileChangeEventArgs args)
+    {
+        if (!ValidateWorkspaceForOperation("attach a file"))
+        {
+            return;
+        }
+
+        foreach (IBrowserFile file in args.GetMultipleFiles())
+        {
+            await SaveTurnAttachment(file);
+        }
+
+        attachmentPickerKey = Guid.NewGuid().ToString("N");
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SaveTurnAttachment(IBrowserFile file)
+    {
+        string safeName = GetSafeFileName(file.Name);
+        string attachmentDirectory = Path.Combine(
+            repoRoot,
+            "runtime",
+            "turn-attachments",
+            DateTime.UtcNow.ToString("yyyyMMdd"),
+            Guid.NewGuid().ToString("N"));
+        string destinationPath = Path.Combine(attachmentDirectory, safeName);
+
+        try
+        {
+            Directory.CreateDirectory(attachmentDirectory);
+
+            Stream source = file.OpenReadStream(MaxAttachmentBytes);
+            try
+            {
+                FileStream target = File.Create(destinationPath);
+                try
+                {
+                    await source.CopyToAsync(target);
+                }
+                finally
+                {
+                    target.Dispose();
+                }
+            }
+            finally
+            {
+                source.Dispose();
+            }
+
+            CodexTurnAttachmentKind kind = IsImageAttachment(safeName, file.ContentType)
+                ? CodexTurnAttachmentKind.LocalImage
+                : CodexTurnAttachmentKind.Text;
+            turnAttachments.Add(new CodexTurnAttachment(
+                safeName,
+                destinationPath,
+                kind,
+                file.Size));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            string message = $"Could not attach {safeName}: {ex.Message}";
+            errorMessage = message;
+            NotificationService.Notify(new NotificationMessage
+            {
+                Severity = NotificationSeverity.Error,
+                Summary = "Attachment failed",
+                Detail = message,
+                Duration = 7000
+            });
+        }
+    }
+
+    private Task RemoveTurnAttachment(string path)
+    {
+        CodexTurnAttachment? attachment = turnAttachments.FirstOrDefault(candidate =>
+            candidate.Path.Equals(path, StringComparison.OrdinalIgnoreCase));
+        if (attachment is not null)
+        {
+            turnAttachments.Remove(attachment);
+            TryDeleteRuntimeAttachment(attachment.Path);
+        }
+
+        attachmentPickerKey = Guid.NewGuid().ToString("N");
+        return Task.CompletedTask;
+    }
+
+    private async Task DenyPermissionRequest(int requestId)
+    {
+        await RunCommandAsync(() => ConnectionService.DenyPermissionRequestAsync(
+            requestId,
+            cancelTurn: false,
+            CancellationToken.None));
+        if (errorMessage is null)
+        {
+            NotifyPermissionAction("Permission denied", "The agent can continue with a different approach.", NotificationSeverity.Warning);
+        }
+    }
+
+    private async Task ApprovePermissionRequest(int requestId)
+    {
+        await RunCommandAsync(() => ConnectionService.ApprovePermissionRequestAsync(
+            requestId,
+            PermissionApprovalScope.Turn,
+            CancellationToken.None));
+        if (errorMessage is null)
+        {
+            NotifyPermissionAction("Permission granted", "The agent can continue this turn.", NotificationSeverity.Success);
+        }
+    }
+
+    private async Task ApprovePermissionRequestForSession(int requestId)
+    {
+        await RunCommandAsync(() => ConnectionService.ApprovePermissionRequestAsync(
+            requestId,
+            PermissionApprovalScope.Session,
+            CancellationToken.None));
+        if (errorMessage is null)
+        {
+            NotifyPermissionAction("Permission granted for session", "Matching requests can continue for this session.", NotificationSeverity.Success);
+        }
+    }
+
+    private async Task ApprovePermissionRequestAlways(int requestId)
+    {
+        await RunCommandAsync(() => ConnectionService.ApprovePermissionRequestAsync(
+            requestId,
+            PermissionApprovalScope.Persistent,
+            CancellationToken.None));
+        if (errorMessage is null)
+        {
+            NotifyPermissionAction("Permission granted always", "The proposed persistent rule was accepted.", NotificationSeverity.Success);
+        }
+    }
+
+    private async Task CancelPermissionRequest(int requestId)
+    {
+        await RunCommandAsync(() => ConnectionService.DenyPermissionRequestAsync(
+            requestId,
+            cancelTurn: true,
+            CancellationToken.None));
+        if (errorMessage is null)
+        {
+            NotifyPermissionAction("Turn cancelled", "The permission request was denied and the turn was interrupted.", NotificationSeverity.Warning);
+        }
+    }
+
+    private void BrowseForDirectory()
+    {
+        isDirectoryBrowserVisible = !isDirectoryBrowserVisible;
+        if (isDirectoryBrowserVisible)
+        {
+            directorySnapshot = DirectoryBrowser.GetSnapshot(repoRoot);
+        }
+    }
+
+    private void BrowseToDirectory(string path)
+    {
+        directorySnapshot = DirectoryBrowser.GetSnapshot(path);
+    }
+
+    private async Task UseBrowsedDirectory()
+    {
+        await ChangeWorkspaceAsync(directorySnapshot.CurrentPath);
+        isDirectoryBrowserVisible = false;
+    }
+
+    private void CancelDirectoryBrowser()
+    {
+        directorySnapshot = DirectoryBrowser.GetSnapshot(repoRoot);
+        isDirectoryBrowserVisible = false;
     }
 
     private bool ValidateWorkspaceForOperation(string operationName)
@@ -183,6 +410,38 @@ public partial class Home : IDisposable, IAsyncDisposable
             Duration = 7000
         });
         return false;
+    }
+
+    private async Task ChangeWorkspaceAsync(string? path)
+    {
+        string nextWorkspace = DirectoryBrowser.GetSnapshot(path).CurrentPath;
+        string currentWorkspace = repoRoot;
+        if (string.Equals(
+                Path.GetFullPath(currentWorkspace),
+                Path.GetFullPath(nextWorkspace),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            SetWorkspace(nextWorkspace);
+            return;
+        }
+
+        if (snapshot.IsTurnRunning)
+        {
+            errorMessage = "Wait for the current turn to finish before changing the workspace.";
+            NotificationService.Notify(new NotificationMessage
+            {
+                Severity = NotificationSeverity.Warning,
+                Summary = "Turn still running",
+                Detail = errorMessage,
+                Duration = 5000
+            });
+            return;
+        }
+
+        await RequestConversationDispositionAsync(
+            ConversationContinuation.ChangeWorkspace,
+            nextWorkspace,
+            currentWorkspace);
     }
 
     private void SetWorkspace(string? path)
@@ -287,16 +546,264 @@ public partial class Home : IDisposable, IAsyncDisposable
         isConnectionPanelVisible = !isConnectionPanelVisible;
     }
 
-    private void ClearChatHistory()
+    private async Task ClearChatHistory()
+        => await RequestConversationDispositionAsync(ConversationContinuation.StartNewConversation);
+
+    private async Task RequestConversationDispositionAsync(
+        ConversationContinuation continuation,
+        string? targetWorkspacePath = null,
+        string? currentWorkspacePath = null)
     {
         if (snapshot.IsTurnRunning)
+        {
+            string actionLabel = continuation switch
+            {
+                ConversationContinuation.StartNewConversation => "start a new conversation",
+                ConversationContinuation.ChangeWorkspace => "change the workspace",
+                ConversationContinuation.StopServer => "stop the server",
+                _ => "continue"
+            };
+            errorMessage = $"Wait for the current turn to finish before you {actionLabel}.";
+            NotificationService.Notify(new NotificationMessage
+            {
+                Severity = NotificationSeverity.Warning,
+                Summary = "Turn still running",
+                Detail = errorMessage,
+                Duration = 5000
+            });
+            return;
+        }
+
+        if (!HasUnsavedConversationState())
+        {
+            await ContinueConversationActionAsync(continuation, targetWorkspacePath, currentWorkspacePath);
+            return;
+        }
+
+        string targetLabel = continuation switch
+        {
+            ConversationContinuation.StartNewConversation => "start a new conversation",
+            ConversationContinuation.ChangeWorkspace => "change the workspace",
+            ConversationContinuation.StopServer => "stop the server",
+            _ => "continue"
+        };
+        string continueWithoutSavingText = continuation switch
+        {
+            ConversationContinuation.StartNewConversation => "Start New Conversation",
+            ConversationContinuation.ChangeWorkspace => "Change Workspace",
+            ConversationContinuation.StopServer => "Stop Server",
+            _ => "Continue"
+        };
+
+        ArchiveConversationDialogResult? decision = await DialogService.OpenAsync<ArchiveConversationDialog>(
+            "Save Current Conversation?",
+            new Dictionary<string, object?>
+            {
+                [nameof(ArchiveConversationDialog.Message)] = BuildDispositionMessage(continuation, targetLabel),
+                [nameof(ArchiveConversationDialog.TriggerLabel)] = GetTriggerLabel(continuation, targetWorkspacePath),
+                [nameof(ArchiveConversationDialog.MessageCount)] = chatMessages.Count,
+                [nameof(ArchiveConversationDialog.AttachmentCount)] = turnAttachments.Count,
+                [nameof(ArchiveConversationDialog.HasDraft)] = !string.IsNullOrWhiteSpace(chatDraft),
+                [nameof(ArchiveConversationDialog.ContinueWithoutSavingText)] = continueWithoutSavingText,
+                [nameof(ArchiveConversationDialog.SuggestedName)] = BuildSuggestedDiscussionName()
+            },
+            new DialogOptions
+            {
+                Width = "680px",
+                CloseDialogOnEsc = true,
+                CloseDialogOnOverlayClick = false,
+                Resizable = false,
+                Draggable = false
+            });
+
+        if (decision is null || decision.Decision == ArchiveConversationDecision.Cancel)
         {
             return;
         }
 
+        if (decision.Decision == ArchiveConversationDecision.SaveAndContinue)
+        {
+            ArchivedDiscussionSaveResult saveResult;
+            try
+            {
+                saveResult = ArchivedDiscussionService.SaveDiscussion(
+                    new ArchivedDiscussionSaveRequest(
+                        repoRoot,
+                        decision.Name,
+                        snapshot.ThreadId,
+                        turnMode.ToString(),
+                        GetTriggerLabel(continuation, targetWorkspacePath),
+                        TranscriptText,
+                        chatDraft,
+                        turnAttachments.Select(attachment => attachment.Name).ToArray(),
+                        DateTimeOffset.Now));
+            }
+            catch (Exception ex)
+            {
+                errorMessage = ex.Message;
+                NotificationService.Notify(new NotificationMessage
+                {
+                    Severity = NotificationSeverity.Error,
+                    Summary = "Archive failed",
+                    Detail = ex.Message,
+                    Duration = 7000
+                });
+                return;
+            }
+
+            NotificationService.Notify(new NotificationMessage
+            {
+                Severity = NotificationSeverity.Success,
+                Summary = "Conversation archived",
+                Detail = $"Saved to Archived Discussions as \"{saveResult.Name}\".",
+                Duration = 5000
+            });
+        }
+
+        await ContinueConversationActionAsync(continuation, targetWorkspacePath, currentWorkspacePath);
+    }
+
+    private async Task ContinueConversationActionAsync(
+        ConversationContinuation continuation,
+        string? targetWorkspacePath = null,
+        string? currentWorkspacePath = null)
+    {
+        switch (continuation)
+        {
+            case ConversationContinuation.StartNewConversation:
+                if (snapshot.IsServerStarted && !string.IsNullOrWhiteSpace(snapshot.ThreadId))
+                {
+                    await RunCommandAsync(() => ConnectionService.ResetConversationAsync(
+                        "Cleared the current chat history and reset the active Codex thread.",
+                        CancellationToken.None));
+                    if (errorMessage is not null)
+                    {
+                        return;
+                    }
+                }
+
+                ResetLocalConversationState(clearDraft: true);
+                break;
+
+            case ConversationContinuation.ChangeWorkspace:
+                bool shouldResetConversation = !string.IsNullOrWhiteSpace(snapshot.ThreadId)
+                    || chatMessages.Count > 0
+                    || turnAttachments.Count > 0
+                    || !string.IsNullOrWhiteSpace(chatDraft);
+                if (shouldResetConversation && snapshot.IsServerStarted)
+                {
+                    string currentWorkspace = currentWorkspacePath ?? repoRoot;
+                    string nextWorkspace = targetWorkspacePath ?? repoRoot;
+                    await RunCommandAsync(() => ConnectionService.ResetConversationAsync(
+                        $"Reset the active Codex thread because the CWD changed from {currentWorkspace} to {nextWorkspace}.",
+                        CancellationToken.None));
+                    if (errorMessage is not null)
+                    {
+                        return;
+                    }
+                }
+
+                ResetLocalConversationState(clearDraft: true);
+                SetWorkspace(targetWorkspacePath);
+                NotificationService.Notify(new NotificationMessage
+                {
+                    Severity = NotificationSeverity.Info,
+                    Summary = "Workspace changed",
+                    Detail = shouldResetConversation
+                        ? "Changed the CWD and reset the current conversation so the next turn starts fresh."
+                        : "Changed the CWD.",
+                    Duration = 5000
+                });
+                break;
+
+            case ConversationContinuation.StopServer:
+                await RunCommandAsync(() => ConnectionService.StopServerAsync(CancellationToken.None));
+                if (errorMessage is not null)
+                {
+                    return;
+                }
+
+                ResetLocalConversationState(clearDraft: true);
+                break;
+        }
+    }
+
+    private void ResetLocalConversationState(bool clearDraft)
+    {
+        foreach (CodexTurnAttachment attachment in turnAttachments.ToArray())
+        {
+            TryDeleteRuntimeAttachment(attachment.Path);
+        }
+
         chatMessages.Clear();
+        turnAttachments.Clear();
+        attachmentPickerKey = Guid.NewGuid().ToString("N");
         activeAssistantMessageId = null;
         renderedAssistantText = string.Empty;
+        if (clearDraft)
+        {
+            chatDraft = string.Empty;
+        }
+    }
+
+    private bool HasUnsavedConversationState()
+    {
+        return chatMessages.Count > 0
+            || turnAttachments.Count > 0
+            || !string.IsNullOrWhiteSpace(chatDraft);
+    }
+
+    private static string GetTriggerLabel(ConversationContinuation continuation, string? targetWorkspacePath)
+    {
+        return continuation switch
+        {
+            ConversationContinuation.StartNewConversation => "Start New Conversation",
+            ConversationContinuation.ChangeWorkspace => string.IsNullOrWhiteSpace(targetWorkspacePath)
+                ? "Change Workspace"
+                : "Change Workspace to " + targetWorkspacePath,
+            ConversationContinuation.StopServer => "Stop Server",
+            _ => "Continue"
+        };
+    }
+
+    private static string BuildDispositionMessage(ConversationContinuation continuation, string targetLabel)
+    {
+        return continuation switch
+        {
+            ConversationContinuation.StopServer =>
+                "You have unsaved conversation state. Saving it now will make it easy to recover later as archived evidence before you stop the server.",
+            _ =>
+                $"You have unsaved conversation state that will be discarded if you {targetLabel}."
+        };
+    }
+
+    private string BuildSuggestedDiscussionName()
+    {
+        foreach (TranscriptMessage message in chatMessages.Where(candidate => candidate.IsUser))
+        {
+            string firstLine = message.Content
+                .Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(line => line.Trim())
+                .FirstOrDefault(line => !string.IsNullOrWhiteSpace(line))
+                ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(firstLine))
+            {
+                return firstLine.Length <= 72
+                    ? firstLine
+                    : firstLine[..72].TrimEnd();
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(chatDraft))
+        {
+            string draft = chatDraft.Trim();
+            return draft.Length <= 72
+                ? draft
+                : draft[..72].TrimEnd();
+        }
+
+        return "Saved discussion " + DateTime.Now.ToString("yyyy-MM-dd HH:mm");
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -343,7 +850,6 @@ public partial class Home : IDisposable, IAsyncDisposable
         {
             busy = false;
             snapshot = ConnectionService.GetSnapshot();
-            RenderAssistantSnapshot(isStreaming: false);
         }
     }
 
@@ -351,7 +857,11 @@ public partial class Home : IDisposable, IAsyncDisposable
     {
         snapshot = ConnectionService.GetSnapshot();
         RenderAssistantSnapshot(isStreaming: snapshot.IsTurnRunning);
-        _ = InvokeAsync(StateHasChanged);
+        _ = InvokeAsync(() =>
+        {
+            NotifyLatestPermissionResult();
+            StateHasChanged();
+        });
     }
 
     private void AddUserMessage(string content)
@@ -367,25 +877,25 @@ public partial class Home : IDisposable, IAsyncDisposable
         });
     }
 
-    private void StartAssistantMessage()
+    private void StartAssistantMessage(string initialContent, bool isStreaming)
     {
         activeAssistantMessageId = Guid.NewGuid().ToString("N");
-        renderedAssistantText = string.Empty;
+        renderedAssistantText = initialContent;
         chatMessages.Add(new TranscriptMessage
         {
             Id = activeAssistantMessageId,
             UserId = AssistantUserId,
             Role = "assistant",
             IsUser = false,
-            IsStreaming = true,
-            Content = string.Empty,
+            IsStreaming = isStreaming,
+            Content = initialContent,
             Timestamp = DateTime.Now
         });
     }
 
     private void RenderAssistantSnapshot(bool isStreaming)
     {
-        if (string.IsNullOrEmpty(activeAssistantMessageId) || string.IsNullOrEmpty(snapshot.AssistantText))
+        if (string.IsNullOrEmpty(activeAssistantMessageId))
         {
             return;
         }
@@ -396,13 +906,13 @@ public partial class Home : IDisposable, IAsyncDisposable
             return;
         }
 
-        renderedAssistantText = snapshot.AssistantText;
-        message.Content = renderedAssistantText;
-        message.IsStreaming = isStreaming;
-        if (!isStreaming)
+        if (!string.IsNullOrEmpty(snapshot.AssistantText))
         {
-            activeAssistantMessageId = null;
+            renderedAssistantText = snapshot.AssistantText;
+            message.Content = renderedAssistantText;
         }
+
+        message.IsStreaming = isStreaming;
     }
 
     private static string JoinLines(IEnumerable<string> lines)
@@ -413,7 +923,59 @@ public partial class Home : IDisposable, IAsyncDisposable
     private string BuildTranscriptHtml()
     {
         var html = new StringBuilder();
-        html.Append("""
+        html.Append(GetTranscriptDocumentStart());
+        html.Append(BuildTranscriptBodyHtml(includeMessageCopyButtons: false));
+        html.Append("</body></html>");
+        return html.ToString();
+    }
+
+    private string BuildTranscriptBodyHtml(bool includeMessageCopyButtons)
+    {
+        var html = new StringBuilder();
+
+        if (chatMessages.Count == 0)
+        {
+            html.Append("""
+            <div class="empty">
+                <div class="empty-icon">□</div>
+                <div>Start a workspace conversation.</div>
+            </div>
+            """);
+        }
+        else
+        {
+            foreach (TranscriptMessage message in chatMessages)
+            {
+                string role = message.IsUser ? "user" : "assistant";
+                string label = message.IsUser ? "You" : "Codex";
+                string timestamp = WebUtility.HtmlEncode(message.Timestamp.ToString("HH:mm:ss"));
+                string messageText = WebUtility.HtmlEncode(message.Content);
+                html.Append("<article class=\"message ");
+                html.Append(role);
+                html.Append("\"><header class=\"message-header\"><span>");
+                html.Append(label);
+                html.Append("</span><div class=\"message-meta\"><span>");
+                html.Append(timestamp);
+                html.Append("</span>");
+                if (includeMessageCopyButtons)
+                {
+                    html.Append("<button type=\"button\" class=\"message-copy\" data-copy-text=\"");
+                    html.Append(messageText);
+                    html.Append("\" title=\"Copy this message\">Copy</button>");
+                }
+
+                html.Append("</div></header><div class=\"message-body\">");
+                html.Append(RenderMarkdown(message.Content));
+                html.Append("</div></article>");
+            }
+        }
+
+        return html.ToString();
+    }
+
+    private static string GetTranscriptDocumentStart()
+    {
+        return """
         <!doctype html>
         <html>
         <head>
@@ -435,8 +997,13 @@ public partial class Home : IDisposable, IAsyncDisposable
             line-height: 1.45;
         }
         .empty {
-            display: grid;
             min-height: calc(100vh - 28px);
+        }
+        .transcript-body {
+            padding: 14px;
+        }
+        .empty {
+            display: grid;
             place-content: center;
             gap: 8px;
             color: #6c7d8f;
@@ -515,43 +1082,7 @@ public partial class Home : IDisposable, IAsyncDisposable
         </style>
         </head>
         <body>
-        """);
-
-        if (chatMessages.Count == 0)
-        {
-            html.Append("""
-            <div class="empty">
-                <div class="empty-icon">□</div>
-                <div>Start a workspace conversation.</div>
-            </div>
-            """);
-        }
-        else
-        {
-            foreach (TranscriptMessage message in chatMessages)
-            {
-                if (message.IsStreaming)
-                {
-                    continue;
-                }
-
-                string role = message.IsUser ? "user" : "assistant";
-                string label = message.IsUser ? "You" : "Codex";
-                string timestamp = WebUtility.HtmlEncode(message.Timestamp.ToString("HH:mm:ss"));
-                html.Append("<article class=\"message ");
-                html.Append(role);
-                html.Append("\"><header class=\"message-header\"><span>");
-                html.Append(label);
-                html.Append("</span><span>");
-                html.Append(timestamp);
-                html.Append("</span></header><div class=\"message-body\">");
-                html.Append(RenderMarkdown(message.Content));
-                html.Append("</div></article>");
-            }
-        }
-
-        html.Append("</body></html>");
-        return html.ToString();
+        """;
     }
 
     private string BuildTranscriptText()
@@ -559,11 +1090,6 @@ public partial class Home : IDisposable, IAsyncDisposable
         var text = new StringBuilder();
         foreach (TranscriptMessage message in chatMessages)
         {
-            if (message.IsStreaming)
-            {
-                continue;
-            }
-
             string label = message.IsUser ? "You" : "Codex";
             if (text.Length > 0)
             {
@@ -582,16 +1108,185 @@ public partial class Home : IDisposable, IAsyncDisposable
 
     private string GetCurrentTurnText()
     {
+        var text = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(snapshot.CurrentTurnNoticeText))
+        {
+            text.AppendLine(snapshot.CurrentTurnNoticeText);
+            text.AppendLine();
+        }
+
         if (!string.IsNullOrWhiteSpace(activeAssistantMessageId))
         {
             TranscriptMessage? message = chatMessages.FirstOrDefault(candidate => candidate.Id == activeAssistantMessageId);
             if (message?.IsStreaming == true)
             {
-                return message.Content;
+                text.Append(message.Content);
             }
         }
 
-        return string.Empty;
+        return text.ToString();
+    }
+
+    private bool ValidateAttachmentsForSend(IReadOnlyList<CodexTurnAttachment> attachments)
+    {
+        foreach (CodexTurnAttachment attachment in attachments)
+        {
+            if (!File.Exists(attachment.Path))
+            {
+                string message = $"Attachment is missing from runtime storage: {attachment.Name}";
+                errorMessage = message;
+                NotificationService.Notify(new NotificationMessage
+                {
+                    Severity = NotificationSeverity.Error,
+                    Summary = "Attachment missing",
+                    Detail = message,
+                    Duration = 7000
+                });
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static string BuildUserTranscriptContent(string content, IReadOnlyList<CodexTurnAttachment> attachments)
+    {
+        if (attachments.Count == 0)
+        {
+            return content;
+        }
+
+        var text = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(content))
+        {
+            text.AppendLine(content.TrimEnd());
+            text.AppendLine();
+        }
+
+        text.AppendLine("Attachments:");
+        foreach (CodexTurnAttachment attachment in attachments)
+        {
+            string kind = attachment.Kind == CodexTurnAttachmentKind.LocalImage ? "image" : "file";
+            text.Append("- ");
+            text.Append(attachment.Name);
+            text.Append(" (");
+            text.Append(kind);
+            text.Append(", ");
+            text.Append(FormatAttachmentSize(attachment.SizeBytes));
+            text.AppendLine(")");
+        }
+
+        return text.ToString();
+    }
+
+    private static string FormatAttachmentSize(long sizeBytes)
+    {
+        if (sizeBytes >= 1024L * 1024L)
+        {
+            return $"{sizeBytes / 1024d / 1024d:0.##} MB";
+        }
+
+        if (sizeBytes >= 1024L)
+        {
+            return $"{sizeBytes / 1024d:0.##} KB";
+        }
+
+        return $"{sizeBytes} bytes";
+    }
+
+    private static bool IsImageAttachment(string fileName, string? contentType)
+    {
+        if (!string.IsNullOrWhiteSpace(contentType) &&
+            contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        string extension = Path.GetExtension(fileName);
+        return extension.Equals(".png", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".jpg", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".jpeg", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".gif", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".webp", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".bmp", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetSafeFileName(string fileName)
+    {
+        string name = Path.GetFileName(fileName);
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return "attachment";
+        }
+
+        foreach (char invalid in Path.GetInvalidFileNameChars())
+        {
+            name = name.Replace(invalid, '_');
+        }
+
+        return name;
+    }
+
+    private static void TryDeleteRuntimeAttachment(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private void NotifyPermissionAction(string summary, string detail, NotificationSeverity severity)
+    {
+        NotificationService.Notify(new NotificationMessage
+        {
+            Severity = severity,
+            Summary = summary,
+            Detail = detail,
+            Duration = 3500
+        });
+    }
+
+    private void NotifyLatestPermissionResult()
+    {
+        CodexPermissionRequest? request = snapshot.PermissionRequests
+            .Where(candidate => candidate.ResolvedAt is not null)
+            .OrderBy(candidate => candidate.ResolvedAt)
+            .LastOrDefault();
+        if (request is null)
+        {
+            return;
+        }
+
+        bool completed = request.Status.Contains("completed", StringComparison.OrdinalIgnoreCase);
+        bool failed = request.Status.Contains("failed", StringComparison.OrdinalIgnoreCase);
+        if (!completed && !failed)
+        {
+            return;
+        }
+
+        string key = $"{request.RequestId}:{request.Status}:{request.ResolvedAt:O}";
+        if (string.Equals(lastPermissionResultToastKey, key, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        bool changeResult = request.Status.Contains("change", StringComparison.OrdinalIgnoreCase);
+        lastPermissionResultToastKey = key;
+        NotifyPermissionAction(
+            completed
+                ? (changeResult ? "Approved change completed" : "Approved command completed")
+                : (changeResult ? "Approved change failed" : "Approved command failed"),
+            $"Request #{request.RequestId} resumed after approval.",
+            completed ? NotificationSeverity.Success : NotificationSeverity.Error);
     }
 
     private static string RenderMarkdown(string markdown)
@@ -634,4 +1329,11 @@ public sealed class TranscriptMessage
     public bool IsStreaming { get; set; }
     public string Content { get; set; } = string.Empty;
     public DateTime Timestamp { get; set; }
+}
+
+public enum ConversationContinuation
+{
+    StartNewConversation,
+    ChangeWorkspace,
+    StopServer
 }

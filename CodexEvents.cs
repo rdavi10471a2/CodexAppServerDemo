@@ -17,8 +17,30 @@ public sealed record ToolEvent(
     string EventType,
     string Name,
     string? Status,
-    string? Detail);
+    string? Detail,
+    string? CorrelationId,
+    string? ApprovalId = null);
 
 public sealed record StatusEvent(
     string EventType,
     string Summary);
+
+public enum CodexTurnAttachmentKind
+{
+    LocalImage,
+    Text
+}
+
+public sealed record CodexTurnAttachment(
+    string Name,
+    string Path,
+    CodexTurnAttachmentKind Kind,
+    long SizeBytes);
+
+public sealed record CodexServerRequestEvent(
+    int RequestId,
+    string Method,
+    string Summary,
+    string RawJson,
+    string? CorrelationId,
+    string? ApprovalId);

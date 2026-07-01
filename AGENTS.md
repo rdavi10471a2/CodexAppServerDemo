@@ -15,16 +15,48 @@ The primary workflow is CWD/workspace based:
 
 - Keep changes small and explicit.
 - Prefer workflow order: discovery, proposal, edit/diff, compile, reindex.
+- Treat indexed MCP summaries as stale after source edits. Build and reindex
+  before trusting them again, and use `get_watched_solution_digest` as the
+  freshness gate before reloading product or test summaries.
 - Make context sources visible in the UI or logs.
 - Keep UI, MCP, and Codex app-server connection code separated by service boundaries.
+
+## Turn Modes
+
+- The app supports two turn modes: `Discuss` and `Work`.
+- `Discuss` is the default lightweight mode.
+- `Discuss` may include a compact indexed workspace/bootstrap summary from the
+  native app-server turn context, but it must not silently load durable active
+  task memory.
+- `Work` is the governed task mode.
+- `Work` must require active task context before the turn is sent.
+- Durable workflow memory lives in task artifacts such as user notes, agent
+  notes, task file references, and task events.
+- Indexed workspace summaries are volatile lookup context, not durable memory.
+- Keep `CodexConnectionService` focused on transport/orchestration; do not let
+  it become the workflow-management god object.
+- Keep evolving workflow notes in `WORKFLOW.md`; promote only stable rules into
+  this file.
+
+## Tool Approval And Failure Handling
+
+- When a shell or tool action requires runtime approval, prefer triggering the
+  formal approval flow instead of asking for permission only in conversational
+  text.
+- If a tool or command is denied, cancelled, blocked by sandbox, or fails after
+  approval, treat that as an execution result, not an automatic reason to stop
+  the turn.
+- After a denied or failed action, continue with the best available fallback,
+  explain the constraint briefly, and only stop when the user must make a real
+  choice or when no viable fallback exists.
 
 ## Repo Map
 
 - `CodexAppServerBlazor/`: Blazor Server control UI and app host.
 - `CodexAppServerClient.cs`: JSON-RPC client for `codex app-server`, protocol events, and token usage handling.
 - `Mcp/`: local MCP HTTP host and workspace metadata tools. The health endpoint
-  under configured `Mcp:Url` advertises available MCP discovery tools and
-  descriptions.
+  under configured `Mcp:Url` advertises available MCP discovery tool wire names
+  and descriptions.
 - `CodexAppServerWinForms_corrected.slnx`: root solution pointing at the Blazor project.
 
 ## Build And Run

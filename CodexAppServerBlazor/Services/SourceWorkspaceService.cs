@@ -1,6 +1,7 @@
 using CodexAppServerBlazor.AICodingServices.Core;
 using CodexAppServerBlazor.AICodingServices.Data;
 using CodexAppServerBlazor.AICodingServices.Indexing;
+using Microsoft.Data.Sqlite;
 
 namespace CodexAppServerBlazor.Services;
 
@@ -34,7 +35,7 @@ public sealed class SourceWorkspaceService
         CodingServicesSettings settings = settingsProvider.GetSettings(workspaceRoot);
         if (settings.TestProjectPaths.Count == 0)
         {
-            string databasePath = MonitorDataPaths.GetDefaultIndexDatabasePath(settings);
+            string databasePath = SystemDataPaths.GetDefaultIndexDatabasePath(settings);
             return new SourceWorkspaceSnapshot(
                 settings.WatchedProjectFolder,
                 settings.WatchedSolutionPath,
@@ -56,15 +57,24 @@ public sealed class SourceWorkspaceService
         string? filter,
         ProjectProjection projection)
     {
-        string workspaceDataRoot = MonitorWorkspacePaths.GetWatchedSolutionWorkspaceRoot(settings);
-        string databasePath = MonitorDataPaths.GetDefaultIndexDatabasePath(settings);
+        string workspaceDataRoot = SystemWorkspacePaths.GetWatchedSolutionWorkspaceRoot(settings);
+        string databasePath = SystemDataPaths.GetDefaultIndexDatabasePath(settings);
 
-        Directory.CreateDirectory(Path.Combine(workspaceDataRoot, "data"));
+        if (!TryReadIndexState(databasePath, out SolutionIndexCounts counts, out bool fullRebuildRequired))
+        {
+            return new SourceWorkspaceSnapshot(
+                settings.WatchedProjectFolder,
+                settings.WatchedSolutionPath,
+                databasePath,
+                [],
+                [],
+                null,
+                filter ?? string.Empty,
+                "Solution index is missing. Rebuild the index to load source.");
+        }
+
         SolutionIndexDatabase database = new(databasePath);
-        database.EnsureCreated();
-
-        SolutionIndexCounts counts = new SolutionIndexProbe(database).GetCounts();
-        bool rebuildRequired = database.IsFullRebuildRequired()
+        bool rebuildRequired = fullRebuildRequired
             || counts.Projects == 0
             || counts.Documents == 0;
         if (rebuildRequired)
@@ -119,7 +129,7 @@ public sealed class SourceWorkspaceService
         CodingServicesSettings settings = settingsProvider.GetSettings(workspaceRoot);
         if (settings.TestProjectPaths.Count == 0)
         {
-            string databasePath = MonitorDataPaths.GetDefaultIndexDatabasePath(settings);
+            string databasePath = SystemDataPaths.GetDefaultIndexDatabasePath(settings);
             return new SourceWorkspaceStructureSnapshot(
                 settings.WatchedProjectFolder,
                 settings.WatchedSolutionPath,
@@ -137,15 +147,22 @@ public sealed class SourceWorkspaceService
         string? filter,
         ProjectProjection projection)
     {
-        string workspaceDataRoot = MonitorWorkspacePaths.GetWatchedSolutionWorkspaceRoot(settings);
-        string databasePath = MonitorDataPaths.GetDefaultIndexDatabasePath(settings);
+        string workspaceDataRoot = SystemWorkspacePaths.GetWatchedSolutionWorkspaceRoot(settings);
+        string databasePath = SystemDataPaths.GetDefaultIndexDatabasePath(settings);
 
-        Directory.CreateDirectory(Path.Combine(workspaceDataRoot, "data"));
+        if (!TryReadIndexState(databasePath, out SolutionIndexCounts counts, out bool fullRebuildRequired))
+        {
+            return new SourceWorkspaceStructureSnapshot(
+                settings.WatchedProjectFolder,
+                settings.WatchedSolutionPath,
+                databasePath,
+                0,
+                [],
+                "Solution index is missing. Rebuild the index to load source.");
+        }
+
         SolutionIndexDatabase database = new(databasePath);
-        database.EnsureCreated();
-
-        SolutionIndexCounts counts = new SolutionIndexProbe(database).GetCounts();
-        bool rebuildRequired = database.IsFullRebuildRequired()
+        bool rebuildRequired = fullRebuildRequired
             || counts.Projects == 0
             || counts.Documents == 0;
         if (rebuildRequired)
@@ -178,13 +195,13 @@ public sealed class SourceWorkspaceService
     public async Task RebuildIndexAsync(string workspaceRoot, CancellationToken cancellationToken)
     {
         CodingServicesSettings settings = settingsProvider.GetSettings(workspaceRoot);
-        string workspaceDataRoot = MonitorWorkspacePaths.GetWatchedSolutionWorkspaceRoot(settings);
+        string workspaceDataRoot = SystemWorkspacePaths.GetWatchedSolutionWorkspaceRoot(settings);
         Directory.CreateDirectory(Path.Combine(workspaceDataRoot, "data"));
         Directory.CreateDirectory(Path.Combine(workspaceDataRoot, "workflow"));
         Directory.CreateDirectory(Path.Combine(workspaceDataRoot, "reviews"));
         Directory.CreateDirectory(Path.Combine(workspaceDataRoot, "logs"));
         Directory.CreateDirectory(Path.Combine(workspaceDataRoot, "planning"));
-        Directory.CreateDirectory(MonitorDataPaths.GetDefaultTaskMemoryRoot(settings));
+        Directory.CreateDirectory(SystemDataPaths.GetDefaultTaskMemoryRoot(settings));
 
         await new SolutionIndexRebuildService().RebuildAsync(settings, cancellationToken);
     }
@@ -204,6 +221,69 @@ public sealed class SourceWorkspaceService
                 .ToArray(),
             _ => projects
         };
+    }
+
+    private static bool TryReadIndexState(
+        string databasePath,
+        out SolutionIndexCounts counts,
+        out bool fullRebuildRequired)
+    {
+        counts = new SolutionIndexCounts(0, 0, 0, 0, 0, 0);
+        fullRebuildRequired = true;
+        if (!File.Exists(databasePath))
+        {
+            return false;
+        }
+
+        try
+        {
+            SqliteConnectionStringBuilder builder = new()
+            {
+                DataSource = Path.GetFullPath(databasePath),
+                Mode = SqliteOpenMode.ReadOnly,
+                Pooling = false
+            };
+            using (SqliteConnection connection = new(builder.ToString()))
+            {
+                connection.Open();
+                counts = new SolutionIndexCounts(
+                    ScalarCount(connection, "projects"),
+                    ScalarCount(connection, "documents"),
+                    ScalarCount(connection, "symbols"),
+                    ScalarCount(connection, "symbol_references"),
+                    ScalarCount(connection, "call_sites"),
+                    ScalarCount(connection, "symbol_relationships"));
+                fullRebuildRequired = ReadFullRebuildRequired(connection);
+            }
+
+            return true;
+        }
+        catch (SqliteException)
+        {
+            counts = new SolutionIndexCounts(0, 0, 0, 0, 0, 0);
+            fullRebuildRequired = true;
+            return true;
+        }
+    }
+
+    private static int ScalarCount(SqliteConnection connection, string table)
+    {
+        using (SqliteCommand command = connection.CreateCommand())
+        {
+            command.CommandText = $"select count(*) from {table};";
+            return Convert.ToInt32(command.ExecuteScalar());
+        }
+    }
+
+    private static bool ReadFullRebuildRequired(SqliteConnection connection)
+    {
+        using (SqliteCommand command = connection.CreateCommand())
+        {
+            command.CommandText = "select value from index_meta where key = $key;";
+            command.Parameters.AddWithValue("$key", SolutionIndexDatabase.NeedsFullRebuildKey);
+            object? value = command.ExecuteScalar();
+            return value is string text && text == "1";
+        }
     }
 
     private static IReadOnlyList<IndexedDocumentRow> FilterDocuments(

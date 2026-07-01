@@ -95,7 +95,7 @@ public sealed class WorkflowEditService
         string backupDirectory = paths.GetRetrievalBackupDirectory(fullWatchedPath);
         Directory.CreateDirectory(backupDirectory);
 
-        string fileNameWithoutExtension = MonitorWorkspacePaths.GetSafePathSegment(
+        string fileNameWithoutExtension = SystemWorkspacePaths.GetSafePathSegment(
             Path.GetFileNameWithoutExtension(fullWatchedPath));
         string extension = Path.GetExtension(fullWatchedPath);
         string timestamp = capturedAtUtc.UtcDateTime.ToString("yyyyMMdd-HHmmssfff'Z'");

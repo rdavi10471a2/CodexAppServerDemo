@@ -1,31 +1,44 @@
-using System.Text.Json;
 using CodexAppServerBlazor.Mcp;
+using CodexAppServerBlazor.Services.Tasks;
+using CodexAppServerBlazor.Services.Workflow;
 
 namespace CodexAppServerBlazor.Services;
 
 public sealed class CodexConnectionService : IAsyncDisposable
 {
     private const int MaxEvents = 500;
-    private const string SupportedApprovalPolicy = "never";
-    private const string SupportedSandbox = "danger-full-access";
 
     private readonly object gate = new();
     private readonly SemaphoreSlim operationGate = new(1, 1);
+    private readonly Func<CodexAppServerClient> clientFactory;
     private readonly WorkspaceState workspaceState;
-    private readonly SourceWorkspaceService sourceWorkspaceService;
+    private readonly IWorkspaceWorkflowContextService workspaceWorkflowContextService;
+    private readonly ITaskWorkflowContextService taskWorkflowContextService;
+    private readonly IWorkflowTurnContextComposer workflowTurnContextComposer;
+    private readonly PermissionRequestService permissionRequestService = new();
     private CodexAppServerClient? client;
     private string assistantText = string.Empty;
+    private string currentTurnNoticeText = string.Empty;
     private bool isTurnRunning;
     private CodexTelemetrySummary telemetrySummary = CodexTelemetrySummary.Empty;
     private readonly List<CodexOutputEvent> statusEvents = [];
     private readonly List<CodexOutputEvent> telemetryEvents = [];
     private readonly List<CodexOutputEvent> toolEvents = [];
     private readonly List<string> rawLines = [];
+    private WorkflowSessionState? workflowSessionState;
 
-    public CodexConnectionService(WorkspaceState workspaceState, SourceWorkspaceService sourceWorkspaceService)
+    public CodexConnectionService(
+        WorkspaceState workspaceState,
+        IWorkspaceWorkflowContextService workspaceWorkflowContextService,
+        ITaskWorkflowContextService taskWorkflowContextService,
+        IWorkflowTurnContextComposer workflowTurnContextComposer,
+        Func<CodexAppServerClient>? clientFactory = null)
     {
+        this.clientFactory = clientFactory ?? (() => new CodexAppServerClient());
         this.workspaceState = workspaceState;
-        this.sourceWorkspaceService = sourceWorkspaceService;
+        this.workspaceWorkflowContextService = workspaceWorkflowContextService;
+        this.taskWorkflowContextService = taskWorkflowContextService;
+        this.workflowTurnContextComposer = workflowTurnContextComposer;
     }
 
     public event Action? Changed;
@@ -39,10 +52,12 @@ public sealed class CodexConnectionService : IAsyncDisposable
                 ThreadId: client?.ThreadId,
                 IsTurnRunning: isTurnRunning,
                 AssistantText: assistantText,
+                CurrentTurnNoticeText: currentTurnNoticeText,
                 TelemetrySummary: telemetrySummary,
                 StatusEvents: statusEvents.ToArray(),
                 TelemetryEvents: telemetryEvents.ToArray(),
                 ToolEvents: toolEvents.ToArray(),
+                PermissionRequests: permissionRequestService.GetSnapshot(),
                 RawLines: rawLines.ToArray());
         }
     }
@@ -61,14 +76,15 @@ public sealed class CodexConnectionService : IAsyncDisposable
                 return;
             }
 
-            client = new CodexAppServerClient();
+            client = clientFactory();
             client.RawProtocol += line => AddRawLine(line);
             client.LogLine += line => AddEvent(statusEvents, "Log", null, "app-server", line);
             client.AssistantText += OnAssistantText;
             client.Telemetry += OnTelemetry;
-            client.ToolActivity += e => AddEvent(toolEvents, e.EventType, e.Status, e.Name, e.Detail ?? string.Empty);
+            client.ToolActivity += OnToolActivity;
             client.Status += OnStatus;
-            client.Exited += code => AddEvent(statusEvents, "ServerExited", code == 0 ? "ok" : "error", "codex app-server", $"Exited with code {code}.");
+            client.ServerRequest += OnServerRequest;
+            client.Exited += OnClientExited;
 
             await client.StartAsync(codexExe, cancellationToken);
             AddEvent(statusEvents, "ServerStarted", "ok", "codex app-server", "Blazor connection initialized codex app-server.");
@@ -98,9 +114,12 @@ public sealed class CodexConnectionService : IAsyncDisposable
             lock (gate)
             {
                 assistantText = string.Empty;
+                currentTurnNoticeText = string.Empty;
                 telemetryEvents.Clear();
                 toolEvents.Clear();
+                permissionRequestService.Clear();
                 isTurnRunning = false;
+                workflowSessionState = null;
             }
 
             AddEvent(statusEvents, "ServerStopped", "ok", "codex app-server", "Stopped codex app-server.");
@@ -117,6 +136,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
         string model,
         string approvalPolicy,
         string sandbox,
+        WorkflowTurnMode mode,
         CancellationToken cancellationToken)
     {
         if (!await operationGate.WaitAsync(0, cancellationToken))
@@ -131,12 +151,54 @@ public sealed class CodexConnectionService : IAsyncDisposable
                 activeClient,
                 repoRoot,
                 model,
-                sendInitialContext: true,
+                approvalPolicy,
+                sandbox,
+                mode,
                 cancellationToken);
         }
         finally
         {
             operationGate.Release();
+        }
+    }
+
+    public async Task ResetConversationAsync(string reason, CancellationToken cancellationToken)
+    {
+        if (!await operationGate.WaitAsync(0, cancellationToken))
+        {
+            throw new InvalidOperationException("A Codex operation is already running.");
+        }
+
+        try
+        {
+            CodexAppServerClient activeClient = GetStartedClient();
+            if (isTurnRunning)
+            {
+                throw new InvalidOperationException("Wait for the current turn to finish before resetting the conversation.");
+            }
+
+            lock (gate)
+            {
+                assistantText = string.Empty;
+                currentTurnNoticeText = string.Empty;
+                permissionRequestService.Clear();
+                workflowSessionState = null;
+            }
+
+            activeClient.ResetThreadState();
+            AddEvent(
+                statusEvents,
+                "ThreadReset",
+                "ok",
+                "coding-services",
+                string.IsNullOrWhiteSpace(reason)
+                    ? "Cleared the active Codex thread and workflow session."
+                    : reason);
+        }
+        finally
+        {
+            operationGate.Release();
+            Changed?.Invoke();
         }
     }
 
@@ -146,6 +208,8 @@ public sealed class CodexConnectionService : IAsyncDisposable
         string model,
         string approvalPolicy,
         string sandbox,
+        WorkflowTurnMode mode,
+        IReadOnlyList<CodexTurnAttachment>? attachments,
         CancellationToken cancellationToken)
     {
         if (!await operationGate.WaitAsync(0, cancellationToken))
@@ -162,26 +226,76 @@ public sealed class CodexConnectionService : IAsyncDisposable
                     activeClient,
                     repoRoot,
                     model,
-                    sendInitialContext: true,
+                    approvalPolicy,
+                    sandbox,
+                    mode,
                     cancellationToken);
             }
 
             workspaceState.SetRepoRoot(repoRoot);
-            string prompt = $$"""
-        {{userPrompt}}
-
-        Codex cwd:
-        {{repoRoot}}
-
-        Workspace boundary:
-        - Treat the cwd above as the loaded workspace.
-        - Do not use selected-file assumptions for this turn.
-        - Use discovery, proposal, edit/diff, compile, and reindex order when work is requested.
-        """;
+            workflowSessionState ??= new WorkflowSessionState(repoRoot, mode);
+            WorkflowPromptSection workspaceContext = workspaceWorkflowContextService.BuildTurnContext(repoRoot);
+            WorkflowTurnTaskContext taskContext = mode == WorkflowTurnMode.Work
+                ? taskWorkflowContextService.BuildTurnContext(repoRoot)
+                : new WorkflowTurnTaskContext(null, "Task context skipped because mode is Discuss.", null);
+            WorkflowTurnEnvelope envelope = workflowTurnContextComposer.Compose(
+                userPrompt,
+                repoRoot,
+                mode,
+                workflowSessionState,
+                workspaceContext,
+                taskContext);
+            if (!workflowSessionState.HasAttachedWorkspaceContext)
+            {
+                AddEvent(
+                    statusEvents,
+                    "WorkspaceContext",
+                    workspaceContext.HasPrompt ? "ok" : "skipped",
+                    "coding-services",
+                    workspaceContext.Status);
+            }
+            AddEvent(
+                statusEvents,
+                "TaskContext",
+                taskContext.HasPrompt ? "ok" : "skipped",
+                "coding-services",
+                taskContext.Status);
 
             ClearTurnOutput();
             MarkTurnRunning();
-            await activeClient.StartTurnAsync(prompt, cancellationToken);
+            if (attachments is { Count: > 0 })
+            {
+                AddEvent(statusEvents, "TurnAttachments", "ok", "coding-services", BuildAttachmentStatus(attachments));
+            }
+
+            try
+            {
+                await activeClient.StartTurnAsync(
+                    envelope.Prompt,
+                    repoRoot,
+                    model,
+                    NormalizeApprovalPolicy(approvalPolicy),
+                    NormalizeSandbox(sandbox),
+                    attachments,
+                    cancellationToken);
+            }
+            catch
+            {
+                lock (gate)
+                {
+                    isTurnRunning = false;
+                }
+
+                Changed?.Invoke();
+                throw;
+            }
+            if (envelope.IncludedWorkspaceContext)
+            {
+                workflowSessionState.HasAttachedWorkspaceContext = true;
+            }
+
+            AddEvent(statusEvents, "TurnMode", "ok", "coding-services", $"Turn mode set to {mode}.");
+            AddEvent(statusEvents, "TurnPolicy", "ok", "codex", $"Turn policy set to approval={NormalizeApprovalPolicy(approvalPolicy)}, sandbox={NormalizeSandbox(sandbox)}, reviewer=user.");
         }
         finally
         {
@@ -189,9 +303,79 @@ public sealed class CodexConnectionService : IAsyncDisposable
         }
     }
 
+    private static string BuildAttachmentStatus(IReadOnlyList<CodexTurnAttachment> attachments)
+    {
+        return string.Join(
+            "; ",
+            attachments.Select(attachment =>
+                $"{(attachment.Kind == CodexTurnAttachmentKind.LocalImage ? "localImage" : "text")}: {attachment.Name} ({attachment.SizeBytes} bytes) -> {attachment.Path}"));
+    }
+
     public void ReportStatus(string type, string? status, string source, string detail)
     {
         AddEvent(statusEvents, type, status, source, detail);
+    }
+
+    public async Task DenyPermissionRequestAsync(
+        int requestId,
+        bool cancelTurn,
+        CancellationToken cancellationToken)
+    {
+        CodexAppServerClient activeClient = GetStartedClient();
+        CodexPermissionRequest? request = permissionRequestService.Resolve(
+            requestId,
+            cancelTurn ? "cancelled" : "denied");
+        if (request is null)
+        {
+            throw new InvalidOperationException($"No pending permission request found for id {requestId}.");
+        }
+
+        object response = PermissionRequestService.CreateDenyResponse(request.Method, cancelTurn);
+        await activeClient.RespondToServerRequestAsync(request.RequestId, response, cancellationToken);
+        AddCurrentTurnNotice(cancelTurn
+            ? $"Cancelled request #{request.RequestId}; waiting for the turn to stop."
+            : $"Denied request #{request.RequestId}; waiting for the agent to continue.");
+        AddEvent(
+            statusEvents,
+            "PermissionResponse",
+            request.Status,
+            "coding-services",
+            $"Responded to {request.Method} with {PermissionRequestService.DescribeResponse(response)}");
+    }
+
+    public async Task ApprovePermissionRequestAsync(
+        int requestId,
+        PermissionApprovalScope scope,
+        CancellationToken cancellationToken)
+    {
+        CodexAppServerClient activeClient = GetStartedClient();
+        CodexPermissionRequest? request = permissionRequestService.Resolve(requestId, scope switch
+        {
+            PermissionApprovalScope.Session => "approved for session",
+            PermissionApprovalScope.Persistent => "approved always",
+            _ => "approved"
+        });
+        if (request is null)
+        {
+            throw new InvalidOperationException($"No pending permission request found for id {requestId}.");
+        }
+
+        object response = PermissionRequestService.CreateApproveResponse(request.Method, request.RawJson, scope);
+        await activeClient.RespondToServerRequestAsync(request.RequestId, response, cancellationToken);
+        AddCurrentTurnNotice(PermissionRequestService.IsElicitationRequest(request.Method)
+            ? $"Answered elicitation request #{request.RequestId}; waiting for the agent to continue."
+            : scope switch
+        {
+            PermissionApprovalScope.Session => $"Approved request #{request.RequestId} for this session; waiting for the command result.",
+            PermissionApprovalScope.Persistent => $"Approved request #{request.RequestId} always; waiting for the command result.",
+            _ => $"Approved request #{request.RequestId}; waiting for the command result."
+        });
+        AddEvent(
+            statusEvents,
+            "PermissionResponse",
+            request.Status,
+            "coding-services",
+            $"Responded to {request.Method} with {PermissionRequestService.DescribeResponse(response)}");
     }
 
     private CodexAppServerClient GetStartedClient()
@@ -208,126 +392,22 @@ public sealed class CodexConnectionService : IAsyncDisposable
         CodexAppServerClient activeClient,
         string repoRoot,
         string model,
-        bool sendInitialContext,
+        string approvalPolicy,
+        string sandbox,
+        WorkflowTurnMode mode,
         CancellationToken cancellationToken)
     {
         workspaceState.SetRepoRoot(repoRoot);
         await activeClient.StartThreadAsync(
             repoRoot,
             model,
-            SupportedApprovalPolicy,
-            SupportedSandbox,
+            NormalizeApprovalPolicy(approvalPolicy),
+            NormalizeSandbox(sandbox),
             cancellationToken);
-        AddEvent(statusEvents, "ThreadPolicy", "ok", "codex", $"Thread policy forced to approval={SupportedApprovalPolicy}, sandbox={SupportedSandbox}.");
-
-        if (!sendInitialContext)
-        {
-            return;
-        }
-
-        string? initialPrompt = TryBuildInitialWorkspacePrompt(repoRoot, out string contextStatus);
-        AddEvent(statusEvents, "WorkspaceContext", initialPrompt is null ? "skipped" : "ok", "coding-services", contextStatus);
-        if (initialPrompt is not null)
-        {
-            ClearTurnOutput();
-            MarkTurnRunning();
-            await activeClient.StartTurnAsync(initialPrompt, cancellationToken);
-        }
-    }
-
-    private string? TryBuildInitialWorkspacePrompt(string repoRoot, out string status)
-    {
-        if (!Directory.Exists(repoRoot))
-        {
-            status = $"CWD does not exist: {repoRoot}";
-            return null;
-        }
-
-        SourceWorkspaceStructureSnapshot snapshot;
-        try
-        {
-            snapshot = sourceWorkspaceService.BuildProductStructureSnapshot(repoRoot, filter: null);
-        }
-        catch (Exception ex)
-        {
-            status = $"Could not build workspace context: {ex.Message}";
-            return null;
-        }
-
-        if (!File.Exists(snapshot.WatchedSolutionPath))
-        {
-            status = $"No valid watched solution found for CWD: {repoRoot}";
-            return null;
-        }
-
-        if (!File.Exists(snapshot.IndexDatabasePath) || snapshot.FileCount == 0 || snapshot.Tree.Count == 0)
-        {
-            status = string.IsNullOrWhiteSpace(snapshot.Message)
-                ? "Watched solution index is missing, empty, or stale."
-                : snapshot.Message;
-            return null;
-        }
-
-        WorkspaceBootstrapContext context = new(
-            Cwd: Path.GetFullPath(repoRoot),
-            WatchedSolutionPath: snapshot.WatchedSolutionPath,
-            IndexDatabasePath: snapshot.IndexDatabasePath,
-            FileCount: snapshot.FileCount,
-            ProjectCount: snapshot.Tree.Count,
-            Projects: snapshot.Tree
-                .Where(node => node.Kind.Equals("project", StringComparison.OrdinalIgnoreCase))
-                .Select(ToBootstrapProject)
-                .ToArray());
-
-        string json = JsonSerializer.Serialize(context, new JsonSerializerOptions
-        {
-            WriteIndented = true
-        });
-
-        status = $"Injected product workspace context for {context.ProjectCount} projects and {context.FileCount} indexed files.";
-        return $$"""
-        Initial product workspace context:
-        ```json
-        {{json}}
-        ```
-
-        Use this compiler/index-backed product project/file map as initial orientation for this thread.
-        Test projects are intentionally not included in this initial context.
-        The local MCP discovery surface advertises GetWorkspace, GetWatchedSolutionDigest, GetWatchedSolutionSummary, and GetTestProjectSummary.
-        Call GetWatchedSolutionSummary when deeper full-solution type/member structure is needed.
-        Call GetTestProjectSummary when test project structure is relevant.
-        Treat the CWD as the loaded workspace.
-        Do not edit files during this initialization turn.
-        Reply with a concise workspace orientation: main projects, likely responsibility boundaries, and any context gaps.
-        """;
-    }
-
-    private static BootstrapProject ToBootstrapProject(SourceTreeNode project)
-    {
-        List<BootstrapFile> files = [];
-        CollectBootstrapFiles(project, files);
-        return new BootstrapProject(
-            Name: project.Name,
-            Files: files
-                .OrderBy(file => file.Path, StringComparer.OrdinalIgnoreCase)
-                .ToArray(),
-            FileCount: files.Count);
-    }
-
-    private static void CollectBootstrapFiles(SourceTreeNode node, List<BootstrapFile> files)
-    {
-        if (node.File is not null)
-        {
-            files.Add(new BootstrapFile(
-                Path: node.File.RelativePath,
-                Language: node.File.Language));
-            return;
-        }
-
-        foreach (SourceTreeNode child in node.Children)
-        {
-            CollectBootstrapFiles(child, files);
-        }
+        workflowSessionState = new WorkflowSessionState(repoRoot, mode);
+        AddEvent(statusEvents, "ThreadPolicy", "ok", "codex", $"Thread policy set to approval={NormalizeApprovalPolicy(approvalPolicy)}, sandbox={NormalizeSandbox(sandbox)}.");
+        AddEvent(statusEvents, "ThreadMode", "ok", "coding-services", $"Thread initialized in {mode} mode.");
+        AddEvent(statusEvents, "WorkspaceContext", "ready", "coding-services", "Brief indexed workspace context will be attached to the next eligible user turn.");
     }
 
     private void OnAssistantText(AssistantTextEvent e)
@@ -350,7 +430,8 @@ public sealed class CodexConnectionService : IAsyncDisposable
     private void OnStatus(StatusEvent e)
     {
         if (e.EventType.Equals("turn/completed", StringComparison.OrdinalIgnoreCase)
-            || e.EventType.Equals("turn/failed", StringComparison.OrdinalIgnoreCase))
+            || e.EventType.Equals("turn/failed", StringComparison.OrdinalIgnoreCase)
+            || IsThreadIdleStatus(e))
         {
             lock (gate)
             {
@@ -359,6 +440,58 @@ public sealed class CodexConnectionService : IAsyncDisposable
         }
 
         AddEvent(statusEvents, e.EventType, null, "codex", e.Summary);
+    }
+
+    private static bool IsThreadIdleStatus(StatusEvent e)
+    {
+        return e.EventType.Equals("thread/status/changed", StringComparison.OrdinalIgnoreCase)
+            && e.Summary.Contains("\"type\":\"idle\"", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void OnServerRequest(CodexServerRequestEvent e)
+    {
+        CodexPermissionRequest request = permissionRequestService.Add(e);
+        AddEvent(
+            statusEvents,
+            "PermissionRequest",
+            "pending",
+            "codex app-server",
+            $"{request.Method} #{request.RequestId}: {request.Summary}");
+    }
+
+    private void OnToolActivity(ToolEvent e)
+    {
+        AddEvent(toolEvents, e.EventType, e.Status, e.Name, e.Detail ?? string.Empty);
+
+        bool commandCompleted = e.EventType.Equals("command completed", StringComparison.OrdinalIgnoreCase);
+        bool fileChangeCompleted = e.EventType.Equals("file change completed", StringComparison.OrdinalIgnoreCase);
+        if (!commandCompleted && !fileChangeCompleted)
+        {
+            return;
+        }
+
+        bool failed = IsFailureStatus(e.Status);
+        string noun = fileChangeCompleted ? "change" : "command";
+        string status = failed ? $"{noun} failed" : $"{noun} completed";
+        CodexPermissionRequest? request = permissionRequestService.ResolveCommandResult(e.CorrelationId, e.ApprovalId, status);
+        if (request is null)
+        {
+            return;
+        }
+
+        AddCurrentTurnNotice(failed
+            ? $"Request #{request.RequestId} resumed after approval and the {noun} failed."
+            : $"Request #{request.RequestId} resumed after approval and the {noun} completed.");
+        if (failed && !string.IsNullOrWhiteSpace(e.Detail))
+        {
+            AddCurrentTurnNotice(BuildFailureDiagnosticNotice(e.Detail));
+        }
+        AddEvent(
+            statusEvents,
+            "PermissionResult",
+            status,
+            "coding-services",
+            BuildPermissionResultDetail(request.RequestId, status, e.Detail));
     }
 
     private void OnTelemetry(TelemetryEvent e)
@@ -371,13 +504,35 @@ public sealed class CodexConnectionService : IAsyncDisposable
         AddEvent(telemetryEvents, "Telemetry", null, "codex", e.Summary);
     }
 
+    private void OnClientExited(int code)
+    {
+        lock (gate)
+        {
+            isTurnRunning = false;
+        }
+
+        AddEvent(statusEvents, "ServerExited", code == 0 ? "ok" : "error", "codex app-server", $"Exited with code {code}.");
+    }
+
     private void ClearTurnOutput()
     {
         lock (gate)
         {
             assistantText = string.Empty;
-            telemetryEvents.Clear();
-            toolEvents.Clear();
+            currentTurnNoticeText = string.Empty;
+        }
+
+        Changed?.Invoke();
+    }
+
+    private void AddCurrentTurnNotice(string detail)
+    {
+        lock (gate)
+        {
+            string line = $"[{DateTime.Now:HH:mm:ss}] {detail}";
+            currentTurnNoticeText = string.IsNullOrWhiteSpace(currentTurnNoticeText)
+                ? line
+                : $"{currentTurnNoticeText}{Environment.NewLine}{line}";
         }
 
         Changed?.Invoke();
@@ -463,6 +618,56 @@ public sealed class CodexConnectionService : IAsyncDisposable
         return false;
     }
 
+    private static bool IsFailureStatus(string? status)
+    {
+        return !string.IsNullOrWhiteSpace(status) &&
+            ContainsAny(status, "error", "fail", "failed", "cancel", "denied");
+    }
+
+    private static string BuildPermissionResultDetail(int requestId, string status, string? detail)
+    {
+        string prefix = $"Request #{requestId} {status} after approval.";
+        if (string.IsNullOrWhiteSpace(detail))
+        {
+            return prefix;
+        }
+
+        return prefix + Environment.NewLine + Environment.NewLine + detail.Trim();
+    }
+
+    private static string BuildFailureDiagnosticNotice(string detail)
+    {
+        string firstLine = detail
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault()
+            ?? "Command failed after approval.";
+        return "Diagnostic: " + firstLine;
+    }
+
+    private static string NormalizeApprovalPolicy(string value)
+    {
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "untrusted" => "untrusted",
+            "on-failure" => "on-failure",
+            "on-request" => "on-request",
+            "never" => "never",
+            _ => "on-request"
+        };
+    }
+
+    private static string NormalizeSandbox(string value)
+    {
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "read-only" => "read-only",
+            "workspace-write" => "workspace-write",
+            "danger-full-access" => "danger-full-access",
+            _ => "read-only"
+        };
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (client is not null)
@@ -479,10 +684,12 @@ public sealed record CodexConnectionSnapshot(
     string? ThreadId,
     bool IsTurnRunning,
     string AssistantText,
+    string CurrentTurnNoticeText,
     CodexTelemetrySummary TelemetrySummary,
     IReadOnlyList<CodexOutputEvent> StatusEvents,
     IReadOnlyList<CodexOutputEvent> TelemetryEvents,
     IReadOnlyList<CodexOutputEvent> ToolEvents,
+    IReadOnlyList<CodexPermissionRequest> PermissionRequests,
     IReadOnlyList<string> RawLines);
 
 public sealed record CodexOutputEvent(
@@ -525,20 +732,3 @@ public sealed record CodexTelemetrySummary(
         };
     }
 }
-
-public sealed record WorkspaceBootstrapContext(
-    string Cwd,
-    string WatchedSolutionPath,
-    string IndexDatabasePath,
-    int FileCount,
-    int ProjectCount,
-    IReadOnlyList<BootstrapProject> Projects);
-
-public sealed record BootstrapProject(
-    string Name,
-    IReadOnlyList<BootstrapFile> Files,
-    int FileCount);
-
-public sealed record BootstrapFile(
-    string Path,
-    string Language);

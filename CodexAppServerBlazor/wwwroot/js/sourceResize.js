@@ -78,6 +78,45 @@ export function attachMainSplitter(layout, connection, workPanel, splitter) {
     });
 }
 
+export function attachTaskSplitter(layout, navigator, workspace, splitter) {
+    if (!layout || !navigator || !workspace || !splitter || splitter.dataset.resizeAttached === "true") {
+        return;
+    }
+
+    splitter.dataset.resizeAttached = "true";
+
+    let startX = 0;
+    let startNavigatorWidth = 0;
+    const minNavigator = 280;
+    const maxNavigator = 680;
+
+    function onPointerMove(event) {
+        const delta = event.clientX - startX;
+        const nextNavigator = Math.min(maxNavigator, Math.max(minNavigator, startNavigatorWidth + delta));
+        navigator.style.flexBasis = `${nextNavigator}px`;
+        navigator.style.width = `${nextNavigator}px`;
+    }
+
+    function onPointerUp() {
+        splitter.classList.remove("dragging");
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        window.removeEventListener("pointermove", onPointerMove);
+        window.removeEventListener("pointerup", onPointerUp);
+    }
+
+    splitter.addEventListener("pointerdown", event => {
+        event.preventDefault();
+        startX = event.clientX;
+        startNavigatorWidth = navigator.getBoundingClientRect().width;
+        splitter.classList.add("dragging");
+        document.body.style.cursor = "col-resize";
+        document.body.style.userSelect = "none";
+        window.addEventListener("pointermove", onPointerMove);
+        window.addEventListener("pointerup", onPointerUp);
+    });
+}
+
 export function attachAssistantSplitter(layout, transcript, composer, splitter) {
     if (!layout || !transcript || !composer || !splitter || splitter.dataset.resizeAttached === "true") {
         return;
@@ -86,20 +125,19 @@ export function attachAssistantSplitter(layout, transcript, composer, splitter) 
     splitter.dataset.resizeAttached = "true";
 
     let startY = 0;
-    let startTranscriptHeight = 0;
     let startComposerHeight = 0;
+    let layoutHeight = 0;
+    let splitterHeight = 12;
 
-    const minTranscript = 160;
-    const minComposer = 120;
+    const minTranscript = 220;
+    const minComposer = 150;
 
     function onPointerMove(event) {
         const delta = event.clientY - startY;
-        const nextTranscript = Math.max(minTranscript, startTranscriptHeight + delta);
-        const nextComposer = Math.max(minComposer, startComposerHeight - delta);
-        transcript.style.flexBasis = `${nextTranscript}px`;
-        transcript.style.height = `${nextTranscript}px`;
-        composer.style.flexBasis = `${nextComposer}px`;
-        composer.style.height = `${nextComposer}px`;
+        const maxComposer = Math.max(minComposer, layoutHeight - splitterHeight - minTranscript);
+        const nextComposer = Math.min(maxComposer, Math.max(minComposer, startComposerHeight - delta));
+        const nextTranscript = Math.max(minTranscript, layoutHeight - splitterHeight - nextComposer);
+        layout.style.gridTemplateRows = `${nextTranscript}px ${splitterHeight}px ${nextComposer}px`;
     }
 
     function onPointerUp() {
@@ -113,7 +151,8 @@ export function attachAssistantSplitter(layout, transcript, composer, splitter) 
     splitter.addEventListener("pointerdown", event => {
         event.preventDefault();
         startY = event.clientY;
-        startTranscriptHeight = transcript.getBoundingClientRect().height;
+        layoutHeight = layout.getBoundingClientRect().height;
+        splitterHeight = Math.max(8, splitter.getBoundingClientRect().height || 12);
         startComposerHeight = composer.getBoundingClientRect().height;
         splitter.classList.add("dragging");
         document.body.style.cursor = "row-resize";
@@ -165,6 +204,51 @@ export function attachStreamSplitter(layout, history, stream, splitter) {
     });
 }
 
+export function attachAgentSplitter(panel, stream, actions, splitter) {
+    if (!panel || !stream || !actions || !splitter || splitter.dataset.resizeAttached === "true") {
+        return;
+    }
+
+    splitter.dataset.resizeAttached = "true";
+
+    let startY = 0;
+    let startStreamHeight = 0;
+    let startActionsHeight = 0;
+
+    const minStream = 160;
+    const minActions = 120;
+
+    function onPointerMove(event) {
+        const delta = event.clientY - startY;
+        const nextStream = Math.max(minStream, startStreamHeight + delta);
+        const nextActions = Math.max(minActions, startActionsHeight - delta);
+        stream.style.flexBasis = `${nextStream}px`;
+        stream.style.height = `${nextStream}px`;
+        actions.style.flexBasis = `${nextActions}px`;
+        actions.style.height = `${nextActions}px`;
+    }
+
+    function onPointerUp() {
+        splitter.classList.remove("dragging");
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        window.removeEventListener("pointermove", onPointerMove);
+        window.removeEventListener("pointerup", onPointerUp);
+    }
+
+    splitter.addEventListener("pointerdown", event => {
+        event.preventDefault();
+        startY = event.clientY;
+        startStreamHeight = stream.getBoundingClientRect().height;
+        startActionsHeight = actions.getBoundingClientRect().height;
+        splitter.classList.add("dragging");
+        document.body.style.cursor = "row-resize";
+        document.body.style.userSelect = "none";
+        window.addEventListener("pointermove", onPointerMove);
+        window.addEventListener("pointerup", onPointerUp);
+    });
+}
+
 export function attachComposerAutoScroll(textarea) {
     if (!textarea || textarea.dataset.autoScrollAttached === "true") {
         return;
@@ -191,41 +275,16 @@ export function scrollElementToBottom(element) {
         return;
     }
 
-    window.requestAnimationFrame(() => {
-        element.scrollTop = element.scrollHeight;
-    });
-}
-
-export function scrollIframeToBottom(iframe) {
-    if (!iframe) {
-        return;
-    }
-
-    const scroll = () => {
+    const scroll = (attempt = 0) => {
         window.requestAnimationFrame(() => {
-            const documentElement = iframe.contentDocument?.documentElement;
-            const body = iframe.contentDocument?.body;
-            const target = body || documentElement;
-            if (!target) {
-                return;
-            }
-
-            const height = Math.max(
-                body?.scrollHeight || 0,
-                documentElement?.scrollHeight || 0);
-            target.scrollTop = height;
-            if (documentElement) {
-                documentElement.scrollTop = height;
+            element.scrollTop = element.scrollHeight;
+            if (attempt < 4) {
+                window.setTimeout(() => scroll(attempt + 1), 40);
             }
         });
     };
 
-    if (iframe.contentDocument?.readyState === "complete") {
-        scroll();
-        return;
-    }
-
-    iframe.addEventListener("load", scroll, { once: true });
+    scroll();
 }
 
 export async function copyTextToClipboard(text) {
@@ -248,6 +307,32 @@ export async function copyTextToClipboard(text) {
     textarea.select();
     document.execCommand("copy");
     document.body.removeChild(textarea);
+}
+
+export function attachTranscriptCopyButtons(transcriptElement) {
+    if (!transcriptElement || transcriptElement.__codingServicesCopyAttached) {
+        return;
+    }
+
+    transcriptElement.__codingServicesCopyAttached = true;
+    transcriptElement.addEventListener("click", async event => {
+        const button = event.target && event.target.closest
+            ? event.target.closest(".message-copy")
+            : null;
+        if (!button || !transcriptElement.contains(button)) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        const text = button.getAttribute("data-copy-text") || "";
+        await copyTextToClipboard(text);
+        const originalText = button.textContent;
+        button.textContent = "Copied";
+        window.setTimeout(() => {
+            button.textContent = originalText || "Copy";
+        }, 1200);
+    });
 }
 
 export function openHtmlDocument(html, title) {

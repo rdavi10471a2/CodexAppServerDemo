@@ -1,0 +1,86 @@
+@using Radzen
+@inject DialogService DialogService
+
+<div class="archive-dialog">
+    <p class="archive-dialog-message">@Message</p>
+
+    <label class="archive-dialog-field">
+        <span>Saved discussion name</span>
+        <RadzenTextBox @bind-Value="discussionName"
+                       Style="width: 100%;"
+                       Name="discussionName"
+                       Placeholder="Give this saved discussion a clear name" />
+    </label>
+
+    <div class="archive-dialog-summary">
+        <div><strong>Trigger</strong><span>@TriggerLabel</span></div>
+        <div><strong>Messages</strong><span>@MessageCount</span></div>
+        <div><strong>Draft</strong><span>@DraftSummary</span></div>
+        <div><strong>Attachments</strong><span>@AttachmentCount</span></div>
+    </div>
+
+    <div class="archive-dialog-actions">
+        <RadzenButton Icon="archive"
+                      Text="Save To Archived Discussions"
+                      ButtonStyle="ButtonStyle.Primary"
+                      Disabled="@string.IsNullOrWhiteSpace(discussionName)"
+                      Click="@SaveAndClose" />
+        <RadzenButton Icon="delete_sweep"
+                      Text="@ContinueWithoutSavingText"
+                      ButtonStyle="ButtonStyle.Light"
+                      Click="@(() => Close(ArchiveConversationDecision.DiscardAndContinue, string.Empty))" />
+        <RadzenButton Icon="close"
+                      Text="Cancel"
+                      ButtonStyle="ButtonStyle.Secondary"
+                      Click="@(() => Close(ArchiveConversationDecision.Cancel, string.Empty))" />
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public string Message { get; set; } = string.Empty;
+
+    [Parameter]
+    public string TriggerLabel { get; set; } = string.Empty;
+
+    [Parameter]
+    public int MessageCount { get; set; }
+
+    [Parameter]
+    public int AttachmentCount { get; set; }
+
+    [Parameter]
+    public bool HasDraft { get; set; }
+
+    [Parameter]
+    public string ContinueWithoutSavingText { get; set; } = "Continue Without Saving";
+
+    [Parameter]
+    public string SuggestedName { get; set; } = string.Empty;
+
+    private string discussionName = string.Empty;
+    private string DraftSummary => HasDraft ? "Unsent draft present" : "No unsent draft";
+
+    protected override void OnParametersSet()
+    {
+        if (string.IsNullOrWhiteSpace(discussionName))
+        {
+            discussionName = SuggestedName;
+        }
+    }
+
+    private void SaveAndClose()
+    {
+        if (string.IsNullOrWhiteSpace(discussionName))
+        {
+            return;
+        }
+
+        Close(ArchiveConversationDecision.SaveAndContinue, discussionName);
+    }
+
+    private void Close(ArchiveConversationDecision decision, string name)
+    {
+        DialogService.Close(new ArchiveConversationDialogResult(decision, name.Trim()));
+    }
+}

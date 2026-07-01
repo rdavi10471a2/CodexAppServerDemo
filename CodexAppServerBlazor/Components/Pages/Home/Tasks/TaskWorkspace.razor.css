@@ -1,0 +1,253 @@
+.task-workspace {
+    border: 1px solid #d5e2ef;
+    border-radius: 6px;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    width: 100%;
+}
+
+.empty-detail {
+    margin: auto;
+    color: #526b86;
+    text-align: center;
+}
+
+.task-workspace-header {
+    align-items: flex-start;
+    border-bottom: 1px solid #d5e2ef;
+    display: flex;
+    flex: 0 0 auto;
+    gap: 1rem;
+    justify-content: space-between;
+    padding: 1rem;
+}
+
+.task-header-actions {
+    align-items: center;
+    display: flex;
+    gap: 0.5rem;
+}
+
+.task-workspace-header h3 {
+    font-size: 1.25rem;
+    margin: 0.15rem 0;
+}
+
+.task-workspace-header p {
+    color: #526b86;
+    margin: 0;
+}
+
+.eyebrow {
+    color: #466381;
+    font-size: 0.78rem;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.archived-chip {
+    background: #fff7df;
+    border: 1px solid #f0d184;
+    border-radius: 999px;
+    color: #8b6110;
+    font-size: 0.8rem;
+    font-weight: 700;
+    padding: 0.25rem 0.55rem;
+}
+
+.detail-section {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 0.65rem;
+    min-height: 0;
+    overflow: hidden;
+    padding: 0.9rem 1rem;
+}
+
+.detail-section h4 {
+    margin: 0;
+}
+
+.section-heading {
+    align-items: center;
+    display: flex;
+    justify-content: space-between;
+}
+
+.task-fields,
+.file-form,
+.comment-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+}
+
+.task-fields {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+}
+
+.task-fields label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.description-label {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.task-fields span {
+    color: #466381;
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.grow-section {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.task-description,
+.task-notes {
+    border: 1px solid #d7e1ea;
+    border-radius: 6px;
+    flex: 1 1 auto;
+    font: inherit;
+    line-height: 1.4;
+    min-height: 0;
+    overflow: auto;
+    padding: 0.65rem 0.75rem;
+    resize: none;
+    width: 100%;
+}
+
+.task-pane-tabs {
+    background: #f6f9fc;
+    border-bottom: 1px solid #d5e2ef;
+    display: flex;
+    flex: 0 0 auto;
+    gap: 0;
+    padding: 0.35rem 0.5rem 0;
+}
+
+.task-pane-tabs button {
+    background: transparent;
+    border: 0;
+    border-bottom: 3px solid transparent;
+    color: #334e6d;
+    cursor: pointer;
+    font-weight: 700;
+    padding: 0.55rem 0.75rem;
+}
+
+.task-pane-tabs button.active {
+    background: #fff;
+    border-color: #2563eb;
+    color: #0c2035;
+}
+
+.task-pane-body {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.readonly-notes {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    overflow: auto;
+}
+
+.agent-markdown {
+    background: #f8fbfe;
+    border: 1px solid #d5e2ef;
+    border-radius: 5px;
+    flex: 1 1 auto;
+    margin: 0;
+    min-height: 0;
+    overflow: auto;
+    padding: 0.8rem;
+}
+
+.agent-markdown ::deep p:first-child {
+    margin-top: 0;
+}
+
+.agent-markdown ::deep p:last-child {
+    margin-bottom: 0;
+}
+
+.agent-markdown ::deep ul,
+.agent-markdown ::deep ol {
+    padding-left: 1.4rem;
+}
+
+.agent-markdown ::deep code,
+.agent-markdown ::deep pre {
+    background: #edf3f8;
+    border-radius: 4px;
+    font-family: Consolas, "Courier New", monospace;
+}
+
+.agent-markdown ::deep code {
+    padding: 0.1rem 0.3rem;
+}
+
+.agent-markdown ::deep pre {
+    overflow: auto;
+    padding: 0.75rem;
+    white-space: pre-wrap;
+}
+
+.agent-markdown ::deep pre code {
+    background: transparent;
+    padding: 0;
+}
+
+.file-list,
+.event-list {
+    display: grid;
+    gap: 0.45rem;
+    min-height: 0;
+    overflow: auto;
+}
+
+.file-row,
+.event-row {
+    border: 1px solid #dce7f1;
+    border-radius: 5px;
+    display: grid;
+    gap: 0.25rem;
+    padding: 0.55rem;
+}
+
+.file-row span,
+.file-row em,
+.event-row em {
+    color: #607893;
+}
+
+.empty-column {
+    color: #607893;
+    margin: 0;
+}
+
+@media (max-width: 1100px) {
+    .task-fields {
+        grid-template-columns: 1fr;
+    }
+}

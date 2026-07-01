@@ -1,8 +1,8 @@
 using CodexAppServerBlazor.AICodingServices.Core;
+using CodexAppServerBlazor.Mcp;
 using CodexAppServerBlazor.Services;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.FileProviders;
-using Microsoft.Extensions.Hosting;
 
 namespace CodexAppServerBlazor.Tests;
 
@@ -27,7 +27,7 @@ public sealed class CodingServicesSettingsProviderTests
                 ["CodingServices:TestProjectPaths:0"] = "tests/Sample.Tests/Sample.Tests.csproj"
             })
             .Build();
-        CodingServicesSettingsProvider provider = new(configuration, new TestHostEnvironment(workspaceRoot));
+        CodingServicesSettingsProvider provider = new(configuration);
 
         CodingServicesSettings settings = provider.GetSettings(workspaceRoot);
 
@@ -35,6 +35,40 @@ public sealed class CodingServicesSettingsProviderTests
         Assert.Equal(Path.GetFullPath(solutionPath), settings.WatchedSolutionPath);
         Assert.Equal(Path.Combine(workspaceRoot, "runtime"), settings.RuntimeRoot);
         Assert.Equal(Path.GetFullPath(testProjectPath), Assert.Single(settings.TestProjectPaths));
+    }
+
+    [Fact]
+    public void GetSettings_resolves_relative_test_projects_against_selected_workspace()
+    {
+        using (TemporaryRepository appRepository = TemporaryRepository.Create())
+        using (TemporaryRepository selectedWorkspace = TemporaryRepository.Create())
+        {
+            string appRepoTestProjectPath = Path.Combine(appRepository.RootPath, "tests", "Sample.Tests", "Sample.Tests.csproj");
+            string workspaceTestProjectPath = Path.Combine(selectedWorkspace.RootPath, "tests", "Sample.Tests", "Sample.Tests.csproj");
+            string workspaceSolutionPath = Path.Combine(selectedWorkspace.RootPath, "Sample.slnx");
+            Directory.CreateDirectory(Path.GetDirectoryName(appRepoTestProjectPath)!);
+            Directory.CreateDirectory(Path.GetDirectoryName(workspaceTestProjectPath)!);
+            File.WriteAllText(appRepoTestProjectPath, "<Project />");
+            File.WriteAllText(workspaceTestProjectPath, "<Project />");
+            File.WriteAllText(workspaceSolutionPath, "<Solution />");
+
+            IConfiguration configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["CodingServices:RuntimeRoot"] = "runtime",
+                    ["CodingServices:WatchedSolutionPath"] = "Sample.slnx",
+                    ["CodingServices:TestProjectPaths:0"] = "tests/Sample.Tests/Sample.Tests.csproj"
+                })
+                .Build();
+            CodingServicesSettingsProvider provider = new(configuration);
+
+            CodingServicesSettings settings = provider.GetSettings(selectedWorkspace.RootPath);
+
+            Assert.Equal(Path.GetFullPath(selectedWorkspace.RootPath), settings.RepositoryRoot);
+            Assert.Equal(Path.Combine(selectedWorkspace.RootPath, "runtime"), settings.RuntimeRoot);
+            Assert.Equal(Path.GetFullPath(workspaceTestProjectPath), Assert.Single(settings.TestProjectPaths));
+            Assert.NotEqual(Path.GetFullPath(appRepoTestProjectPath), settings.TestProjectPaths[0]);
+        }
     }
 
     [Fact]
@@ -53,29 +87,36 @@ public sealed class CodingServicesSettingsProviderTests
                 ["CodingServices:RuntimeRoot"] = "runtime"
             })
             .Build();
-        CodingServicesSettingsProvider provider = new(configuration, new TestHostEnvironment(workspaceRoot));
+        CodingServicesSettingsProvider provider = new(configuration);
 
         CodingServicesSettings settings = provider.GetSettings(productRoot);
 
         Assert.Equal(Path.GetFullPath(solutionPath), settings.WatchedSolutionPath);
     }
-}
 
-internal sealed class TestHostEnvironment : IHostEnvironment
-{
-    public TestHostEnvironment(string contentRootPath)
+    [Theory]
+    [InlineData(null, "http://localhost:6278")]
+    [InlineData(" http://localhost:6278/ ", "http://localhost:6278")]
+    [InlineData("http://127.0.0.1:6278", "http://127.0.0.1:6278")]
+    [InlineData("http://[::1]:6278", "http://[::1]:6278")]
+    public void NormalizeLocalUrl_accepts_loopback_urls(string? configuredUrl, string expectedUrl)
     {
-        ContentRootPath = contentRootPath;
-        ContentRootFileProvider = new PhysicalFileProvider(contentRootPath);
+        string normalizedUrl = McpHostFactory.NormalizeLocalUrl(configuredUrl, McpHostFactory.DefaultLocalMcpUrl);
+
+        Assert.Equal(expectedUrl, normalizedUrl);
     }
 
-    public string EnvironmentName { get; set; } = Environments.Development;
-
-    public string ApplicationName { get; set; } = "CodexAppServerBlazor.Tests";
-
-    public string ContentRootPath { get; set; }
-
-    public IFileProvider ContentRootFileProvider { get; set; }
+    [Theory]
+    [InlineData("http://0.0.0.0:6278")]
+    [InlineData("http://192.168.1.10:6278")]
+    [InlineData("http://example.com:6278")]
+    [InlineData("ftp://localhost:6278")]
+    [InlineData("http://localhost:6278/mcp")]
+    public void NormalizeLocalUrl_rejects_nonlocal_or_invalid_urls(string configuredUrl)
+    {
+        Assert.Throws<InvalidOperationException>(() =>
+            McpHostFactory.NormalizeLocalUrl(configuredUrl, McpHostFactory.DefaultLocalMcpUrl));
+    }
 }
 
 internal sealed class TemporaryRepository : IDisposable
@@ -97,9 +138,32 @@ internal sealed class TemporaryRepository : IDisposable
 
     public void Dispose()
     {
-        if (Directory.Exists(RootPath))
+        SqliteConnection.ClearAllPools();
+
+        for (int attempt = 0; attempt < 10; attempt++)
         {
-            Directory.Delete(RootPath, recursive: true);
+            if (!Directory.Exists(RootPath))
+            {
+                return;
+            }
+
+            try
+            {
+                Directory.Delete(RootPath, recursive: true);
+                return;
+            }
+            catch (IOException) when (attempt < 9)
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                Thread.Sleep(100);
+            }
+            catch (UnauthorizedAccessException) when (attempt < 9)
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                Thread.Sleep(100);
+            }
         }
     }
 }
