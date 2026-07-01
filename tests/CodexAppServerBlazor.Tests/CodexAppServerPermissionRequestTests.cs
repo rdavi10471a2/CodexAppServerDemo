@@ -59,26 +59,110 @@ public sealed class CodexAppServerPermissionRequestTests
             "on-request",
             "read-only");
 
+        JsonNode? threadStart = null;
         JsonNode? turnStart = null;
         foreach (string messageJson in sentMessages)
         {
             JsonNode? message = JsonNode.Parse(messageJson);
+            if (message?["method"]?.GetValue<string>() == "thread/start")
+            {
+                threadStart = message;
+            }
+
             if (message?["method"]?.GetValue<string>() == "turn/start")
             {
                 turnStart = message;
-                break;
             }
         }
+        JsonNode? threadParameters = threadStart?["params"];
         JsonNode? parameters = turnStart?["params"];
 
+        Assert.NotNull(threadStart);
         Assert.NotNull(turnStart);
+        Assert.True(threadParameters?["approvalPolicy"]?["granular"]?["sandbox_approval"]?.GetValue<bool>());
+        Assert.False(threadParameters?["approvalPolicy"]?["granular"]?["mcp_elicitations"]?.GetValue<bool>());
+        Assert.False(threadParameters?["approvalPolicy"]?["granular"]?["rules"]?.GetValue<bool>());
+        Assert.Null(threadParameters?["approvalPolicy"]?["granular"]?["request_permissions"]);
+        Assert.Null(threadParameters?["approvalPolicy"]?["granular"]?["skill_approval"]);
         Assert.Equal("thread-1", parameters?["threadId"]?.GetValue<string>());
         Assert.Equal("C:\\Work", parameters?["cwd"]?.GetValue<string>());
         Assert.Equal("gpt-5.4", parameters?["model"]?.GetValue<string>());
-        Assert.Equal("on-request", parameters?["approvalPolicy"]?.GetValue<string>());
+        Assert.True(parameters?["approvalPolicy"]?["granular"]?["sandbox_approval"]?.GetValue<bool>());
+        Assert.False(parameters?["approvalPolicy"]?["granular"]?["mcp_elicitations"]?.GetValue<bool>());
+        Assert.False(parameters?["approvalPolicy"]?["granular"]?["rules"]?.GetValue<bool>());
+        Assert.Null(parameters?["approvalPolicy"]?["granular"]?["request_permissions"]);
+        Assert.Null(parameters?["approvalPolicy"]?["granular"]?["skill_approval"]);
         Assert.Equal("user", parameters?["approvalsReviewer"]?.GetValue<string>());
         Assert.Equal("readOnly", parameters?["sandboxPolicy"]?["type"]?.GetValue<string>());
         Assert.False(parameters?["sandboxPolicy"]?["networkAccess"]?.GetValue<bool>());
+    }
+
+    [Fact]
+    public async Task StartTurnAsync_workspace_write_includes_repo_root_in_writable_roots()
+    {
+        const string repoRoot = "C:\\Work";
+        List<string> sentMessages = [];
+        CodexAppServerClient? client = null;
+        client = new CodexAppServerClient((json, _) =>
+        {
+            sentMessages.Add(json);
+            JsonNode? request = JsonNode.Parse(json);
+            int id = request?["id"]?.GetValue<int>() ?? 0;
+            string? method = request?["method"]?.GetValue<string>();
+            if (id > 0)
+            {
+                object result = method == "thread/start"
+                    ? new
+                    {
+                        thread = new
+                        {
+                            id = "thread-1"
+                        }
+                    }
+                    : new
+                    {
+                        turn = new
+                        {
+                            id = "turn-1",
+                            status = "inProgress"
+                        }
+                    };
+
+                client!.HandleServerMessage(JsonSerializer.Serialize(new
+                {
+                    id,
+                    result
+                }));
+            }
+
+            return Task.CompletedTask;
+        });
+
+        await client.StartThreadAsync(
+            repoRoot,
+            "gpt-5.4",
+            "on-request",
+            "workspace-write");
+
+        await client.StartTurnAsync(
+            "search please",
+            repoRoot,
+            "gpt-5.4",
+            "on-request",
+            "workspace-write");
+
+        JsonNode? turnStart = sentMessages
+            .Select(messageJson => JsonNode.Parse(messageJson))
+            .FirstOrDefault(message => message?["method"]?.GetValue<string>() == "turn/start");
+        JsonNode? parameters = turnStart?["params"];
+        JsonArray? writableRoots = parameters?["sandboxPolicy"]?["writableRoots"]?.AsArray();
+
+        Assert.NotNull(turnStart);
+        Assert.Equal("workspaceWrite", parameters?["sandboxPolicy"]?["type"]?.GetValue<string>());
+        Assert.False(parameters?["sandboxPolicy"]?["networkAccess"]?.GetValue<bool>());
+        Assert.NotNull(writableRoots);
+        Assert.Single(writableRoots!);
+        Assert.Equal(repoRoot, writableRoots[0]?.GetValue<string>());
     }
 
     [Fact]
@@ -185,6 +269,7 @@ public sealed class CodexAppServerPermissionRequestTests
         Assert.NotNull(observedRequest);
         Assert.Equal(42, observedRequest.RequestId);
         Assert.Equal("item/permissions/requestApproval", observedRequest.Method);
+        Assert.Equal("item-1", observedRequest.CorrelationId);
         Assert.Contains("Need network", observedRequest.Summary);
         Assert.Contains("C:\\Work", observedRequest.Summary);
         Assert.NotNull(observedStatus);
@@ -205,7 +290,45 @@ public sealed class CodexAppServerPermissionRequestTests
         Assert.NotNull(observedRequest);
         Assert.Equal(99, observedRequest.RequestId);
         Assert.Equal("execCommandApproval", observedRequest.Method);
+        Assert.Equal("call-1", observedRequest.CorrelationId);
         Assert.Contains("execCommandApproval", observedRequest.Summary);
+    }
+
+    [Fact]
+    public void HandleServerMessage_emits_command_completion_with_correlation_id()
+    {
+        CodexAppServerClient client = new();
+        ToolEvent? observedEvent = null;
+        client.ToolActivity += toolEvent => observedEvent = toolEvent;
+
+        client.HandleServerMessage("""
+            {"method":"item/completed","params":{"item":{"type":"commandExecution","id":"cmd-1","command":"dotnet test","status":"completed","cwd":"C:\\Work","exitCode":0,"durationMs":42,"processId":"pty-1","aggregatedOutput":"ok"}}}
+            """);
+
+        Assert.NotNull(observedEvent);
+        Assert.Equal("command completed", observedEvent!.EventType);
+        Assert.Equal("cmd-1", observedEvent.CorrelationId);
+        Assert.Contains("cwd: C:\\Work", observedEvent.Detail, StringComparison.Ordinal);
+        Assert.Contains("exit: 0", observedEvent.Detail, StringComparison.Ordinal);
+        Assert.Contains("duration: 42 ms", observedEvent.Detail, StringComparison.Ordinal);
+        Assert.Contains("pid: pty-1", observedEvent.Detail, StringComparison.Ordinal);
+        Assert.Contains("ok", observedEvent.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HandleServerMessage_emits_file_change_completion_with_correlation_id()
+    {
+        CodexAppServerClient client = new();
+        ToolEvent? observedEvent = null;
+        client.ToolActivity += toolEvent => observedEvent = toolEvent;
+
+        client.HandleServerMessage("""
+            {"method":"item/completed","params":{"item":{"type":"fileChange","id":"patch-1","status":"completed","changes":[]}}}
+            """);
+
+        Assert.NotNull(observedEvent);
+        Assert.Equal("file change completed", observedEvent!.EventType);
+        Assert.Equal("patch-1", observedEvent.CorrelationId);
     }
 
     [Fact]
@@ -458,28 +581,94 @@ public sealed class CodexAppServerPermissionRequestTests
     }
 
     [Fact]
-    public void ResolveLatestApproved_updates_only_latest_approved_request()
+    public void ResolveCommandResult_matches_exact_correlation_id()
     {
         PermissionRequestService service = new();
         service.Add(new CodexServerRequestEvent(
             1,
             "item/commandExecution/requestApproval",
             "first",
-            "{}"));
+            "{}",
+            "cmd-1",
+            null));
         service.Add(new CodexServerRequestEvent(
             2,
             "item/commandExecution/requestApproval",
             "second",
-            "{}"));
+            "{}",
+            "cmd-2",
+            null));
 
         Assert.NotNull(service.Resolve(1, "approved"));
         Assert.NotNull(service.Resolve(2, "approved for session"));
 
-        CodexPermissionRequest? resolved = service.ResolveLatestApproved("command completed");
+        CodexPermissionRequest? resolved = service.ResolveCommandResult("cmd-2", null, "command completed");
 
         Assert.NotNull(resolved);
         Assert.Equal(2, resolved.RequestId);
         CodexPermissionRequest[] snapshot = service.GetSnapshot().ToArray();
+        Assert.Equal("approved", snapshot[0].Status);
+        Assert.Equal("command completed", snapshot[1].Status);
+    }
+
+    [Fact]
+    public void ResolveCommandResult_falls_back_when_correlation_id_is_missing()
+    {
+        PermissionRequestService service = new();
+        service.Add(new CodexServerRequestEvent(
+            1,
+            "mcpServer/elicitation/request",
+            "need guidance",
+            "{}",
+            null,
+            null));
+        service.Add(new CodexServerRequestEvent(
+            2,
+            "item/commandExecution/requestApproval",
+            "run command",
+            "{}",
+            "cmd-2",
+            null));
+
+        Assert.NotNull(service.Resolve(1, "approved"));
+        Assert.NotNull(service.Resolve(2, "approved"));
+
+        CodexPermissionRequest? resolved = service.ResolveCommandResult(null, null, "command completed");
+
+        Assert.NotNull(resolved);
+        Assert.Equal(2, resolved.RequestId);
+        CodexPermissionRequest[] snapshot = service.GetSnapshot().ToArray();
+        Assert.Equal("approved", snapshot[0].Status);
+        Assert.Equal("command completed", snapshot[1].Status);
+    }
+
+    [Fact]
+    public void ResolveCommandResult_prefers_approval_id_when_present()
+    {
+        PermissionRequestService service = new();
+        service.Add(new CodexServerRequestEvent(
+            1,
+            "item/commandExecution/requestApproval",
+            "first callback",
+            "{}",
+            "cmd-parent",
+            "approval-1"));
+        service.Add(new CodexServerRequestEvent(
+            2,
+            "item/commandExecution/requestApproval",
+            "second callback",
+            "{}",
+            "cmd-parent",
+            "approval-2"));
+
+        Assert.NotNull(service.Resolve(1, "approved"));
+        Assert.NotNull(service.Resolve(2, "approved"));
+
+        CodexPermissionRequest? resolved = service.ResolveCommandResult("cmd-parent", "approval-2", "command completed");
+
+        Assert.NotNull(resolved);
+        Assert.Equal(2, resolved.RequestId);
+        CodexPermissionRequest[] snapshot = service.GetSnapshot().OrderBy(r => r.RequestId).ToArray();
         Assert.Equal("approved", snapshot[0].Status);
         Assert.Equal("command completed", snapshot[1].Status);
     }

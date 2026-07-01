@@ -4,7 +4,7 @@ namespace CodexAppServerBlazor.AICodingServices.Data;
 
 public sealed class WorkflowTaskBoardDatabase
 {
-    public const int SchemaVersion = 1;
+    public const int SchemaVersion = 2;
 
     private readonly string databasePath;
 
@@ -145,10 +145,23 @@ public sealed class WorkflowTaskBoardDatabase
             );
             """);
 
+        Execute(connection, transaction, """
+            create table if not exists workflow_archived_discussions (
+                id text primary key,
+                name text not null,
+                markdown_path text not null,
+                thread_id text null,
+                turn_mode text not null,
+                trigger text not null,
+                created_at datetime not null
+            );
+            """);
+
         Execute(connection, transaction, "create unique index if not exists ux_workflow_tasks_single_active on workflow_tasks(state_code) where state_code = 'Active';");
         Execute(connection, transaction, "create index if not exists idx_workflow_tasks_state on workflow_tasks(state_code);");
         Execute(connection, transaction, "create index if not exists idx_workflow_task_files_task on workflow_task_files(task_id);");
         Execute(connection, transaction, "create index if not exists idx_workflow_task_events_task on workflow_task_events(task_id, created_at);");
+        Execute(connection, transaction, "create index if not exists idx_workflow_archived_discussions_created on workflow_archived_discussions(created_at desc);");
     }
 
     private static void MigrateSchema(SqliteConnection connection, SqliteTransaction transaction)

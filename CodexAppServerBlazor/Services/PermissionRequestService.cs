@@ -24,6 +24,8 @@ public sealed class PermissionRequestService
             Method: serverRequest.Method,
             Summary: serverRequest.Summary,
             RawJson: serverRequest.RawJson,
+            CorrelationId: NormalizeOptionalValue(serverRequest.CorrelationId),
+            ApprovalId: NormalizeOptionalValue(serverRequest.ApprovalId),
             SupportsSessionApproval: SupportsSessionApproval(serverRequest.Method),
             SupportsPersistentApproval: SupportsPersistentApproval(serverRequest.Method, serverRequest.RawJson),
             Status: "pending",
@@ -63,11 +65,24 @@ public sealed class PermissionRequestService
         }
     }
 
-    public CodexPermissionRequest? ResolveLatestApproved(string status)
+    public CodexPermissionRequest? ResolveCommandResult(string? correlationId, string? approvalId, string status)
     {
         lock (gate)
         {
-            int index = requests.FindLastIndex(IsApprovedAndWaiting);
+            int index = !string.IsNullOrWhiteSpace(approvalId)
+                ? requests.FindLastIndex(request => IsApprovedAndAwaitingTrackedResult(request)
+                    && string.Equals(request.ApprovalId, approvalId, StringComparison.Ordinal))
+                : -1;
+            if (index < 0 && !string.IsNullOrWhiteSpace(correlationId))
+            {
+                index = requests.FindLastIndex(request => IsApprovedAndAwaitingTrackedResult(request)
+                    && string.Equals(request.CorrelationId, correlationId, StringComparison.Ordinal));
+            }
+            if (index < 0)
+            {
+                index = requests.FindLastIndex(IsApprovedAndAwaitingTrackedResult);
+            }
+
             if (index < 0)
             {
                 return null;
@@ -94,6 +109,27 @@ public sealed class PermissionRequestService
     private static bool IsApprovedAndWaiting(CodexPermissionRequest request)
     {
         return request.Status.Contains("approved", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsApprovedAndAwaitingTrackedResult(CodexPermissionRequest request)
+    {
+        return IsApprovedAndWaiting(request)
+            && SupportsTrackedResult(request.Method);
+    }
+
+    private static bool SupportsTrackedResult(string method)
+    {
+        return method.Equals("item/commandExecution/requestApproval", StringComparison.OrdinalIgnoreCase)
+            || method.Equals("execCommandApproval", StringComparison.OrdinalIgnoreCase)
+            || method.Equals("item/fileChange/requestApproval", StringComparison.OrdinalIgnoreCase)
+            || method.Equals("applyPatchApproval", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? NormalizeOptionalValue(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? null
+            : value.Trim();
     }
 
     public static bool IsElicitationRequest(string method)
@@ -273,6 +309,8 @@ public sealed record CodexPermissionRequest(
     string Method,
     string Summary,
     string RawJson,
+    string? CorrelationId,
+    string? ApprovalId,
     bool SupportsSessionApproval,
     bool SupportsPersistentApproval,
     string Status,

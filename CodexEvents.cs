@@ -17,7 +17,9 @@ public sealed record ToolEvent(
     string EventType,
     string Name,
     string? Status,
-    string? Detail);
+    string? Detail,
+    string? CorrelationId,
+    string? ApprovalId = null);
 
 public sealed record StatusEvent(
     string EventType,
@@ -39,4 +41,6 @@ public sealed record CodexServerRequestEvent(
     int RequestId,
     string Method,
     string Summary,
-    string RawJson);
+    string RawJson,
+    string? CorrelationId,
+    string? ApprovalId);

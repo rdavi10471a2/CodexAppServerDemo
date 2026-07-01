@@ -1,5 +1,6 @@
 using CodexAppServerBlazor.Mcp;
 using CodexAppServerBlazor.Services;
+using CodexAppServerBlazor.Services.ArchivedDiscussions;
 using CodexAppServerBlazor.Services.Tasks;
 using CodexAppServerBlazor.Services.Workflow;
 using Markdig;
@@ -93,6 +94,12 @@ public partial class Home : IDisposable, IAsyncDisposable
     [Inject]
     public ITranscriptTaskPromotionService TranscriptTaskPromotionService { get; set; } = default!;
 
+    [Inject]
+    public IArchivedDiscussionService ArchivedDiscussionService { get; set; } = default!;
+
+    [Inject]
+    public DialogService DialogService { get; set; } = default!;
+
     protected override void OnInitialized()
     {
         ConnectionService.Changed += OnConnectionChanged;
@@ -106,7 +113,7 @@ public partial class Home : IDisposable, IAsyncDisposable
     {
         if (snapshot.IsServerStarted)
         {
-            await RunCommandAsync(() => ConnectionService.StopServerAsync(CancellationToken.None));
+            await RequestConversationDispositionAsync(ConversationContinuation.StopServer);
         }
         else
         {
@@ -151,9 +158,7 @@ public partial class Home : IDisposable, IAsyncDisposable
             return;
         }
 
-        chatDraft = string.Empty;
-        AddUserMessage(BuildUserTranscriptContent(content, attachments));
-        StartAssistantMessage();
+        string transcriptContent = BuildUserTranscriptContent(content, attachments);
         await RunCommandAsync(() => ConnectionService.SendTurnAsync(
             repoRoot,
             content,
@@ -163,12 +168,17 @@ public partial class Home : IDisposable, IAsyncDisposable
             turnMode,
             attachments,
             CancellationToken.None));
-        if (errorMessage is null)
+        if (errorMessage is not null)
         {
-            turnAttachments.Clear();
+            return;
         }
 
-        RenderAssistantSnapshot(isStreaming: snapshot.IsTurnRunning);
+        chatDraft = string.Empty;
+        turnAttachments.Clear();
+        attachmentPickerKey = Guid.NewGuid().ToString("N");
+        AddUserMessage(transcriptContent);
+        StartAssistantMessage("_Awaiting assistant response..._", snapshot.IsTurnRunning);
+        RenderAssistantSnapshot(snapshot.IsTurnRunning);
     }
 
     private async Task CreateTaskFromTranscript(string taskName)
@@ -428,31 +438,10 @@ public partial class Home : IDisposable, IAsyncDisposable
             return;
         }
 
-        bool shouldResetConversation = !string.IsNullOrWhiteSpace(snapshot.ThreadId)
-            || chatMessages.Count > 0
-            || turnAttachments.Count > 0;
-        if (shouldResetConversation && snapshot.IsServerStarted)
-        {
-            await RunCommandAsync(() => ConnectionService.ResetConversationAsync(
-                $"Reset the active Codex thread because the CWD changed from {currentWorkspace} to {nextWorkspace}.",
-                CancellationToken.None));
-            if (errorMessage is not null)
-            {
-                return;
-            }
-        }
-
-        ResetLocalConversationState(clearDraft: true);
-        SetWorkspace(nextWorkspace);
-        NotificationService.Notify(new NotificationMessage
-        {
-            Severity = NotificationSeverity.Info,
-            Summary = "Workspace changed",
-            Detail = shouldResetConversation
-                ? "Changed the CWD and reset the current conversation so the next turn starts fresh."
-                : "Changed the CWD.",
-            Duration = 5000
-        });
+        await RequestConversationDispositionAsync(
+            ConversationContinuation.ChangeWorkspace,
+            nextWorkspace,
+            currentWorkspace);
     }
 
     private void SetWorkspace(string? path)
@@ -558,24 +547,185 @@ public partial class Home : IDisposable, IAsyncDisposable
     }
 
     private async Task ClearChatHistory()
+        => await RequestConversationDispositionAsync(ConversationContinuation.StartNewConversation);
+
+    private async Task RequestConversationDispositionAsync(
+        ConversationContinuation continuation,
+        string? targetWorkspacePath = null,
+        string? currentWorkspacePath = null)
     {
         if (snapshot.IsTurnRunning)
+        {
+            string actionLabel = continuation switch
+            {
+                ConversationContinuation.StartNewConversation => "start a new conversation",
+                ConversationContinuation.ChangeWorkspace => "change the workspace",
+                ConversationContinuation.StopServer => "stop the server",
+                _ => "continue"
+            };
+            errorMessage = $"Wait for the current turn to finish before you {actionLabel}.";
+            NotificationService.Notify(new NotificationMessage
+            {
+                Severity = NotificationSeverity.Warning,
+                Summary = "Turn still running",
+                Detail = errorMessage,
+                Duration = 5000
+            });
+            return;
+        }
+
+        if (!HasUnsavedConversationState())
+        {
+            await ContinueConversationActionAsync(continuation, targetWorkspacePath, currentWorkspacePath);
+            return;
+        }
+
+        string targetLabel = continuation switch
+        {
+            ConversationContinuation.StartNewConversation => "start a new conversation",
+            ConversationContinuation.ChangeWorkspace => "change the workspace",
+            ConversationContinuation.StopServer => "stop the server",
+            _ => "continue"
+        };
+        string continueWithoutSavingText = continuation switch
+        {
+            ConversationContinuation.StartNewConversation => "Start New Conversation",
+            ConversationContinuation.ChangeWorkspace => "Change Workspace",
+            ConversationContinuation.StopServer => "Stop Server",
+            _ => "Continue"
+        };
+
+        ArchiveConversationDialogResult? decision = await DialogService.OpenAsync<ArchiveConversationDialog>(
+            "Save Current Conversation?",
+            new Dictionary<string, object?>
+            {
+                [nameof(ArchiveConversationDialog.Message)] = BuildDispositionMessage(continuation, targetLabel),
+                [nameof(ArchiveConversationDialog.TriggerLabel)] = GetTriggerLabel(continuation, targetWorkspacePath),
+                [nameof(ArchiveConversationDialog.MessageCount)] = chatMessages.Count,
+                [nameof(ArchiveConversationDialog.AttachmentCount)] = turnAttachments.Count,
+                [nameof(ArchiveConversationDialog.HasDraft)] = !string.IsNullOrWhiteSpace(chatDraft),
+                [nameof(ArchiveConversationDialog.ContinueWithoutSavingText)] = continueWithoutSavingText,
+                [nameof(ArchiveConversationDialog.SuggestedName)] = BuildSuggestedDiscussionName()
+            },
+            new DialogOptions
+            {
+                Width = "680px",
+                CloseDialogOnEsc = true,
+                CloseDialogOnOverlayClick = false,
+                Resizable = false,
+                Draggable = false
+            });
+
+        if (decision is null || decision.Decision == ArchiveConversationDecision.Cancel)
         {
             return;
         }
 
-        if (snapshot.IsServerStarted && !string.IsNullOrWhiteSpace(snapshot.ThreadId))
+        if (decision.Decision == ArchiveConversationDecision.SaveAndContinue)
         {
-            await RunCommandAsync(() => ConnectionService.ResetConversationAsync(
-                "Cleared the current chat history and reset the active Codex thread.",
-                CancellationToken.None));
-            if (errorMessage is not null)
+            ArchivedDiscussionSaveResult saveResult;
+            try
             {
+                saveResult = ArchivedDiscussionService.SaveDiscussion(
+                    new ArchivedDiscussionSaveRequest(
+                        repoRoot,
+                        decision.Name,
+                        snapshot.ThreadId,
+                        turnMode.ToString(),
+                        GetTriggerLabel(continuation, targetWorkspacePath),
+                        TranscriptText,
+                        chatDraft,
+                        turnAttachments.Select(attachment => attachment.Name).ToArray(),
+                        DateTimeOffset.Now));
+            }
+            catch (Exception ex)
+            {
+                errorMessage = ex.Message;
+                NotificationService.Notify(new NotificationMessage
+                {
+                    Severity = NotificationSeverity.Error,
+                    Summary = "Archive failed",
+                    Detail = ex.Message,
+                    Duration = 7000
+                });
                 return;
             }
+
+            NotificationService.Notify(new NotificationMessage
+            {
+                Severity = NotificationSeverity.Success,
+                Summary = "Conversation archived",
+                Detail = $"Saved to Archived Discussions as \"{saveResult.Name}\".",
+                Duration = 5000
+            });
         }
 
-        ResetLocalConversationState(clearDraft: true);
+        await ContinueConversationActionAsync(continuation, targetWorkspacePath, currentWorkspacePath);
+    }
+
+    private async Task ContinueConversationActionAsync(
+        ConversationContinuation continuation,
+        string? targetWorkspacePath = null,
+        string? currentWorkspacePath = null)
+    {
+        switch (continuation)
+        {
+            case ConversationContinuation.StartNewConversation:
+                if (snapshot.IsServerStarted && !string.IsNullOrWhiteSpace(snapshot.ThreadId))
+                {
+                    await RunCommandAsync(() => ConnectionService.ResetConversationAsync(
+                        "Cleared the current chat history and reset the active Codex thread.",
+                        CancellationToken.None));
+                    if (errorMessage is not null)
+                    {
+                        return;
+                    }
+                }
+
+                ResetLocalConversationState(clearDraft: true);
+                break;
+
+            case ConversationContinuation.ChangeWorkspace:
+                bool shouldResetConversation = !string.IsNullOrWhiteSpace(snapshot.ThreadId)
+                    || chatMessages.Count > 0
+                    || turnAttachments.Count > 0
+                    || !string.IsNullOrWhiteSpace(chatDraft);
+                if (shouldResetConversation && snapshot.IsServerStarted)
+                {
+                    string currentWorkspace = currentWorkspacePath ?? repoRoot;
+                    string nextWorkspace = targetWorkspacePath ?? repoRoot;
+                    await RunCommandAsync(() => ConnectionService.ResetConversationAsync(
+                        $"Reset the active Codex thread because the CWD changed from {currentWorkspace} to {nextWorkspace}.",
+                        CancellationToken.None));
+                    if (errorMessage is not null)
+                    {
+                        return;
+                    }
+                }
+
+                ResetLocalConversationState(clearDraft: true);
+                SetWorkspace(targetWorkspacePath);
+                NotificationService.Notify(new NotificationMessage
+                {
+                    Severity = NotificationSeverity.Info,
+                    Summary = "Workspace changed",
+                    Detail = shouldResetConversation
+                        ? "Changed the CWD and reset the current conversation so the next turn starts fresh."
+                        : "Changed the CWD.",
+                    Duration = 5000
+                });
+                break;
+
+            case ConversationContinuation.StopServer:
+                await RunCommandAsync(() => ConnectionService.StopServerAsync(CancellationToken.None));
+                if (errorMessage is not null)
+                {
+                    return;
+                }
+
+                ResetLocalConversationState(clearDraft: true);
+                break;
+        }
     }
 
     private void ResetLocalConversationState(bool clearDraft)
@@ -594,6 +744,66 @@ public partial class Home : IDisposable, IAsyncDisposable
         {
             chatDraft = string.Empty;
         }
+    }
+
+    private bool HasUnsavedConversationState()
+    {
+        return chatMessages.Count > 0
+            || turnAttachments.Count > 0
+            || !string.IsNullOrWhiteSpace(chatDraft);
+    }
+
+    private static string GetTriggerLabel(ConversationContinuation continuation, string? targetWorkspacePath)
+    {
+        return continuation switch
+        {
+            ConversationContinuation.StartNewConversation => "Start New Conversation",
+            ConversationContinuation.ChangeWorkspace => string.IsNullOrWhiteSpace(targetWorkspacePath)
+                ? "Change Workspace"
+                : "Change Workspace to " + targetWorkspacePath,
+            ConversationContinuation.StopServer => "Stop Server",
+            _ => "Continue"
+        };
+    }
+
+    private static string BuildDispositionMessage(ConversationContinuation continuation, string targetLabel)
+    {
+        return continuation switch
+        {
+            ConversationContinuation.StopServer =>
+                "You have unsaved conversation state. Saving it now will make it easy to recover later as archived evidence before you stop the server.",
+            _ =>
+                $"You have unsaved conversation state that will be discarded if you {targetLabel}."
+        };
+    }
+
+    private string BuildSuggestedDiscussionName()
+    {
+        foreach (TranscriptMessage message in chatMessages.Where(candidate => candidate.IsUser))
+        {
+            string firstLine = message.Content
+                .Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(line => line.Trim())
+                .FirstOrDefault(line => !string.IsNullOrWhiteSpace(line))
+                ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(firstLine))
+            {
+                return firstLine.Length <= 72
+                    ? firstLine
+                    : firstLine[..72].TrimEnd();
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(chatDraft))
+        {
+            string draft = chatDraft.Trim();
+            return draft.Length <= 72
+                ? draft
+                : draft[..72].TrimEnd();
+        }
+
+        return "Saved discussion " + DateTime.Now.ToString("yyyy-MM-dd HH:mm");
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -640,7 +850,6 @@ public partial class Home : IDisposable, IAsyncDisposable
         {
             busy = false;
             snapshot = ConnectionService.GetSnapshot();
-            RenderAssistantSnapshot(isStreaming: false);
         }
     }
 
@@ -668,18 +877,18 @@ public partial class Home : IDisposable, IAsyncDisposable
         });
     }
 
-    private void StartAssistantMessage()
+    private void StartAssistantMessage(string initialContent, bool isStreaming)
     {
         activeAssistantMessageId = Guid.NewGuid().ToString("N");
-        renderedAssistantText = string.Empty;
+        renderedAssistantText = initialContent;
         chatMessages.Add(new TranscriptMessage
         {
             Id = activeAssistantMessageId,
             UserId = AssistantUserId,
             Role = "assistant",
             IsUser = false,
-            IsStreaming = true,
-            Content = string.Empty,
+            IsStreaming = isStreaming,
+            Content = initialContent,
             Timestamp = DateTime.Now
         });
     }
@@ -701,10 +910,6 @@ public partial class Home : IDisposable, IAsyncDisposable
         {
             renderedAssistantText = snapshot.AssistantText;
             message.Content = renderedAssistantText;
-        }
-        else if (!isStreaming && string.IsNullOrWhiteSpace(message.Content))
-        {
-            message.Content = "_Awaiting assistant response..._";
         }
 
         message.IsStreaming = isStreaming;
@@ -1061,8 +1266,8 @@ public partial class Home : IDisposable, IAsyncDisposable
             return;
         }
 
-        bool completed = request.Status.Contains("command completed", StringComparison.OrdinalIgnoreCase);
-        bool failed = request.Status.Contains("command failed", StringComparison.OrdinalIgnoreCase);
+        bool completed = request.Status.Contains("completed", StringComparison.OrdinalIgnoreCase);
+        bool failed = request.Status.Contains("failed", StringComparison.OrdinalIgnoreCase);
         if (!completed && !failed)
         {
             return;
@@ -1074,9 +1279,12 @@ public partial class Home : IDisposable, IAsyncDisposable
             return;
         }
 
+        bool changeResult = request.Status.Contains("change", StringComparison.OrdinalIgnoreCase);
         lastPermissionResultToastKey = key;
         NotifyPermissionAction(
-            completed ? "Approved command completed" : "Approved command failed",
+            completed
+                ? (changeResult ? "Approved change completed" : "Approved command completed")
+                : (changeResult ? "Approved change failed" : "Approved command failed"),
             $"Request #{request.RequestId} resumed after approval.",
             completed ? NotificationSeverity.Success : NotificationSeverity.Error);
     }
@@ -1121,4 +1329,11 @@ public sealed class TranscriptMessage
     public bool IsStreaming { get; set; }
     public string Content { get; set; } = string.Empty;
     public DateTime Timestamp { get; set; }
+}
+
+public enum ConversationContinuation
+{
+    StartNewConversation,
+    ChangeWorkspace,
+    StopServer
 }

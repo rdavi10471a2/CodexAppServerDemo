@@ -27,7 +27,7 @@
                               Size="ButtonSize.Small"
                               Title="Starts a fresh conversation by clearing the visible chat, removing pending attachments, and resetting the active Codex thread."
                               Click="@ClearTranscript"
-                              Disabled="@(!HasTranscript || Busy)" />
+                              Disabled="@(!HasTranscript || Busy || IsTurnRunning)" />
                 <RadzenButton Icon="assignment_add"
                               Text="New Task"
                               ButtonStyle="ButtonStyle.Secondary"
@@ -36,6 +36,12 @@
                               Disabled="@(!CanCreateTaskFromTranscript)" />
             </div>
         </div>
+        @if (HasPendingRequests)
+        {
+            <div class="permission-waiting-banner">
+                Agent is waiting for your approval in <strong>Agent Actions</strong>.
+            </div>
+        }
         @if (isCreateTaskPanelVisible)
         {
             <div class="transcript-task-panel">
@@ -115,7 +121,7 @@
             <section class="agent-request-region" @ref="agentRequestRegion" role="tabpanel" aria-label="Agent actions">
                 <div class="agent-request-header">
                     <span>Agent Actions</span>
-                    <strong>@PendingRequests.Count pending</strong>
+                    <strong>@GetPendingHeaderText()</strong>
                 </div>
 
                 @if (VisibleRequests.Count == 0)
@@ -268,6 +274,9 @@
     public bool IsServerStarted { get; set; }
 
     [Parameter]
+    public bool IsTurnRunning { get; set; }
+
+    [Parameter]
     public bool Busy { get; set; }
 
     [Parameter]
@@ -301,26 +310,51 @@
     public EventCallback<int> CancelPermission { get; set; }
 
     private bool HasTranscript => !string.IsNullOrWhiteSpace(TranscriptText);
+    private bool HasPendingRequests => PendingRequests.Count > 0;
     private bool IsDiscussMode => TurnMode == WorkflowTurnMode.Discuss;
     private bool CanCreateTaskFromTranscript => HasTranscript && IsDiscussMode && !Busy;
     private bool CanSubmitTaskCreation => CanCreateTaskFromTranscript && !string.IsNullOrWhiteSpace(taskTitleDraft);
     private RailTab activeRailTab = RailTab.AgentActions;
     private bool isCreateTaskPanelVisible;
     private string taskTitleDraft = string.Empty;
+    private int? lastPendingRequestId;
 
     private IReadOnlyList<CodexPermissionRequest> PendingRequests =>
         PermissionRequests
             .Where(IsPending)
             .ToArray();
     private IReadOnlyList<CodexPermissionRequest> VisibleRequests =>
-        PermissionRequests
-            .OrderByDescending(request => request.ResolvedAt ?? request.CreatedAt)
-            .Take(1)
+        PendingRequests
+            .OrderBy(request => request.CreatedAt)
+            .Concat(PermissionRequests
+                .Where(request => !IsPending(request))
+                .OrderByDescending(request => request.ResolvedAt ?? request.CreatedAt)
+                .Take(5))
+            .DistinctBy(request => request.RequestId)
             .ToArray();
 
     private void SelectRailTab(RailTab tab)
     {
         activeRailTab = tab;
+    }
+
+    protected override void OnParametersSet()
+    {
+        CodexPermissionRequest? latestPending = PendingRequests
+            .OrderByDescending(request => request.CreatedAt)
+            .FirstOrDefault();
+        if (latestPending is not null)
+        {
+            if (lastPendingRequestId != latestPending.RequestId)
+            {
+                activeRailTab = RailTab.AgentActions;
+                lastPendingRequestId = latestPending.RequestId;
+            }
+        }
+        else
+        {
+            lastPendingRequestId = null;
+        }
     }
 
     private void ShowCreateTaskPanel()
@@ -340,9 +374,31 @@
 
     private string GetRailTabClass(RailTab tab)
     {
-        return activeRailTab == tab
-            ? "rail-tab active"
+        bool isActive = activeRailTab == tab;
+        bool isWaitingTab = tab == RailTab.AgentActions && HasPendingRequests;
+        if (isActive && isWaitingTab)
+        {
+            return "rail-tab active waiting";
+        }
+
+        if (isActive)
+        {
+            return "rail-tab active";
+        }
+
+        return isWaitingTab
+            ? "rail-tab waiting"
             : "rail-tab";
+    }
+
+    private string GetPendingHeaderText()
+    {
+        return PendingRequests.Count switch
+        {
+            0 => "No pending requests",
+            1 => "Waiting for you",
+            _ => $"{PendingRequests.Count} waiting for you"
+        };
     }
 
     private static bool IsPending(CodexPermissionRequest request)

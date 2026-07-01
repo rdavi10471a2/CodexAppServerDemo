@@ -21,4 +21,6 @@ public interface IWorkflowTaskBoardViewService
     void AddFile(string workspaceRoot, string taskId, string relativePath, string? intent, string? fileRole);
 
     void AddComment(string workspaceRoot, string taskId, string message);
+
+    string ReadArchivedDiscussionContent(string workspaceRoot, string archivedDiscussionId);
 }

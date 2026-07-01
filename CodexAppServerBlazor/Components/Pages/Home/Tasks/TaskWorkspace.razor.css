@@ -91,6 +91,7 @@
 .task-fields {
     flex: 1 1 auto;
     min-height: 0;
+    overflow: auto;
 }
 
 .task-fields label {
@@ -113,6 +114,7 @@
 .grow-section {
     flex: 1 1 auto;
     min-height: 0;
+    overflow: hidden;
 }
 
 .task-description,
@@ -167,7 +169,7 @@
     flex: 1 1 auto;
     flex-direction: column;
     min-height: 0;
-    overflow: hidden;
+    overflow: auto;
 }
 
 .agent-markdown {

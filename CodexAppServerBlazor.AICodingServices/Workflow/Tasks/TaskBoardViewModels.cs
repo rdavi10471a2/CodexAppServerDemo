@@ -5,12 +5,14 @@ public sealed record TaskBoardViewModel(
     string DatabasePath,
     string TaskMemoryRoot,
     IReadOnlyList<TaskBoardColumnViewModel> Columns,
+    IReadOnlyList<TaskBoardArchivedDiscussionViewModel> ArchivedDiscussions,
     TaskBoardTaskDetailViewModel? SelectedTask)
 {
     public static TaskBoardViewModel Empty { get; } = new(
         string.Empty,
         string.Empty,
         string.Empty,
+        [],
         [],
         null);
 }
@@ -63,4 +65,13 @@ public sealed record TaskBoardEventViewModel(
     string EventTypeCode,
     string EventTypeName,
     string Message,
+    string CreatedLabel);
+
+public sealed record TaskBoardArchivedDiscussionViewModel(
+    string Id,
+    string Name,
+    string MarkdownPath,
+    string? ThreadId,
+    string Trigger,
+    string TurnMode,
     string CreatedLabel);

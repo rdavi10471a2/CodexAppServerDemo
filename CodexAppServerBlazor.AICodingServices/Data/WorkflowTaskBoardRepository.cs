@@ -409,6 +409,88 @@ public sealed class WorkflowTaskBoardRepository
         }
     }
 
+    public ArchivedDiscussionRow SaveArchivedDiscussion(
+        string name,
+        string markdownPath,
+        string? threadId,
+        string turnMode,
+        string trigger)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new ArgumentException("Archived discussion name is required.", nameof(name));
+        }
+
+        if (string.IsNullOrWhiteSpace(markdownPath))
+        {
+            throw new ArgumentException("Archived discussion markdown path is required.", nameof(markdownPath));
+        }
+
+        EnsureCreated();
+        string id = CreateId();
+        DateTime now = DateTime.Now;
+        using (SqliteConnection connection = database.OpenConnection())
+        {
+            using (SqliteCommand command = connection.CreateCommand())
+            {
+                command.CommandText = """
+                    insert into workflow_archived_discussions(id, name, markdown_path, thread_id, turn_mode, trigger, created_at)
+                    values ($id, $name, $markdownPath, $threadId, $turnMode, $trigger, $createdAt);
+                    """;
+                command.Parameters.AddWithValue("$id", id);
+                command.Parameters.AddWithValue("$name", name.Trim());
+                command.Parameters.AddWithValue("$markdownPath", Path.GetFullPath(markdownPath));
+                AddNullable(command, "$threadId", threadId);
+                command.Parameters.AddWithValue("$turnMode", string.IsNullOrWhiteSpace(turnMode) ? "Discuss" : turnMode);
+                command.Parameters.AddWithValue("$trigger", string.IsNullOrWhiteSpace(trigger) ? "Manual" : trigger);
+                command.Parameters.AddWithValue("$createdAt", now);
+                command.ExecuteNonQuery();
+            }
+
+            return new ArchivedDiscussionRow(
+                id,
+                name.Trim(),
+                Path.GetFullPath(markdownPath),
+                string.IsNullOrWhiteSpace(threadId) ? null : threadId.Trim(),
+                string.IsNullOrWhiteSpace(turnMode) ? "Discuss" : turnMode,
+                string.IsNullOrWhiteSpace(trigger) ? "Manual" : trigger,
+                now);
+        }
+    }
+
+    public IReadOnlyList<ArchivedDiscussionRow> ListArchivedDiscussions()
+    {
+        EnsureCreated();
+        using (SqliteConnection connection = database.OpenConnection())
+        {
+            List<ArchivedDiscussionRow> rows = [];
+            using (SqliteCommand command = connection.CreateCommand())
+            {
+                command.CommandText = """
+                    select id, name, markdown_path, thread_id, turn_mode, trigger, created_at
+                    from workflow_archived_discussions
+                    order by created_at desc, id desc;
+                    """;
+                using (SqliteDataReader reader = command.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        rows.Add(new ArchivedDiscussionRow(
+                            reader.GetString(0),
+                            reader.GetString(1),
+                            reader.GetString(2),
+                            reader.IsDBNull(3) ? null : reader.GetString(3),
+                            reader.GetString(4),
+                            reader.GetString(5),
+                            reader.GetDateTime(6)));
+                    }
+                }
+            }
+
+            return rows;
+        }
+    }
+
     public WorkflowTaskFileRow AddFile(string taskId, string relativePath, string? intent, string? fileRole)
     {
         if (string.IsNullOrWhiteSpace(relativePath))

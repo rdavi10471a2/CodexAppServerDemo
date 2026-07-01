@@ -146,6 +146,7 @@
                                       AttachmentPickerKey="@attachmentPickerKey"
                                       @bind-ChatDraft="@chatDraft"
                                       IsServerStarted="@snapshot.IsServerStarted"
+                                      IsTurnRunning="@snapshot.IsTurnRunning"
                                       Busy="@busy"
                                       CreateTaskFromTranscript="@CreateTaskFromTranscript"
                                       SendChatDraft="@SendChatDraft"
@@ -181,6 +182,10 @@
 
                     <RadzenTabsItem Text="Status">
                         <OutputTab Events="@snapshot.StatusEvents" EmptyText="No status events yet." />
+                    </RadzenTabsItem>
+
+                    <RadzenTabsItem Text="Protocol">
+                        <RawProtocolTab Lines="@snapshot.RawLines" EmptyText="No protocol lines yet." />
                     </RadzenTabsItem>
 
                     <RadzenTabsItem Text="Telemetry">

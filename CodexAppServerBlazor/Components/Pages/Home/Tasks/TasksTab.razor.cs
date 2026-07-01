@@ -1,6 +1,7 @@
 using CodexAppServerBlazor.AICodingServices.Workflow.Tasks;
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
+using Radzen;
 
 namespace CodexAppServerBlazor.Components.Pages.Home.Tasks;
 
@@ -15,6 +16,9 @@ public partial class TasksTab : ComponentBase, IAsyncDisposable
     private ElementReference taskWorkspacePane;
     private ElementReference taskSplitter;
     private IJSObjectReference? taskResizeModule;
+
+    [Inject]
+    public DialogService DialogService { get; set; } = default!;
 
     private IReadOnlyList<TaskBoardColumnViewModel> BoardStateOptions =>
         model.Columns.ToArray();
@@ -181,6 +185,59 @@ public partial class TasksTab : ComponentBase, IAsyncDisposable
             Load(taskId);
         });
         await Task.CompletedTask;
+    }
+
+    private async Task CopyArchivedDiscussion(string archivedDiscussionId)
+    {
+        if (taskResizeModule is null)
+        {
+            return;
+        }
+
+        string content;
+        try
+        {
+            content = TaskBoardViewService.ReadArchivedDiscussionContent(WorkspaceRoot, archivedDiscussionId);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+            return;
+        }
+
+        await taskResizeModule.InvokeVoidAsync("copyTextToClipboard", content);
+    }
+
+    private async Task OpenArchivedDiscussion(TaskBoardArchivedDiscussionViewModel discussion)
+    {
+        string content = string.Empty;
+        Execute(() =>
+        {
+            content = TaskBoardViewService.ReadArchivedDiscussionContent(WorkspaceRoot, discussion.Id);
+        });
+        if (!string.IsNullOrWhiteSpace(errorMessage))
+        {
+            return;
+        }
+
+        await DialogService.OpenAsync<ArchivedDiscussionViewerDialog>(
+            "Archived Discussion",
+            new Dictionary<string, object?>
+            {
+                [nameof(ArchivedDiscussionViewerDialog.Title)] = discussion.Name,
+                [nameof(ArchivedDiscussionViewerDialog.CreatedLabel)] = discussion.CreatedLabel,
+                [nameof(ArchivedDiscussionViewerDialog.ThreadId)] = discussion.ThreadId,
+                [nameof(ArchivedDiscussionViewerDialog.Content)] = content
+            },
+            new DialogOptions
+            {
+                Width = "760px",
+                Height = "70vh",
+                CloseDialogOnEsc = true,
+                CloseDialogOnOverlayClick = true,
+                Resizable = true,
+                Draggable = true
+            });
     }
 
     private void Load(string? taskId)

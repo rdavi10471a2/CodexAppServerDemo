@@ -22,6 +22,50 @@
         <div class="task-error">@errorMessage</div>
     }
 
+    <section class="archived-discussions-panel">
+        <div class="archived-discussions-header">
+            <div>
+                <span>Archived Discussions</span>
+                <strong>@model.ArchivedDiscussions.Count saved</strong>
+            </div>
+        </div>
+
+        @if (model.ArchivedDiscussions.Count == 0)
+        {
+            <div class="archived-discussions-empty">No archived discussions have been saved yet.</div>
+        }
+        else
+        {
+            <div class="archived-discussions-list">
+                @foreach (TaskBoardArchivedDiscussionViewModel discussion in model.ArchivedDiscussions)
+                {
+                    <article class="archived-discussion-row">
+                        <div class="archived-discussion-main">
+                            <strong>@discussion.Name</strong>
+                            <span>@discussion.CreatedLabel | @discussion.Trigger | @discussion.TurnMode</span>
+                            @if (!string.IsNullOrWhiteSpace(discussion.ThreadId))
+                            {
+                                <small>Thread: @discussion.ThreadId</small>
+                            }
+                        </div>
+                        <div class="archived-discussion-actions">
+                            <RadzenButton Icon="content_copy"
+                                          Text="Copy"
+                                          ButtonStyle="ButtonStyle.Light"
+                                          Size="ButtonSize.Small"
+                                          Click="@(() => CopyArchivedDiscussion(discussion.Id))" />
+                            <RadzenButton Icon="open_in_new"
+                                          Text="Open"
+                                          ButtonStyle="ButtonStyle.Secondary"
+                                          Size="ButtonSize.Small"
+                                          Click="@(() => OpenArchivedDiscussion(discussion))" />
+                        </div>
+                    </article>
+                }
+            </div>
+        }
+    </section>
+
     <div class="task-layout @(isNavigatorVisible ? string.Empty : "task-layout-navigator-hidden")" @ref="taskLayout">
         @if (isNavigatorVisible)
         {

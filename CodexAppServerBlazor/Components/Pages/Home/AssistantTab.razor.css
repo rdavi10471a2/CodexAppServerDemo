@@ -61,6 +61,19 @@
     background: #f8fbfd;
 }
 
+.permission-waiting-banner {
+    border-bottom: 1px solid #f0c7cc;
+    padding: 9px 12px;
+    color: #7a1f2d;
+    background: #fff1f3;
+    font-size: .86rem;
+    font-weight: 700;
+}
+
+.permission-waiting-banner strong {
+    color: #611320;
+}
+
 .transcript-task-field {
     display: grid;
     gap: 6px;
@@ -150,13 +163,27 @@
     background: #ffffff;
 }
 
+.rail-tab.waiting {
+    color: #7a1f2d;
+    background: #fff3f5;
+}
+
 .rail-tab.active {
     box-shadow: inset 0 3px 0 #1d5cff;
+}
+
+.rail-tab.active.waiting {
+    box-shadow: inset 0 3px 0 #d6455d;
 }
 
 .rail-tab strong {
     color: #1f5d38;
     font-size: 11px;
+}
+
+.rail-tab.waiting strong,
+.rail-tab.active.waiting strong {
+    color: #7a1f2d;
 }
 
 .turn-stream-region {
@@ -192,6 +219,15 @@
 .agent-request-header strong {
     color: #1f5d38;
     font-size: 11px;
+}
+
+.agent-request-region:has(.agent-request-card.pending) .agent-request-header {
+    color: #7a1f2d;
+    background: #fff3f5;
+}
+
+.agent-request-region:has(.agent-request-card.pending) .agent-request-header strong {
+    color: #7a1f2d;
 }
 
 .agent-request-empty {

@@ -2,6 +2,7 @@ using CodexAppServerBlazor.AICodingServices.Core;
 using CodexAppServerBlazor.AICodingServices.Data;
 using CodexAppServerBlazor.AICodingServices.Workflow.Tasks;
 using CodexAppServerBlazor.Services;
+using CodexAppServerBlazor.Services.ArchivedDiscussions;
 using CodexAppServerBlazor.Services.Tasks;
 using Microsoft.Extensions.Configuration;
 
@@ -310,6 +311,62 @@ public sealed class WorkflowTaskBoardViewServiceTests
             Assert.Contains(
                 secondRead.Columns.SelectMany(column => column.Tasks),
                 task => task.Id.Equals(created.Id, StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public void ReadArchivedDiscussionContent_rejects_paths_outside_archive_store()
+    {
+        using (TemporaryRepository repository = TemporaryRepository.Create())
+        {
+            CodingServicesSettingsProvider provider = CreateProvider();
+            WorkflowTaskBoardViewService service = new(provider);
+            CodingServicesSettings settings = provider.GetSettings(repository.RootPath);
+            WorkflowTaskBoardRepository taskBoardRepository = new(
+                SystemDataPaths.GetDefaultPlanningDatabasePath(settings),
+                SystemDataPaths.GetDefaultTaskMemoryRoot(settings));
+            string outsidePath = Path.Combine(repository.RootPath, "outside.md");
+            File.WriteAllText(outsidePath, "# outside");
+
+            ArchivedDiscussionRow row = taskBoardRepository.SaveArchivedDiscussion(
+                "Outside row",
+                outsidePath,
+                null,
+                "Discuss",
+                "Manual");
+
+            InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+                service.ReadArchivedDiscussionContent(repository.RootPath, row.Id));
+
+            Assert.Contains("outside the archived discussion store", ex.Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void ReadArchivedDiscussionContent_reads_saved_archive_from_store()
+    {
+        using (TemporaryRepository repository = TemporaryRepository.Create())
+        {
+            CodingServicesSettingsProvider provider = CreateProvider();
+            ArchivedDiscussionService archiveService = new(provider);
+            WorkflowTaskBoardViewService service = new(provider);
+
+            ArchivedDiscussionSaveResult result = archiveService.SaveDiscussion(
+                new ArchivedDiscussionSaveRequest(
+                    repository.RootPath,
+                    "Review archive retrieval",
+                    "thread-123",
+                    "Discuss",
+                    "Manual",
+                    "You 10:00:00" + Environment.NewLine + "archive me",
+                    string.Empty,
+                    [],
+                    DateTimeOffset.Parse("2026-07-01T10:30:00-05:00")));
+
+            string content = service.ReadArchivedDiscussionContent(repository.RootPath, result.Id);
+
+            Assert.Contains("# Review archive retrieval", content, StringComparison.Ordinal);
+            Assert.Contains("## Transcript", content, StringComparison.Ordinal);
         }
     }
 

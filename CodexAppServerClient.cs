@@ -80,6 +80,10 @@ public sealed class CodexAppServerClient : IAsyncDisposable
     {
         var init = await SendRequestAsync("initialize", new
         {
+            capabilities = new
+            {
+                experimentalApi = true
+            },
             clientInfo = new
             {
                 name = "codex_app_server_blazor",
@@ -102,15 +106,18 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         string sandbox,
         CancellationToken cancellationToken = default)
     {
-        var response = await SendRequestAsync("thread/start", new
+        object approvalPolicyPayload = CreateApprovalPolicy(approvalPolicy);
+        object payload = new
         {
             model,
             cwd = repoRoot,
-            approvalPolicy,
+            approvalPolicy = approvalPolicyPayload,
             approvalsReviewer = "user",
             sandbox,
             serviceName = "codex_app_server_blazor"
-        }, cancellationToken);
+        };
+        LogLine?.Invoke("thread/start payload: " + JsonSerializer.Serialize(payload));
+        var response = await SendRequestAsync("thread/start", payload, cancellationToken);
 
         ThrowIfRpcError(response);
 
@@ -154,20 +161,44 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             Status?.Invoke(new StatusEvent("turn/input", BuildTurnInputSummary(attachments, repoRoot)));
         }
 
-        var response = await SendRequestAsync("turn/start", new
+        object approvalPolicyPayload = CreateApprovalPolicy(approvalPolicy);
+        object sandboxPolicyPayload = CreateSandboxPolicy(sandbox, repoRoot);
+        object payload = new
         {
             threadId = ThreadId,
             cwd = repoRoot,
             model,
-            approvalPolicy,
+            approvalPolicy = approvalPolicyPayload,
             approvalsReviewer = "user",
-            sandboxPolicy = CreateSandboxPolicy(sandbox),
+            sandboxPolicy = sandboxPolicyPayload,
             input
-        }, cancellationToken);
+        };
+        LogLine?.Invoke("turn/start payload: " + JsonSerializer.Serialize(payload));
+        var response = await SendRequestAsync("turn/start", payload, cancellationToken);
 
         ThrowIfRpcError(response);
         Status?.Invoke(new StatusEvent("turn", "Turn accepted by app-server."));
         LogLine?.Invoke("Turn started.");
+    }
+
+    private static object CreateApprovalPolicy(string approvalPolicy)
+    {
+        return approvalPolicy.Trim().ToLowerInvariant() switch
+        {
+            "on-request" => new
+            {
+                granular = new
+                {
+                    mcp_elicitations = false,
+                    rules = false,
+                    sandbox_approval = true
+                }
+            },
+            "untrusted" => "untrusted",
+            "on-failure" => "on-failure",
+            "never" => "never",
+            _ => "on-request"
+        };
     }
 
     private static object CreateTurnAttachmentInput(CodexTurnAttachment attachment, string repoRoot)
@@ -232,7 +263,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         return relativePath;
     }
 
-    private static object CreateSandboxPolicy(string sandbox)
+    private static object CreateSandboxPolicy(string sandbox, string repoRoot)
     {
         return sandbox.Trim().ToLowerInvariant() switch
         {
@@ -245,7 +276,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             {
                 type = "workspaceWrite",
                 networkAccess = false,
-                writableRoots = Array.Empty<string>(),
+                writableRoots = new[] { repoRoot },
                 excludeTmpdirEnvVar = false,
                 excludeSlashTmp = false
             },
@@ -431,12 +462,15 @@ public sealed class CodexAppServerClient : IAsyncDisposable
 
     private void EmitServerRequest(int requestId, string method, JsonNode node, string rawJson)
     {
+        JsonNode? parameters = node["params"];
         string summary = BuildServerRequestSummary(method, node);
         ServerRequest?.Invoke(new CodexServerRequestEvent(
             requestId,
             method,
             summary,
-            rawJson));
+            rawJson,
+            GetStringValue(parameters?["itemId"]) ?? GetStringValue(parameters?["callId"]),
+            GetStringValue(parameters?["approvalId"])));
         Status?.Invoke(new StatusEvent(method, summary));
     }
 
@@ -562,11 +596,23 @@ public sealed class CodexAppServerClient : IAsyncDisposable
                     "command started",
                     item?["command"]?.GetValue<string>() ?? "command",
                     item?["status"]?.GetValue<string>(),
-                    item?["cwd"]?.GetValue<string>()));
+                    BuildCommandExecutionDetail(item),
+                    item?["id"]?.GetValue<string>(),
+                    item?["approvalId"]?.GetValue<string>()));
                 break;
 
             case "reasoning":
                 Status?.Invoke(new StatusEvent("reasoning", "Reasoning item started."));
+                break;
+
+            case "fileChange":
+                ToolActivity?.Invoke(new ToolEvent(
+                    "file change started",
+                    "file change",
+                    item?["status"]?.GetValue<string>(),
+                    item?["changes"]?.ToJsonString(),
+                    item?["id"]?.GetValue<string>(),
+                    null));
                 break;
 
             case "agentMessage":
@@ -611,11 +657,23 @@ public sealed class CodexAppServerClient : IAsyncDisposable
                     "command completed",
                     item?["command"]?.GetValue<string>() ?? "command",
                     item?["status"]?.GetValue<string>(),
-                    item?["aggregatedOutput"]?.GetValue<string>()));
+                    BuildCommandExecutionDetail(item),
+                    item?["id"]?.GetValue<string>(),
+                    item?["approvalId"]?.GetValue<string>()));
                 break;
 
             case "reasoning":
                 Status?.Invoke(new StatusEvent("reasoning", "Reasoning item completed."));
+                break;
+
+            case "fileChange":
+                ToolActivity?.Invoke(new ToolEvent(
+                    "file change completed",
+                    "file change",
+                    item?["status"]?.GetValue<string>(),
+                    item?["changes"]?.ToJsonString(),
+                    item?["id"]?.GetValue<string>(),
+                    null));
                 break;
 
             case "userMessage":
@@ -694,7 +752,9 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             "mcp status",
             name,
             status,
-            error));
+            error,
+            null,
+            null));
     }
 
     private void EmitTokenTelemetry(JsonNode node)
@@ -758,6 +818,85 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         {
             return node.ToJsonString();
         }
+    }
+
+    private static string BuildCommandExecutionDetail(JsonNode? item)
+    {
+        if (item is null)
+        {
+            return string.Empty;
+        }
+
+        List<string> metadata = [];
+        string? cwd = GetStringValue(item["cwd"]);
+        if (!string.IsNullOrWhiteSpace(cwd))
+        {
+            metadata.Add("cwd: " + cwd);
+        }
+
+        string? processId = GetStringValue(item["processId"]);
+        if (!string.IsNullOrWhiteSpace(processId))
+        {
+            metadata.Add("pid: " + processId);
+        }
+
+        if (TryGetInt32(item["exitCode"], out int exitCode))
+        {
+            metadata.Add("exit: " + exitCode);
+        }
+
+        if (TryGetInt64(item["durationMs"], out long durationMs))
+        {
+            metadata.Add("duration: " + durationMs + " ms");
+        }
+
+        string output = TruncateMultiline(GetStringValue(item["aggregatedOutput"]), 2400);
+        if (metadata.Count == 0)
+        {
+            return output;
+        }
+
+        return string.IsNullOrWhiteSpace(output)
+            ? string.Join(" | ", metadata)
+            : string.Join(" | ", metadata) + Environment.NewLine + Environment.NewLine + output;
+    }
+
+    private static string TruncateMultiline(string? value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        string normalized = value.Replace("\r\n", "\n", StringComparison.Ordinal).Trim();
+        if (normalized.Length <= maxLength)
+        {
+            return normalized;
+        }
+
+        return normalized[..maxLength].TrimEnd() + Environment.NewLine + "... output truncated ...";
+    }
+
+    private static bool TryGetInt32(JsonNode? node, out int value)
+    {
+        if (node is JsonValue jsonValue && jsonValue.TryGetValue<int>(out value))
+        {
+            return true;
+        }
+
+        value = default;
+        return false;
+    }
+
+    private static bool TryGetInt64(JsonNode? node, out long value)
+    {
+        if (node is JsonValue jsonValue && jsonValue.TryGetValue<long>(out value))
+        {
+            return true;
+        }
+
+        value = default;
+        return false;
     }
 
     private static string StripAnsi(string value)

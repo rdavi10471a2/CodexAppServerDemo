@@ -50,6 +50,16 @@ public sealed class WorkflowTaskBoardViewService : IWorkflowTaskBoardViewService
             repository.DatabasePath,
             repository.TaskMemoryRoot,
             columns,
+            repository.ListArchivedDiscussions()
+                .Select(row => new TaskBoardArchivedDiscussionViewModel(
+                    row.Id,
+                    row.Name,
+                    row.MarkdownPath,
+                    row.ThreadId,
+                    row.Trigger,
+                    row.TurnMode,
+                    FormatDate(row.CreatedAt)))
+                .ToArray(),
             selectedTask);
     }
 
@@ -115,6 +125,31 @@ public sealed class WorkflowTaskBoardViewService : IWorkflowTaskBoardViewService
     public void AddComment(string workspaceRoot, string taskId, string message)
     {
         CreateRepository(settingsProvider.GetSettings(workspaceRoot)).AddComment(taskId, message);
+    }
+
+    public string ReadArchivedDiscussionContent(string workspaceRoot, string archivedDiscussionId)
+    {
+        CodingServicesSettings settings = settingsProvider.GetSettings(workspaceRoot);
+        WorkflowTaskBoardRepository repository = CreateRepository(settings);
+        ArchivedDiscussionRow row = repository.ListArchivedDiscussions()
+            .FirstOrDefault(candidate => candidate.Id.Equals(archivedDiscussionId, StringComparison.Ordinal))
+            ?? throw new InvalidOperationException("Archived discussion was not found: " + archivedDiscussionId);
+        string archiveRoot = Path.GetFullPath(Path.Combine(
+            SystemWorkspacePaths.GetWatchedSolutionWorkspaceRoot(settings),
+            "planning",
+            "archived-discussions"));
+        string archivePath = Path.GetFullPath(row.MarkdownPath);
+        if (!IsPathWithinRoot(archivePath, archiveRoot))
+        {
+            throw new InvalidOperationException("Archived discussion file is outside the archived discussion store.");
+        }
+
+        if (!File.Exists(archivePath))
+        {
+            throw new InvalidOperationException("Archived discussion file is missing: " + archivePath);
+        }
+
+        return File.ReadAllText(archivePath);
     }
 
     private static WorkflowTaskBoardRepository CreateRepository(CodingServicesSettings settings)
@@ -208,5 +243,22 @@ public sealed class WorkflowTaskBoardViewService : IWorkflowTaskBoardViewService
     private static string FormatTaskLabel(int taskNumber)
     {
         return "TASK-" + taskNumber.ToString("0000");
+    }
+
+    private static bool IsPathWithinRoot(string candidatePath, string rootPath)
+    {
+        StringComparison comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        string normalizedRoot = rootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string normalizedCandidate = candidatePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        return normalizedCandidate.Equals(normalizedRoot, comparison)
+            || normalizedCandidate.StartsWith(
+                normalizedRoot + Path.DirectorySeparatorChar,
+                comparison)
+            || normalizedCandidate.StartsWith(
+                normalizedRoot + Path.AltDirectorySeparatorChar,
+                comparison);
     }
 }

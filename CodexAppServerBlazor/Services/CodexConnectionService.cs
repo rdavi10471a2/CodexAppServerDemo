@@ -10,6 +10,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
 
     private readonly object gate = new();
     private readonly SemaphoreSlim operationGate = new(1, 1);
+    private readonly Func<CodexAppServerClient> clientFactory;
     private readonly WorkspaceState workspaceState;
     private readonly IWorkspaceWorkflowContextService workspaceWorkflowContextService;
     private readonly ITaskWorkflowContextService taskWorkflowContextService;
@@ -30,8 +31,10 @@ public sealed class CodexConnectionService : IAsyncDisposable
         WorkspaceState workspaceState,
         IWorkspaceWorkflowContextService workspaceWorkflowContextService,
         ITaskWorkflowContextService taskWorkflowContextService,
-        IWorkflowTurnContextComposer workflowTurnContextComposer)
+        IWorkflowTurnContextComposer workflowTurnContextComposer,
+        Func<CodexAppServerClient>? clientFactory = null)
     {
+        this.clientFactory = clientFactory ?? (() => new CodexAppServerClient());
         this.workspaceState = workspaceState;
         this.workspaceWorkflowContextService = workspaceWorkflowContextService;
         this.taskWorkflowContextService = taskWorkflowContextService;
@@ -73,7 +76,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
                 return;
             }
 
-            client = new CodexAppServerClient();
+            client = clientFactory();
             client.RawProtocol += line => AddRawLine(line);
             client.LogLine += line => AddEvent(statusEvents, "Log", null, "app-server", line);
             client.AssistantText += OnAssistantText;
@@ -81,7 +84,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
             client.ToolActivity += OnToolActivity;
             client.Status += OnStatus;
             client.ServerRequest += OnServerRequest;
-            client.Exited += code => AddEvent(statusEvents, "ServerExited", code == 0 ? "ok" : "error", "codex app-server", $"Exited with code {code}.");
+            client.Exited += OnClientExited;
 
             await client.StartAsync(codexExe, cancellationToken);
             AddEvent(statusEvents, "ServerStarted", "ok", "codex app-server", "Blazor connection initialized codex app-server.");
@@ -265,14 +268,27 @@ public sealed class CodexConnectionService : IAsyncDisposable
                 AddEvent(statusEvents, "TurnAttachments", "ok", "coding-services", BuildAttachmentStatus(attachments));
             }
 
-            await activeClient.StartTurnAsync(
-                envelope.Prompt,
-                repoRoot,
-                model,
-                NormalizeApprovalPolicy(approvalPolicy),
-                NormalizeSandbox(sandbox),
-                attachments,
-                cancellationToken);
+            try
+            {
+                await activeClient.StartTurnAsync(
+                    envelope.Prompt,
+                    repoRoot,
+                    model,
+                    NormalizeApprovalPolicy(approvalPolicy),
+                    NormalizeSandbox(sandbox),
+                    attachments,
+                    cancellationToken);
+            }
+            catch
+            {
+                lock (gate)
+                {
+                    isTurnRunning = false;
+                }
+
+                Changed?.Invoke();
+                throw;
+            }
             if (envelope.IncludedWorkspaceContext)
             {
                 workflowSessionState.HasAttachedWorkspaceContext = true;
@@ -447,27 +463,35 @@ public sealed class CodexConnectionService : IAsyncDisposable
     {
         AddEvent(toolEvents, e.EventType, e.Status, e.Name, e.Detail ?? string.Empty);
 
-        if (!e.EventType.Equals("command completed", StringComparison.OrdinalIgnoreCase))
+        bool commandCompleted = e.EventType.Equals("command completed", StringComparison.OrdinalIgnoreCase);
+        bool fileChangeCompleted = e.EventType.Equals("file change completed", StringComparison.OrdinalIgnoreCase);
+        if (!commandCompleted && !fileChangeCompleted)
         {
             return;
         }
 
-        string status = IsFailureStatus(e.Status) ? "command failed" : "command completed";
-        CodexPermissionRequest? request = permissionRequestService.ResolveLatestApproved(status);
+        bool failed = IsFailureStatus(e.Status);
+        string noun = fileChangeCompleted ? "change" : "command";
+        string status = failed ? $"{noun} failed" : $"{noun} completed";
+        CodexPermissionRequest? request = permissionRequestService.ResolveCommandResult(e.CorrelationId, e.ApprovalId, status);
         if (request is null)
         {
             return;
         }
 
-        AddCurrentTurnNotice(IsFailureStatus(e.Status)
-            ? $"Request #{request.RequestId} resumed after approval and the command failed."
-            : $"Request #{request.RequestId} resumed after approval and the command completed.");
+        AddCurrentTurnNotice(failed
+            ? $"Request #{request.RequestId} resumed after approval and the {noun} failed."
+            : $"Request #{request.RequestId} resumed after approval and the {noun} completed.");
+        if (failed && !string.IsNullOrWhiteSpace(e.Detail))
+        {
+            AddCurrentTurnNotice(BuildFailureDiagnosticNotice(e.Detail));
+        }
         AddEvent(
             statusEvents,
             "PermissionResult",
             status,
             "coding-services",
-            $"Request #{request.RequestId} {status} after approval.");
+            BuildPermissionResultDetail(request.RequestId, status, e.Detail));
     }
 
     private void OnTelemetry(TelemetryEvent e)
@@ -478,6 +502,16 @@ public sealed class CodexConnectionService : IAsyncDisposable
         }
 
         AddEvent(telemetryEvents, "Telemetry", null, "codex", e.Summary);
+    }
+
+    private void OnClientExited(int code)
+    {
+        lock (gate)
+        {
+            isTurnRunning = false;
+        }
+
+        AddEvent(statusEvents, "ServerExited", code == 0 ? "ok" : "error", "codex app-server", $"Exited with code {code}.");
     }
 
     private void ClearTurnOutput()
@@ -588,6 +622,27 @@ public sealed class CodexConnectionService : IAsyncDisposable
     {
         return !string.IsNullOrWhiteSpace(status) &&
             ContainsAny(status, "error", "fail", "failed", "cancel", "denied");
+    }
+
+    private static string BuildPermissionResultDetail(int requestId, string status, string? detail)
+    {
+        string prefix = $"Request #{requestId} {status} after approval.";
+        if (string.IsNullOrWhiteSpace(detail))
+        {
+            return prefix;
+        }
+
+        return prefix + Environment.NewLine + Environment.NewLine + detail.Trim();
+    }
+
+    private static string BuildFailureDiagnosticNotice(string detail)
+    {
+        string firstLine = detail
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault()
+            ?? "Command failed after approval.";
+        return "Diagnostic: " + firstLine;
     }
 
     private static string NormalizeApprovalPolicy(string value)

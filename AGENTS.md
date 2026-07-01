@@ -38,6 +38,18 @@ The primary workflow is CWD/workspace based:
 - Keep evolving workflow notes in `WORKFLOW.md`; promote only stable rules into
   this file.
 
+## Tool Approval And Failure Handling
+
+- When a shell or tool action requires runtime approval, prefer triggering the
+  formal approval flow instead of asking for permission only in conversational
+  text.
+- If a tool or command is denied, cancelled, blocked by sandbox, or fails after
+  approval, treat that as an execution result, not an automatic reason to stop
+  the turn.
+- After a denied or failed action, continue with the best available fallback,
+  explain the constraint briefly, and only stop when the user must make a real
+  choice or when no viable fallback exists.
+
 ## Repo Map
 
 - `CodexAppServerBlazor/`: Blazor Server control UI and app host.

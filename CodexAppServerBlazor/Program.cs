@@ -1,5 +1,6 @@
 using CodexAppServerBlazor.Components;
 using CodexAppServerBlazor.Services;
+using CodexAppServerBlazor.Services.ArchivedDiscussions;
 using CodexAppServerBlazor.Services.Tasks;
 using CodexAppServerBlazor.Services.Workflow;
 using CodexAppServerBlazor.Mcp;
@@ -11,8 +12,18 @@ public class Program
 {
     public static void Main(string[] args)
     {
+        string appBaseDirectory = AppContext.BaseDirectory;
         var builder = WebApplication.CreateBuilder(args);
         builder.WebHost.UseStaticWebAssets();
+        builder.Configuration
+            .SetBasePath(appBaseDirectory)
+            .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
+            .AddJsonFile(
+                $"appsettings.{builder.Environment.EnvironmentName}.json",
+                optional: true,
+                reloadOnChange: true)
+            .AddEnvironmentVariables()
+            .AddCommandLine(args);
         string? blazorUrl = builder.Configuration["BlazorHost:Url"];
         if (!string.IsNullOrWhiteSpace(blazorUrl))
         {
@@ -26,6 +37,7 @@ public class Program
         builder.Services.AddSingleton<CodexConnectionService>();
         builder.Services.AddSingleton<DirectoryBrowserService>();
         builder.Services.AddSingleton<CodingServicesSettingsProvider>();
+        builder.Services.AddSingleton<IArchivedDiscussionService, ArchivedDiscussionService>();
         builder.Services.AddSingleton<SourceWorkspaceService>();
         builder.Services.AddSingleton<IWorkflowTaskBoardViewService, WorkflowTaskBoardViewService>();
         builder.Services.AddSingleton<ITaskWorkflowContextService, TaskWorkflowContextService>();
