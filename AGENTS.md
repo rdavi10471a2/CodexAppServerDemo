@@ -21,6 +21,23 @@ The primary workflow is CWD/workspace based:
 - Make context sources visible in the UI or logs.
 - Keep UI, MCP, and Codex app-server connection code separated by service boundaries.
 
+## Turn Modes
+
+- The app supports two turn modes: `Discuss` and `Work`.
+- `Discuss` is the default lightweight mode.
+- `Discuss` may include a compact indexed workspace/bootstrap summary from the
+  native app-server turn context, but it must not silently load durable active
+  task memory.
+- `Work` is the governed task mode.
+- `Work` must require active task context before the turn is sent.
+- Durable workflow memory lives in task artifacts such as user notes, agent
+  notes, task file references, and task events.
+- Indexed workspace summaries are volatile lookup context, not durable memory.
+- Keep `CodexConnectionService` focused on transport/orchestration; do not let
+  it become the workflow-management god object.
+- Keep evolving workflow notes in `WORKFLOW.md`; promote only stable rules into
+  this file.
+
 ## Repo Map
 
 - `CodexAppServerBlazor/`: Blazor Server control UI and app host.

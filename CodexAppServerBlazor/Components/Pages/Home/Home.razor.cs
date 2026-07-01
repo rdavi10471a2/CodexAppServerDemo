@@ -1,5 +1,7 @@
 using CodexAppServerBlazor.Mcp;
 using CodexAppServerBlazor.Services;
+using CodexAppServerBlazor.Services.Tasks;
+using CodexAppServerBlazor.Services.Workflow;
 using Markdig;
 using Markdig.Extensions.MediaLinks;
 using Microsoft.AspNetCore.Components;
@@ -44,6 +46,7 @@ public partial class Home : IDisposable, IAsyncDisposable
     private string model = "gpt-5.4";
     private string approvalPolicy = "on-request";
     private string sandbox = "read-only";
+    private WorkflowTurnMode turnMode = WorkflowTurnMode.Discuss;
     private string mcpUrl = McpHostFactory.DefaultLocalMcpUrl;
     private readonly List<TranscriptMessage> chatMessages = [];
     private readonly List<CodexTurnAttachment> turnAttachments = [];
@@ -56,6 +59,7 @@ public partial class Home : IDisposable, IAsyncDisposable
     private bool busy;
     private bool isRebuildingSourceIndex;
     private bool isConnectionPanelVisible = true;
+    private bool isDirectoryBrowserVisible;
     private ElementReference controlGrid;
     private ElementReference connectionPane;
     private ElementReference workPanel;
@@ -81,13 +85,13 @@ public partial class Home : IDisposable, IAsyncDisposable
     public SourceWorkspaceService SourceWorkspace { get; set; } = default!;
 
     [Inject]
-    public NativeFolderPickerService FolderPicker { get; set; } = default!;
-
-    [Inject]
     public IConfiguration Configuration { get; set; } = default!;
 
     [Inject]
     public NotificationService NotificationService { get; set; } = default!;
+
+    [Inject]
+    public ITranscriptTaskPromotionService TranscriptTaskPromotionService { get; set; } = default!;
 
     protected override void OnInitialized()
     {
@@ -113,21 +117,6 @@ public partial class Home : IDisposable, IAsyncDisposable
 
             await RunCommandAsync(() => ConnectionService.StartServerAsync(codexExe, CancellationToken.None));
         }
-    }
-
-    private async Task StartThread()
-    {
-        if (!ValidateWorkspaceForOperation("start a Codex thread"))
-        {
-            return;
-        }
-
-        await RunCommandAsync(() => ConnectionService.StartThreadAsync(
-            repoRoot,
-            model,
-            approvalPolicy,
-            sandbox,
-            CancellationToken.None));
     }
 
     private async Task SendChatDraft()
@@ -171,6 +160,7 @@ public partial class Home : IDisposable, IAsyncDisposable
             model,
             approvalPolicy,
             sandbox,
+            turnMode,
             attachments,
             CancellationToken.None));
         if (errorMessage is null)
@@ -179,6 +169,43 @@ public partial class Home : IDisposable, IAsyncDisposable
         }
 
         RenderAssistantSnapshot(isStreaming: snapshot.IsTurnRunning);
+    }
+
+    private async Task CreateTaskFromTranscript(string taskName)
+    {
+        if (!ValidateWorkspaceForOperation("create a task from chat"))
+        {
+            return;
+        }
+
+        if (turnMode != WorkflowTurnMode.Discuss)
+        {
+            errorMessage = "Create Task From Chat is only available in Discuss mode.";
+            NotificationService.Notify(new NotificationMessage
+            {
+                Severity = NotificationSeverity.Warning,
+                Summary = "Discuss mode required",
+                Detail = errorMessage,
+                Duration = 5000
+            });
+            return;
+        }
+
+        await RunCommandAsync(() =>
+        {
+            TranscriptTaskPromotionService.CreateTaskFromTranscript(
+                repoRoot,
+                taskName,
+                TranscriptText);
+            NotificationService.Notify(new NotificationMessage
+            {
+                Severity = NotificationSeverity.Success,
+                Summary = "Task created",
+                Detail = "Created a new task in New Task using the current chat transcript as user notes.",
+                Duration = 5000
+            });
+            return Task.CompletedTask;
+        });
     }
 
     private async Task AttachTurnFiles(InputFileChangeEventArgs args)
@@ -327,27 +354,30 @@ public partial class Home : IDisposable, IAsyncDisposable
         }
     }
 
-    private async Task BrowseForDirectory()
+    private void BrowseForDirectory()
     {
-        try
+        isDirectoryBrowserVisible = !isDirectoryBrowserVisible;
+        if (isDirectoryBrowserVisible)
         {
-            string? selectedPath = await FolderPicker.PickFolderAsync(repoRoot, CancellationToken.None);
-            if (!string.IsNullOrWhiteSpace(selectedPath))
-            {
-                SetWorkspace(selectedPath);
-            }
+            directorySnapshot = DirectoryBrowser.GetSnapshot(repoRoot);
         }
-        catch (Exception ex)
-        {
-            errorMessage = "Browse folder failed: " + ex.Message;
-            NotificationService.Notify(new NotificationMessage
-            {
-                Severity = NotificationSeverity.Error,
-                Summary = "Browse failed",
-                Detail = errorMessage,
-                Duration = 7000
-            });
-        }
+    }
+
+    private void BrowseToDirectory(string path)
+    {
+        directorySnapshot = DirectoryBrowser.GetSnapshot(path);
+    }
+
+    private async Task UseBrowsedDirectory()
+    {
+        await ChangeWorkspaceAsync(directorySnapshot.CurrentPath);
+        isDirectoryBrowserVisible = false;
+    }
+
+    private void CancelDirectoryBrowser()
+    {
+        directorySnapshot = DirectoryBrowser.GetSnapshot(repoRoot);
+        isDirectoryBrowserVisible = false;
     }
 
     private bool ValidateWorkspaceForOperation(string operationName)
@@ -370,6 +400,59 @@ public partial class Home : IDisposable, IAsyncDisposable
             Duration = 7000
         });
         return false;
+    }
+
+    private async Task ChangeWorkspaceAsync(string? path)
+    {
+        string nextWorkspace = DirectoryBrowser.GetSnapshot(path).CurrentPath;
+        string currentWorkspace = repoRoot;
+        if (string.Equals(
+                Path.GetFullPath(currentWorkspace),
+                Path.GetFullPath(nextWorkspace),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            SetWorkspace(nextWorkspace);
+            return;
+        }
+
+        if (snapshot.IsTurnRunning)
+        {
+            errorMessage = "Wait for the current turn to finish before changing the workspace.";
+            NotificationService.Notify(new NotificationMessage
+            {
+                Severity = NotificationSeverity.Warning,
+                Summary = "Turn still running",
+                Detail = errorMessage,
+                Duration = 5000
+            });
+            return;
+        }
+
+        bool shouldResetConversation = !string.IsNullOrWhiteSpace(snapshot.ThreadId)
+            || chatMessages.Count > 0
+            || turnAttachments.Count > 0;
+        if (shouldResetConversation && snapshot.IsServerStarted)
+        {
+            await RunCommandAsync(() => ConnectionService.ResetConversationAsync(
+                $"Reset the active Codex thread because the CWD changed from {currentWorkspace} to {nextWorkspace}.",
+                CancellationToken.None));
+            if (errorMessage is not null)
+            {
+                return;
+            }
+        }
+
+        ResetLocalConversationState(clearDraft: true);
+        SetWorkspace(nextWorkspace);
+        NotificationService.Notify(new NotificationMessage
+        {
+            Severity = NotificationSeverity.Info,
+            Summary = "Workspace changed",
+            Detail = shouldResetConversation
+                ? "Changed the CWD and reset the current conversation so the next turn starts fresh."
+                : "Changed the CWD.",
+            Duration = 5000
+        });
     }
 
     private void SetWorkspace(string? path)
@@ -474,16 +557,43 @@ public partial class Home : IDisposable, IAsyncDisposable
         isConnectionPanelVisible = !isConnectionPanelVisible;
     }
 
-    private void ClearChatHistory()
+    private async Task ClearChatHistory()
     {
         if (snapshot.IsTurnRunning)
         {
             return;
         }
 
+        if (snapshot.IsServerStarted && !string.IsNullOrWhiteSpace(snapshot.ThreadId))
+        {
+            await RunCommandAsync(() => ConnectionService.ResetConversationAsync(
+                "Cleared the current chat history and reset the active Codex thread.",
+                CancellationToken.None));
+            if (errorMessage is not null)
+            {
+                return;
+            }
+        }
+
+        ResetLocalConversationState(clearDraft: true);
+    }
+
+    private void ResetLocalConversationState(bool clearDraft)
+    {
+        foreach (CodexTurnAttachment attachment in turnAttachments.ToArray())
+        {
+            TryDeleteRuntimeAttachment(attachment.Path);
+        }
+
         chatMessages.Clear();
+        turnAttachments.Clear();
+        attachmentPickerKey = Guid.NewGuid().ToString("N");
         activeAssistantMessageId = null;
         renderedAssistantText = string.Empty;
+        if (clearDraft)
+        {
+            chatDraft = string.Empty;
+        }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)

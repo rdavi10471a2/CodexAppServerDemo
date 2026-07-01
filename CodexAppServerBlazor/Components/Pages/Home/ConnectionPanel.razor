@@ -1,3 +1,5 @@
+@using CodexAppServerBlazor.Services.Workflow
+
 <aside class="connection-panel" aria-label="Connection controls">
     <div class="panel-heading">
         <div>
@@ -33,17 +35,20 @@
         </label>
     </div>
 
+    <label class="field">
+        <span>Turn Mode</span>
+        <RadzenDropDown TValue="WorkflowTurnMode"
+                        Value="@TurnMode"
+                        ValueChanged="@OnTurnModeChanged"
+                        Data="@TurnModes" />
+    </label>
+
     <div class="actions connection-actions">
         <RadzenButton Icon="power_settings_new"
                       Text="@(Snapshot.IsServerStarted ? "Stop Server" : "Start Server")"
                       ButtonStyle="@(Snapshot.IsServerStarted ? ButtonStyle.Danger : ButtonStyle.Secondary)"
                       Click="@ToggleServer"
                       Disabled="@Busy" />
-        <RadzenButton Icon="forum"
-                      Text="Start Thread"
-                      ButtonStyle="ButtonStyle.Secondary"
-                      Click="@StartThread"
-                      Disabled="@(!Snapshot.IsServerStarted || Busy)" />
     </div>
 
     <section class="token-summary" aria-label="Token and rate summary">
@@ -93,7 +98,7 @@
     <section class="connection-help" aria-label="Connection help">
         <span>Help</span>
         <p><strong>Start Server</strong> launches the local Codex app-server and MCP host.</p>
-        <p><strong>Start Thread</strong> opens a new Codex thread for the current CWD.</p>
+        <p><strong>Send a turn</strong> starts a new Codex thread automatically for the current CWD when needed.</p>
         <p><strong>MCP Health</strong> should answer at <code>@McpHealthUrl</code>.</p>
     </section>
 </aside>
@@ -133,10 +138,13 @@
     public EventCallback<string> SandboxChanged { get; set; }
 
     [Parameter]
-    public EventCallback ToggleServer { get; set; }
+    public WorkflowTurnMode TurnMode { get; set; }
 
     [Parameter]
-    public EventCallback StartThread { get; set; }
+    public EventCallback<WorkflowTurnMode> TurnModeChanged { get; set; }
+
+    [Parameter]
+    public EventCallback ToggleServer { get; set; }
 
     private Task OnCodexExeChanged(string? value)
     {
@@ -158,6 +166,11 @@
         return SandboxChanged.InvokeAsync(value ?? "read-only");
     }
 
+    private Task OnTurnModeChanged(WorkflowTurnMode value)
+    {
+        return TurnModeChanged.InvokeAsync(value);
+    }
+
     private static readonly string[] ApprovalPolicies =
     [
         "on-request",
@@ -171,6 +184,12 @@
         "read-only",
         "workspace-write",
         "danger-full-access"
+    ];
+
+    private static readonly WorkflowTurnMode[] TurnModes =
+    [
+        WorkflowTurnMode.Discuss,
+        WorkflowTurnMode.Work
     ];
 
     private string McpEndpointUrl

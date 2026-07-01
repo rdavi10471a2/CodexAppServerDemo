@@ -31,6 +31,11 @@ public sealed class CodexAppServerClient : IAsyncDisposable
     public bool IsStarted => _process is { HasExited: false };
     public string? ThreadId { get; private set; }
 
+    public void ResetThreadState()
+    {
+        ThreadId = null;
+    }
+
     public async Task StartAsync(string codexExe = "codex", CancellationToken cancellationToken = default)
     {
         if (IsStarted)

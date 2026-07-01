@@ -1,5 +1,7 @@
 using CodexAppServerBlazor.Mcp;
 using CodexAppServerBlazor.Services;
+using CodexAppServerBlazor.Services.Tasks;
+using CodexAppServerBlazor.Services.Workflow;
 using Microsoft.Extensions.Configuration;
 
 namespace CodexAppServerBlazor.Tests;
@@ -25,7 +27,14 @@ public sealed class WorkspaceStartupHostedServiceTests
             WorkspaceState workspaceState = new();
             CodingServicesSettingsProvider settingsProvider = new(configuration);
             SourceWorkspaceService sourceWorkspaceService = new(settingsProvider);
-            CodexConnectionService connectionService = new(workspaceState, sourceWorkspaceService);
+            WorkspaceWorkflowContextService workspaceWorkflowContextService = new(sourceWorkspaceService);
+            TaskWorkflowContextService taskWorkflowContextService = new(settingsProvider);
+            WorkflowTurnContextComposer workflowTurnContextComposer = new();
+            CodexConnectionService connectionService = new(
+                workspaceState,
+                workspaceWorkflowContextService,
+                taskWorkflowContextService,
+                workflowTurnContextComposer);
             WorkspaceStartupHostedService service = new(
                 configuration,
                 workspaceState,

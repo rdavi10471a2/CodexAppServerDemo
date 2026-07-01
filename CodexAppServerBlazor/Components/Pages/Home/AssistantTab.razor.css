@@ -53,6 +53,55 @@
     min-height: 28px;
 }
 
+.transcript-task-panel {
+    display: grid;
+    gap: 10px;
+    border-bottom: 1px solid #e4ebf1;
+    padding: 10px;
+    background: #f8fbfd;
+}
+
+.transcript-task-field {
+    display: grid;
+    gap: 6px;
+}
+
+.transcript-task-field span {
+    color: #526a82;
+    font-size: .75rem;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.transcript-task-field input {
+    width: 100%;
+    min-height: 36px;
+    border: 1px solid #d7e1ea;
+    border-radius: 6px;
+    padding: 8px 10px;
+    color: #16202c;
+    font: inherit;
+    background: #ffffff;
+}
+
+.transcript-task-field input:focus {
+    border-color: #5b82f1;
+    box-shadow: 0 0 0 2px rgba(91, 130, 241, .18);
+    outline: none;
+}
+
+.transcript-task-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.transcript-task-note {
+    color: #526a82;
+    font-size: .78rem;
+    font-weight: 700;
+}
+
 .current-turn-panel {
     display: flex;
     flex-direction: column;

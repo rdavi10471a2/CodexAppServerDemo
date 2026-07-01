@@ -1,5 +1,6 @@
-using System.Text;
 using CodexAppServerBlazor.Mcp;
+using CodexAppServerBlazor.Services.Tasks;
+using CodexAppServerBlazor.Services.Workflow;
 
 namespace CodexAppServerBlazor.Services;
 
@@ -10,7 +11,9 @@ public sealed class CodexConnectionService : IAsyncDisposable
     private readonly object gate = new();
     private readonly SemaphoreSlim operationGate = new(1, 1);
     private readonly WorkspaceState workspaceState;
-    private readonly SourceWorkspaceService sourceWorkspaceService;
+    private readonly IWorkspaceWorkflowContextService workspaceWorkflowContextService;
+    private readonly ITaskWorkflowContextService taskWorkflowContextService;
+    private readonly IWorkflowTurnContextComposer workflowTurnContextComposer;
     private readonly PermissionRequestService permissionRequestService = new();
     private CodexAppServerClient? client;
     private string assistantText = string.Empty;
@@ -21,12 +24,18 @@ public sealed class CodexConnectionService : IAsyncDisposable
     private readonly List<CodexOutputEvent> telemetryEvents = [];
     private readonly List<CodexOutputEvent> toolEvents = [];
     private readonly List<string> rawLines = [];
-    private bool workspaceContextSentForThread;
+    private WorkflowSessionState? workflowSessionState;
 
-    public CodexConnectionService(WorkspaceState workspaceState, SourceWorkspaceService sourceWorkspaceService)
+    public CodexConnectionService(
+        WorkspaceState workspaceState,
+        IWorkspaceWorkflowContextService workspaceWorkflowContextService,
+        ITaskWorkflowContextService taskWorkflowContextService,
+        IWorkflowTurnContextComposer workflowTurnContextComposer)
     {
         this.workspaceState = workspaceState;
-        this.sourceWorkspaceService = sourceWorkspaceService;
+        this.workspaceWorkflowContextService = workspaceWorkflowContextService;
+        this.taskWorkflowContextService = taskWorkflowContextService;
+        this.workflowTurnContextComposer = workflowTurnContextComposer;
     }
 
     public event Action? Changed;
@@ -107,7 +116,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
                 toolEvents.Clear();
                 permissionRequestService.Clear();
                 isTurnRunning = false;
-                workspaceContextSentForThread = false;
+                workflowSessionState = null;
             }
 
             AddEvent(statusEvents, "ServerStopped", "ok", "codex app-server", "Stopped codex app-server.");
@@ -124,6 +133,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
         string model,
         string approvalPolicy,
         string sandbox,
+        WorkflowTurnMode mode,
         CancellationToken cancellationToken)
     {
         if (!await operationGate.WaitAsync(0, cancellationToken))
@@ -140,11 +150,52 @@ public sealed class CodexConnectionService : IAsyncDisposable
                 model,
                 approvalPolicy,
                 sandbox,
+                mode,
                 cancellationToken);
         }
         finally
         {
             operationGate.Release();
+        }
+    }
+
+    public async Task ResetConversationAsync(string reason, CancellationToken cancellationToken)
+    {
+        if (!await operationGate.WaitAsync(0, cancellationToken))
+        {
+            throw new InvalidOperationException("A Codex operation is already running.");
+        }
+
+        try
+        {
+            CodexAppServerClient activeClient = GetStartedClient();
+            if (isTurnRunning)
+            {
+                throw new InvalidOperationException("Wait for the current turn to finish before resetting the conversation.");
+            }
+
+            lock (gate)
+            {
+                assistantText = string.Empty;
+                currentTurnNoticeText = string.Empty;
+                permissionRequestService.Clear();
+                workflowSessionState = null;
+            }
+
+            activeClient.ResetThreadState();
+            AddEvent(
+                statusEvents,
+                "ThreadReset",
+                "ok",
+                "coding-services",
+                string.IsNullOrWhiteSpace(reason)
+                    ? "Cleared the active Codex thread and workflow session."
+                    : reason);
+        }
+        finally
+        {
+            operationGate.Release();
+            Changed?.Invoke();
         }
     }
 
@@ -154,6 +205,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
         string model,
         string approvalPolicy,
         string sandbox,
+        WorkflowTurnMode mode,
         IReadOnlyList<CodexTurnAttachment>? attachments,
         CancellationToken cancellationToken)
     {
@@ -173,31 +225,38 @@ public sealed class CodexConnectionService : IAsyncDisposable
                     model,
                     approvalPolicy,
                     sandbox,
+                    mode,
                     cancellationToken);
             }
 
             workspaceState.SetRepoRoot(repoRoot);
-            string? workspaceContext = TryBuildTurnWorkspaceContext(repoRoot, out string contextStatus);
-            if (!workspaceContextSentForThread)
+            workflowSessionState ??= new WorkflowSessionState(repoRoot, mode);
+            WorkflowPromptSection workspaceContext = workspaceWorkflowContextService.BuildTurnContext(repoRoot);
+            WorkflowTurnTaskContext taskContext = mode == WorkflowTurnMode.Work
+                ? taskWorkflowContextService.BuildTurnContext(repoRoot)
+                : new WorkflowTurnTaskContext(null, "Task context skipped because mode is Discuss.", null);
+            WorkflowTurnEnvelope envelope = workflowTurnContextComposer.Compose(
+                userPrompt,
+                repoRoot,
+                mode,
+                workflowSessionState,
+                workspaceContext,
+                taskContext);
+            if (!workflowSessionState.HasAttachedWorkspaceContext)
             {
-                AddEvent(statusEvents, "WorkspaceContext", workspaceContext is null ? "skipped" : "ok", "coding-services", contextStatus);
+                AddEvent(
+                    statusEvents,
+                    "WorkspaceContext",
+                    workspaceContext.HasPrompt ? "ok" : "skipped",
+                    "coding-services",
+                    workspaceContext.Status);
             }
-
-            string prompt = $$"""
-        {{userPrompt}}
-
-        {{workspaceContext}}
-
-        Codex cwd:
-        {{repoRoot}}
-
-        Workspace boundary:
-        - Treat the cwd above as the loaded workspace.
-        - Do not use selected-file assumptions for this turn.
-        - Use discovery, proposal, edit/diff, compile, and reindex order when work is requested.
-        - Assume indexed MCP results are stale after any code edit. Re-run get_watched_solution_digest before using prior indexed structure, and re-run get_watched_solution_summary or get_test_project_summary after compile/reindex when relevant.
-        - When the user asks for tool results, report the results in the same response after the tool call completes; do not wait for a follow-up prompt.
-        """;
+            AddEvent(
+                statusEvents,
+                "TaskContext",
+                taskContext.HasPrompt ? "ok" : "skipped",
+                "coding-services",
+                taskContext.Status);
 
             ClearTurnOutput();
             MarkTurnRunning();
@@ -207,18 +266,19 @@ public sealed class CodexConnectionService : IAsyncDisposable
             }
 
             await activeClient.StartTurnAsync(
-                prompt,
+                envelope.Prompt,
                 repoRoot,
                 model,
                 NormalizeApprovalPolicy(approvalPolicy),
                 NormalizeSandbox(sandbox),
                 attachments,
                 cancellationToken);
-            if (workspaceContext is not null)
+            if (envelope.IncludedWorkspaceContext)
             {
-                workspaceContextSentForThread = true;
+                workflowSessionState.HasAttachedWorkspaceContext = true;
             }
 
+            AddEvent(statusEvents, "TurnMode", "ok", "coding-services", $"Turn mode set to {mode}.");
             AddEvent(statusEvents, "TurnPolicy", "ok", "codex", $"Turn policy set to approval={NormalizeApprovalPolicy(approvalPolicy)}, sandbox={NormalizeSandbox(sandbox)}, reviewer=user.");
         }
         finally
@@ -318,6 +378,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
         string model,
         string approvalPolicy,
         string sandbox,
+        WorkflowTurnMode mode,
         CancellationToken cancellationToken)
     {
         workspaceState.SetRepoRoot(repoRoot);
@@ -327,88 +388,10 @@ public sealed class CodexConnectionService : IAsyncDisposable
             NormalizeApprovalPolicy(approvalPolicy),
             NormalizeSandbox(sandbox),
             cancellationToken);
-        workspaceContextSentForThread = false;
+        workflowSessionState = new WorkflowSessionState(repoRoot, mode);
         AddEvent(statusEvents, "ThreadPolicy", "ok", "codex", $"Thread policy set to approval={NormalizeApprovalPolicy(approvalPolicy)}, sandbox={NormalizeSandbox(sandbox)}.");
-        AddEvent(statusEvents, "WorkspaceContext", "ready", "coding-services", "Brief indexed workspace context will be attached to the next user turn; no automatic initialization turn was sent.");
-    }
-
-    private string? TryBuildTurnWorkspaceContext(string repoRoot, out string status)
-    {
-        if (workspaceContextSentForThread)
-        {
-            status = "Workspace context was already attached for this thread.";
-            return null;
-        }
-
-        if (!Directory.Exists(repoRoot))
-        {
-            status = $"CWD does not exist: {repoRoot}";
-            return null;
-        }
-
-        SourceWorkspaceStructureSnapshot snapshot;
-        try
-        {
-            snapshot = sourceWorkspaceService.BuildProductStructureSnapshot(repoRoot, filter: null);
-        }
-        catch (Exception ex)
-        {
-            status = $"Could not build workspace context: {ex.Message}";
-            return null;
-        }
-
-        if (!File.Exists(snapshot.WatchedSolutionPath))
-        {
-            status = $"No valid watched solution found for CWD: {repoRoot}";
-            return null;
-        }
-
-        if (!File.Exists(snapshot.IndexDatabasePath) || snapshot.FileCount == 0 || snapshot.Tree.Count == 0)
-        {
-            status = string.IsNullOrWhiteSpace(snapshot.Message)
-                ? "Watched solution index is missing, empty, or stale."
-                : snapshot.Message;
-            return null;
-        }
-
-        StringBuilder builder = new();
-        builder.AppendLine("Indexed workspace context supplied by Coding Services:");
-        builder.AppendLine($"- CWD: {Path.GetFullPath(repoRoot)}");
-        builder.AppendLine($"- Watched solution: {snapshot.WatchedSolutionPath}");
-        builder.AppendLine($"- Index database: {snapshot.IndexDatabasePath}");
-        builder.AppendLine($"- Indexed product files: {snapshot.FileCount}");
-        builder.AppendLine($"- Product projects: {snapshot.Tree.Count}");
-        builder.AppendLine("- MCP discovery tools: get_workspace, get_watched_solution_digest, get_watched_solution_summary, get_test_project_summary");
-        builder.AppendLine("- Test projects are omitted from this startup context; call get_test_project_summary when tests matter.");
-        builder.AppendLine("- Product project/file map:");
-
-        foreach (SourceTreeNode project in snapshot.Tree.Where(node => node.Kind.Equals("project", StringComparison.OrdinalIgnoreCase)))
-        {
-            List<string> files = [];
-            CollectFilePaths(project, files);
-            builder.AppendLine($"  - {project.Name} ({files.Count} files)");
-            foreach (string file in files.OrderBy(file => file, StringComparer.OrdinalIgnoreCase))
-            {
-                builder.AppendLine($"    - {file}");
-            }
-        }
-
-        status = $"Attached brief indexed workspace context for {snapshot.Tree.Count} projects and {snapshot.FileCount} product files to the next user turn.";
-        return builder.ToString();
-    }
-
-    private static void CollectFilePaths(SourceTreeNode node, List<string> files)
-    {
-        if (node.File is not null)
-        {
-            files.Add(node.File.RelativePath);
-            return;
-        }
-
-        foreach (SourceTreeNode child in node.Children)
-        {
-            CollectFilePaths(child, files);
-        }
+        AddEvent(statusEvents, "ThreadMode", "ok", "coding-services", $"Thread initialized in {mode} mode.");
+        AddEvent(statusEvents, "WorkspaceContext", "ready", "coding-services", "Brief indexed workspace context will be attached to the next eligible user turn.");
     }
 
     private void OnAssistantText(AssistantTextEvent e)

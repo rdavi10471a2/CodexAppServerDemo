@@ -1,6 +1,7 @@
 @page "/"
 @rendermode InteractiveServer
 @inject IJSRuntime JS
+@using CodexAppServerBlazor.Services.Workflow
 
 <PageTitle>Coding Services</PageTitle>
 
@@ -29,8 +30,8 @@
                                  @bind-Model="@model"
                                  @bind-ApprovalPolicy="@approvalPolicy"
                                  @bind-Sandbox="@sandbox"
-                                 ToggleServer="@ToggleServer"
-                                 StartThread="@StartThread" />
+                                 @bind-TurnMode="@turnMode"
+                                 ToggleServer="@ToggleServer" />
             </div>
 
             <div class="main-splitter" @ref="mainSplitter" title="Drag to resize connection panel" aria-hidden="true"></div>
@@ -59,7 +60,71 @@
                               Disabled="@busy" />
             </div>
 
-            @if (!string.IsNullOrWhiteSpace(directorySnapshot.ErrorMessage))
+            @if (isDirectoryBrowserVisible)
+            {
+                <section class="directory-picker-panel">
+                    <div class="directory-picker-header">
+                        <div class="directory-picker-title">
+                            <span>Choose CWD</span>
+                            <strong>@directorySnapshot.CurrentPath</strong>
+                        </div>
+                        <div class="directory-picker-actions">
+                            <RadzenButton Icon="check"
+                                          Text="Use This Folder"
+                                          ButtonStyle="ButtonStyle.Primary"
+                                          Size="ButtonSize.Small"
+                                          Click="@UseBrowsedDirectory" />
+                            <RadzenButton Icon="close"
+                                          Text="Cancel"
+                                          ButtonStyle="ButtonStyle.Light"
+                                          Size="ButtonSize.Small"
+                                          Click="@CancelDirectoryBrowser" />
+                        </div>
+                    </div>
+
+                    @if (!string.IsNullOrWhiteSpace(directorySnapshot.ErrorMessage))
+                    {
+                        <div class="inline-error">@directorySnapshot.ErrorMessage</div>
+                    }
+
+                    <div class="directory-picker-grid">
+                        <div class="directory-picker-section">
+                            <div class="directory-picker-label">Drives</div>
+                            <div class="directory-picker-list">
+                                @foreach (DirectoryEntryViewModel drive in directorySnapshot.Drives)
+                                {
+                                    <button type="button" class="directory-picker-row" @onclick="() => BrowseToDirectory(drive.FullPath)">
+                                        <span class="directory-picker-icon">DRV</span>
+                                        <span>@drive.Name</span>
+                                    </button>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="directory-picker-section">
+                            <div class="directory-picker-label">Folders</div>
+                            <div class="directory-picker-list">
+                                @if (!string.IsNullOrWhiteSpace(directorySnapshot.ParentPath))
+                                {
+                                    <button type="button" class="directory-picker-row" @onclick="() => BrowseToDirectory(directorySnapshot.ParentPath!)">
+                                        <span class="directory-picker-icon">UP</span>
+                                        <span>Parent</span>
+                                    </button>
+                                }
+
+                                @foreach (DirectoryEntryViewModel child in directorySnapshot.Children)
+                                {
+                                    <button type="button" class="directory-picker-row" @onclick="() => BrowseToDirectory(child.FullPath)">
+                                        <span class="directory-picker-icon">DIR</span>
+                                        <span>@child.Name</span>
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            }
+            else if (!string.IsNullOrWhiteSpace(directorySnapshot.ErrorMessage))
             {
                 <div class="inline-error">@directorySnapshot.ErrorMessage</div>
             }
@@ -75,12 +140,14 @@
                                       TranscriptBodyHtml="@TranscriptBodyHtml"
                                       TranscriptText="@TranscriptText"
                                       CurrentTurnHtml="@CurrentTurnHtml"
+                                      TurnMode="@turnMode"
                                       PermissionRequests="@snapshot.PermissionRequests"
                                       Attachments="@turnAttachments"
                                       AttachmentPickerKey="@attachmentPickerKey"
                                       @bind-ChatDraft="@chatDraft"
                                       IsServerStarted="@snapshot.IsServerStarted"
                                       Busy="@busy"
+                                      CreateTaskFromTranscript="@CreateTaskFromTranscript"
                                       SendChatDraft="@SendChatDraft"
                                       AttachFiles="@AttachTurnFiles"
                                       RemoveAttachment="@RemoveTurnAttachment"
@@ -133,3 +200,14 @@
         <div class="error-banner">@errorMessage</div>
     }
 </section>
+
+@if (isRebuildingSourceIndex)
+{
+    <div class="screen-busy-overlay" role="status" aria-live="polite" aria-label="Rebuilding workspace index">
+        <div class="screen-busy-card">
+            <div class="screen-busy-spinner" aria-hidden="true"></div>
+            <strong>Rebuilding workspace index</strong>
+            <span>Source and test views will refresh when indexing completes.</span>
+        </div>
+    </div>
+}

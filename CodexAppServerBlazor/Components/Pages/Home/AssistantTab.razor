@@ -1,4 +1,5 @@
 @using CodexAppServerBlazor.Services
+@using CodexAppServerBlazor.Services.Workflow
 @using Microsoft.AspNetCore.Components.Forms
 @inject IJSRuntime JS
 @implements IAsyncDisposable
@@ -21,13 +22,50 @@
                               Click="@OpenTranscript"
                               Disabled="@(!HasTranscript)" />
                 <RadzenButton Icon="delete_sweep"
-                              Text="Clear"
+                              Text="Start New Conversation"
                               ButtonStyle="ButtonStyle.Light"
                               Size="ButtonSize.Small"
+                              Title="Starts a fresh conversation by clearing the visible chat, removing pending attachments, and resetting the active Codex thread."
                               Click="@ClearTranscript"
                               Disabled="@(!HasTranscript || Busy)" />
+                <RadzenButton Icon="assignment_add"
+                              Text="New Task"
+                              ButtonStyle="ButtonStyle.Secondary"
+                              Size="ButtonSize.Small"
+                              Click="@ShowCreateTaskPanel"
+                              Disabled="@(!CanCreateTaskFromTranscript)" />
             </div>
         </div>
+        @if (isCreateTaskPanelVisible)
+        {
+            <div class="transcript-task-panel">
+                <label class="transcript-task-field">
+                    <span>Task title</span>
+                    <input type="text"
+                           value="@taskTitleDraft"
+                           placeholder="Promote this discussion into a task..."
+                           @oninput="OnTaskTitleInput" />
+                </label>
+                <div class="transcript-task-actions">
+                    <RadzenButton Icon="add_task"
+                                  Text="Create In New Task"
+                                  ButtonStyle="ButtonStyle.Primary"
+                                  Size="ButtonSize.Small"
+                                  Click="@CreateTask"
+                                  Disabled="@(!CanSubmitTaskCreation)" />
+                    <RadzenButton Icon="close"
+                                  Text="Cancel"
+                                  ButtonStyle="ButtonStyle.Light"
+                                  Size="ButtonSize.Small"
+                                  Click="@HideCreateTaskPanel"
+                                  Disabled="@Busy" />
+                </div>
+                @if (!IsDiscussMode)
+                {
+                    <div class="transcript-task-note">Switch to Discuss mode before promoting chat into a new task.</div>
+                }
+            </div>
+        }
         <div class="transcript-view"
              @ref="transcriptView"
              role="log"
@@ -209,6 +247,9 @@
     public string CurrentTurnHtml { get; set; } = string.Empty;
 
     [Parameter]
+    public WorkflowTurnMode TurnMode { get; set; }
+
+    [Parameter]
     public IReadOnlyList<CodexPermissionRequest> PermissionRequests { get; set; } = [];
 
     [Parameter]
@@ -228,6 +269,9 @@
 
     [Parameter]
     public bool Busy { get; set; }
+
+    [Parameter]
+    public EventCallback<string> CreateTaskFromTranscript { get; set; }
 
     [Parameter]
     public EventCallback SendChatDraft { get; set; }
@@ -257,7 +301,12 @@
     public EventCallback<int> CancelPermission { get; set; }
 
     private bool HasTranscript => !string.IsNullOrWhiteSpace(TranscriptText);
+    private bool IsDiscussMode => TurnMode == WorkflowTurnMode.Discuss;
+    private bool CanCreateTaskFromTranscript => HasTranscript && IsDiscussMode && !Busy;
+    private bool CanSubmitTaskCreation => CanCreateTaskFromTranscript && !string.IsNullOrWhiteSpace(taskTitleDraft);
     private RailTab activeRailTab = RailTab.AgentActions;
+    private bool isCreateTaskPanelVisible;
+    private string taskTitleDraft = string.Empty;
 
     private IReadOnlyList<CodexPermissionRequest> PendingRequests =>
         PermissionRequests
@@ -272,6 +321,21 @@
     private void SelectRailTab(RailTab tab)
     {
         activeRailTab = tab;
+    }
+
+    private void ShowCreateTaskPanel()
+    {
+        isCreateTaskPanelVisible = true;
+        if (string.IsNullOrWhiteSpace(taskTitleDraft))
+        {
+            taskTitleDraft = "Promote current discussion";
+        }
+    }
+
+    private void HideCreateTaskPanel()
+    {
+        isCreateTaskPanelVisible = false;
+        taskTitleDraft = string.Empty;
     }
 
     private string GetRailTabClass(RailTab tab)
@@ -413,6 +477,23 @@
     private Task OnChatInput(ChangeEventArgs args)
     {
         return ChatDraftChanged.InvokeAsync(args.Value?.ToString() ?? string.Empty);
+    }
+
+    private Task OnTaskTitleInput(ChangeEventArgs args)
+    {
+        taskTitleDraft = args.Value?.ToString() ?? string.Empty;
+        return Task.CompletedTask;
+    }
+
+    private async Task CreateTask()
+    {
+        if (!CanSubmitTaskCreation)
+        {
+            return;
+        }
+
+        await CreateTaskFromTranscript.InvokeAsync(taskTitleDraft);
+        HideCreateTaskPanel();
     }
 
     private async Task CopyTranscript()
