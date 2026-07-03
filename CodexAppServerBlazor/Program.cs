@@ -34,6 +34,7 @@ public class Program
             .AddInteractiveServerComponents();
         builder.Services.AddRadzenComponents();
         builder.Services.AddSingleton<WorkspaceState>();
+        builder.Services.AddSingleton<WorkspaceSelectionService>();
         builder.Services.AddSingleton<CodexConnectionService>();
         builder.Services.AddSingleton<DirectoryBrowserService>();
         builder.Services.AddSingleton<CodingServicesSettingsProvider>();
@@ -43,6 +44,7 @@ public class Program
         builder.Services.AddSingleton<ITaskWorkflowContextService, TaskWorkflowContextService>();
         builder.Services.AddSingleton<ITranscriptTaskPromotionService, TranscriptTaskPromotionService>();
         builder.Services.AddSingleton<IWorkspaceWorkflowContextService, WorkspaceWorkflowContextService>();
+        builder.Services.AddSingleton<SessionBootstrapPolicyService>();
         builder.Services.AddSingleton<IWorkflowTurnContextComposer, WorkflowTurnContextComposer>();
         builder.Services.AddSingleton<HarnessMcpHostedService>();
         builder.Services.AddHostedService(services => services.GetRequiredService<HarnessMcpHostedService>());

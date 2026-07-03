@@ -38,6 +38,7 @@ public partial class Home : IDisposable, IAsyncDisposable
     private SourceWorkspaceSnapshot testSourceSnapshot = SourceWorkspaceSnapshot.Empty("No test project context is loaded.");
     private string codexExe = "codex";
     private string repoRoot = string.Empty;
+    private string instanceLabel = string.Empty;
     private string sourceFilter = string.Empty;
     private string? selectedSourcePath;
     private int? selectedSourceLine;
@@ -61,6 +62,7 @@ public partial class Home : IDisposable, IAsyncDisposable
     private bool isRebuildingSourceIndex;
     private bool isConnectionPanelVisible = true;
     private bool isDirectoryBrowserVisible;
+    private int assistantViewVersion;
     private ElementReference controlGrid;
     private ElementReference connectionPane;
     private ElementReference workPanel;
@@ -75,6 +77,7 @@ public partial class Home : IDisposable, IAsyncDisposable
     private string TranscriptBodyHtml => BuildTranscriptBodyHtml(includeMessageCopyButtons: true);
     private string TranscriptText => BuildTranscriptText();
     private string CurrentTurnHtml => RenderMarkdown(GetCurrentTurnText());
+    private string assistantViewKey => $"{repoRoot}:{assistantViewVersion}";
 
     [Inject]
     public CodexConnectionService ConnectionService { get; set; } = default!;
@@ -100,12 +103,16 @@ public partial class Home : IDisposable, IAsyncDisposable
     [Inject]
     public DialogService DialogService { get; set; } = default!;
 
+    [Inject]
+    public WorkspaceSelectionService WorkspaceSelectionService { get; set; } = default!;
+
     protected override void OnInitialized()
     {
         ConnectionService.Changed += OnConnectionChanged;
         snapshot = ConnectionService.GetSnapshot();
         mcpUrl = Configuration["Mcp:Url"] ?? McpHostFactory.DefaultLocalMcpUrl;
-        string configuredCwd = Configuration["Workspace:DefaultCwd"] ?? Directory.GetCurrentDirectory();
+        instanceLabel = (Configuration["AppInstance:Label"] ?? string.Empty).Trim();
+        string configuredCwd = WorkspaceSelectionService.GetStartupWorkspace();
         SetWorkspace(configuredCwd);
     }
 
@@ -448,6 +455,7 @@ public partial class Home : IDisposable, IAsyncDisposable
     {
         directorySnapshot = DirectoryBrowser.GetSnapshot(path);
         repoRoot = directorySnapshot.CurrentPath;
+        WorkspaceSelectionService.SaveWorkspace(repoRoot);
         selectedSourcePath = null;
         selectedSourceLine = null;
         selectedTestSourcePath = null;
@@ -703,6 +711,10 @@ public partial class Home : IDisposable, IAsyncDisposable
                     }
                 }
 
+                await SourceWorkspace.EnsureWorkspaceArtifactsAsync(
+                    targetWorkspacePath ?? repoRoot,
+                    rebuildIndexIfMissing: true,
+                    CancellationToken.None);
                 ResetLocalConversationState(clearDraft: true);
                 SetWorkspace(targetWorkspacePath);
                 NotificationService.Notify(new NotificationMessage
@@ -740,6 +752,7 @@ public partial class Home : IDisposable, IAsyncDisposable
         attachmentPickerKey = Guid.NewGuid().ToString("N");
         activeAssistantMessageId = null;
         renderedAssistantText = string.Empty;
+        assistantViewVersion++;
         if (clearDraft)
         {
             chatDraft = string.Empty;

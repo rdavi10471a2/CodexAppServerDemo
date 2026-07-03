@@ -94,6 +94,52 @@ public sealed class CodingServicesSettingsProviderTests
         Assert.Equal(Path.GetFullPath(solutionPath), settings.WatchedSolutionPath);
     }
 
+    [Fact]
+    public void GetSettings_prefers_local_solution_when_configured_solution_is_outside_selected_workspace()
+    {
+        using TemporaryRepository configuredRepository = TemporaryRepository.Create();
+        using TemporaryRepository selectedWorkspace = TemporaryRepository.CreateWithoutSolution();
+        string configuredSolutionPath = Path.Combine(configuredRepository.RootPath, "Configured.slnx");
+        string localSolutionPath = Path.Combine(selectedWorkspace.RootPath, "Local.sln");
+        File.WriteAllText(configuredSolutionPath, "<Solution />");
+        File.WriteAllText(localSolutionPath, "<Solution />");
+
+        IConfiguration configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["CodingServices:RuntimeRoot"] = "runtime",
+                ["CodingServices:WatchedSolutionPath"] = configuredSolutionPath
+            })
+            .Build();
+        CodingServicesSettingsProvider provider = new(configuration);
+
+        CodingServicesSettings settings = provider.GetSettings(selectedWorkspace.RootPath);
+
+        Assert.Equal(Path.GetFullPath(localSolutionPath), settings.WatchedSolutionPath);
+    }
+
+    [Fact]
+    public void GetSettings_keeps_configured_solution_when_selected_workspace_has_no_local_solution()
+    {
+        using TemporaryRepository configuredRepository = TemporaryRepository.Create();
+        using TemporaryRepository selectedWorkspace = TemporaryRepository.CreateWithoutSolution();
+        string configuredSolutionPath = Path.Combine(configuredRepository.RootPath, "Configured.slnx");
+        File.WriteAllText(configuredSolutionPath, "<Solution />");
+
+        IConfiguration configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["CodingServices:RuntimeRoot"] = "runtime",
+                ["CodingServices:WatchedSolutionPath"] = configuredSolutionPath
+            })
+            .Build();
+        CodingServicesSettingsProvider provider = new(configuration);
+
+        CodingServicesSettings settings = provider.GetSettings(selectedWorkspace.RootPath);
+
+        Assert.Equal(Path.GetFullPath(configuredSolutionPath), settings.WatchedSolutionPath);
+    }
+
     [Theory]
     [InlineData(null, "http://localhost:6278")]
     [InlineData(" http://localhost:6278/ ", "http://localhost:6278")]
@@ -121,10 +167,13 @@ public sealed class CodingServicesSettingsProviderTests
 
 internal sealed class TemporaryRepository : IDisposable
 {
-    private TemporaryRepository(string rootPath)
+    private TemporaryRepository(string rootPath, bool createDefaultSolution)
     {
         RootPath = rootPath;
-        File.WriteAllText(Path.Combine(rootPath, "CodexAppServerWinForms_corrected.slnx"), "<Solution />");
+        if (createDefaultSolution)
+        {
+            File.WriteAllText(Path.Combine(rootPath, "CodexAppServerWinForms_corrected.slnx"), "<Solution />");
+        }
     }
 
     public string RootPath { get; }
@@ -133,7 +182,14 @@ internal sealed class TemporaryRepository : IDisposable
     {
         string rootPath = Path.Combine(Path.GetTempPath(), $"coding-services-tests-{Guid.NewGuid():N}");
         Directory.CreateDirectory(rootPath);
-        return new TemporaryRepository(rootPath);
+        return new TemporaryRepository(rootPath, createDefaultSolution: true);
+    }
+
+    public static TemporaryRepository CreateWithoutSolution()
+    {
+        string rootPath = Path.Combine(Path.GetTempPath(), $"coding-services-tests-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(rootPath);
+        return new TemporaryRepository(rootPath, createDefaultSolution: false);
     }
 
     public void Dispose()

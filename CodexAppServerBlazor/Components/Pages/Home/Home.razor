@@ -3,7 +3,7 @@
 @inject IJSRuntime JS
 @using CodexAppServerBlazor.Services.Workflow
 
-<PageTitle>Coding Services</PageTitle>
+<PageTitle>@(string.IsNullOrWhiteSpace(instanceLabel) ? "Coding Services" : $"Coding Services [{instanceLabel}]")</PageTitle>
 
 <section class="control-screen @(isConnectionPanelVisible ? string.Empty : "connection-hidden")">
     <header class="command-bar">
@@ -41,6 +41,10 @@
             <div class="workspace-toolbar">
                 <div class="workspace-path">
                     <span>CWD</span>
+                    @if (!string.IsNullOrWhiteSpace(instanceLabel))
+                    {
+                        <span class="instance-badge">@instanceLabel</span>
+                    }
                     <strong>@repoRoot</strong>
                 </div>
                 <div class="workspace-state">
@@ -132,11 +136,12 @@
             <RadzenTabs RenderMode="TabRenderMode.Client">
                 <Tabs>
                     <RadzenTabsItem Text="Tasks">
-                        <TasksTab WorkspaceRoot="@repoRoot" />
+                        <TasksTab @key="repoRoot" WorkspaceRoot="@repoRoot" />
                     </RadzenTabsItem>
 
                     <RadzenTabsItem Text="Assistant">
-                        <AssistantTab TranscriptHtml="@TranscriptHtml"
+                        <AssistantTab @key="assistantViewKey"
+                                      TranscriptHtml="@TranscriptHtml"
                                       TranscriptBodyHtml="@TranscriptBodyHtml"
                                       TranscriptText="@TranscriptText"
                                       CurrentTurnHtml="@CurrentTurnHtml"

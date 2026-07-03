@@ -315,6 +315,38 @@ public sealed class WorkflowTaskBoardViewServiceTests
     }
 
     [Fact]
+    public void GetBoard_uses_distinct_task_database_per_selected_workspace_without_local_solution()
+    {
+        using TemporaryRepository configuredRepository = TemporaryRepository.Create();
+        using TemporaryRepository firstWorkspace = TemporaryRepository.CreateWithoutSolution();
+        using TemporaryRepository secondWorkspace = TemporaryRepository.CreateWithoutSolution();
+        string configuredSolutionPath = Path.Combine(configuredRepository.RootPath, "Configured.slnx");
+        File.WriteAllText(configuredSolutionPath, "<Solution />");
+
+        IConfiguration configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["CodingServices:RuntimeRoot"] = "runtime",
+                ["CodingServices:WatchedSolutionPath"] = configuredSolutionPath
+            })
+            .Build();
+        WorkflowTaskBoardViewService service = new(new CodingServicesSettingsProvider(configuration));
+
+        TaskBoardViewModel firstBoard = service.GetBoard(firstWorkspace.RootPath, null);
+        TaskBoardViewModel secondBoard = service.GetBoard(secondWorkspace.RootPath, null);
+
+        Assert.NotEqual(firstBoard.DatabasePath, secondBoard.DatabasePath);
+        Assert.StartsWith(
+            Path.Combine(firstWorkspace.RootPath, "runtime"),
+            firstBoard.DatabasePath,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.StartsWith(
+            Path.Combine(secondWorkspace.RootPath, "runtime"),
+            secondBoard.DatabasePath,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void ReadArchivedDiscussionContent_rejects_paths_outside_archive_store()
     {
         using (TemporaryRepository repository = TemporaryRepository.Create())

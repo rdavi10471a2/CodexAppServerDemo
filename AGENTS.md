@@ -1,67 +1,63 @@
 # AGENTS.md
 
-## Purpose
+## Workspace Model
 
-This repository is now a Blazor control surface for `codex app-server`.
-
-The primary workflow is CWD/workspace based:
-
-- The user chooses a current working directory in the Blazor UI.
-- Codex turns should treat that CWD as the loaded workspace.
-- Do not assume a selected-file workflow.
-- Do not ask Codex to fetch source through selected-file tools unless a future task explicitly reintroduces that workflow.
-
-## Working Agreements
-
-- Keep changes small and explicit.
-- Prefer workflow order: discovery, proposal, edit/diff, compile, reindex.
-- Treat indexed MCP summaries as stale after source edits. Build and reindex
-  before trusting them again, and use `get_watched_solution_digest` as the
-  freshness gate before reloading product or test summaries.
-- Make context sources visible in the UI or logs.
-- Keep UI, MCP, and Codex app-server connection code separated by service boundaries.
+- This repository is the Coding Services Blazor control surface for `codex app-server`.
+- Work in this repo is CWD/workspace based, not selected-file based.
+- The CWD chosen in the UI is the authoritative workspace for turns sent through the app.
+- Do not reintroduce selected-file workflow assumptions unless a task explicitly requires it.
 
 ## Turn Modes
 
-- The app supports two turn modes: `Discuss` and `Work`.
-- `Discuss` is the default lightweight mode.
-- `Discuss` may include a compact indexed workspace/bootstrap summary from the
-  native app-server turn context, but it must not silently load durable active
-  task memory.
+- `Discuss` is the lightweight mode.
+- In `Discuss`, default to analysis, planning, review, and context shaping.
+- In `Discuss`, do not silently assume durable task memory is loaded.
 - `Work` is the governed task mode.
-- `Work` must require active task context before the turn is sent.
-- Durable workflow memory lives in task artifacts such as user notes, agent
-  notes, task file references, and task events.
-- Indexed workspace summaries are volatile lookup context, not durable memory.
-- Keep `CodexConnectionService` focused on transport/orchestration; do not let
-  it become the workflow-management god object.
-- Keep evolving workflow notes in `WORKFLOW.md`; promote only stable rules into
-  this file.
+- In `Work`, require active task context before sending the turn.
+- Durable workflow memory belongs in task artifacts such as user notes, agent notes, task files, and task events.
+- Indexed workspace summaries are lookup context, not durable memory.
 
-## Tool Approval And Failure Handling
+## Workflow Order
 
-- When a shell or tool action requires runtime approval, prefer triggering the
-  formal approval flow instead of asking for permission only in conversational
-  text.
-- If a tool or command is denied, cancelled, blocked by sandbox, or fails after
-  approval, treat that as an execution result, not an automatic reason to stop
-  the turn.
-- After a denied or failed action, continue with the best available fallback,
-  explain the constraint briefly, and only stop when the user must make a real
-  choice or when no viable fallback exists.
+- Preferred order is: discovery, proposal, edit/diff, compile, reindex.
+- Keep changes small, explicit, and easy to verify.
+- Prefer MCP/index-backed discovery over broad shell/text search when the needed workspace context is available there.
+- Treat repo-local workflow rules as operational requirements, not optional guidance.
 
-## Repo Map
+## Freshness Rules
 
-- `CodexAppServerBlazor/`: Blazor Server control UI and app host.
-- `CodexAppServerClient.cs`: JSON-RPC client for `codex app-server`, protocol events, and token usage handling.
-- `Mcp/`: local MCP HTTP host and workspace metadata tools. The health endpoint
-  under configured `Mcp:Url` advertises available MCP discovery tool wire names
-  and descriptions.
-- `CodexAppServerWinForms_corrected.slnx`: root solution pointing at the Blazor project.
+- Treat indexed MCP summaries as stale after source edits.
+- Before trusting index-backed structure after edits, build and reindex.
+- Use `get_watched_solution_digest` as the freshness gate before reloading deeper product or test summaries.
+- If source truth matters more than startup summary context, refresh through MCP or direct source reads instead of relying on transcript residue.
 
-## Build And Run
+## MCP And Tooling
 
-Use these commands from the repository root:
+- The long-term target in this repo is MCP-first workspace discovery and MCP-first governed edits.
+- Prefer exposed workspace MCP tools over generic fallback mechanics when capabilities overlap.
+- If the required MCP method does not exist yet, say so plainly and use the best available fallback.
+- When a shell or tool action requires runtime approval, prefer the formal approval flow over conversational permission text alone.
+- If a tool or command is denied, cancelled, sandboxed, or fails after approval, treat that as an execution result and continue with the best viable fallback unless the user must choose.
+
+## Architectural Boundaries
+
+- Keep `CodexConnectionService` focused on transport, session orchestration, and turn lifecycle.
+- Do not let `CodexConnectionService` become the workflow-management god object.
+- Keep UI concerns in Blazor components/pages, MCP concerns in `Mcp/`, and workflow/edit logic in service layers.
+- Keep raw protocol visibility intact when changing telemetry or protocol handling.
+- Keep context sources visible in the UI or logs where practical.
+
+## Important Repo Areas
+
+- `CodexAppServerBlazor/`: Blazor UI, host, and app wiring.
+- `CodexAppServerClient.cs`: JSON-RPC client for `codex app-server`.
+- `Mcp/`: local MCP host and workspace-discovery tool surface.
+- `CodexAppServerBlazor.AICodingServices/Workflow/`: governed edit, staging, validation, and workflow services.
+- `CodexAppServerWinForms_corrected.slnx`: root solution.
+
+## Build And Verify
+
+Use from the repo root:
 
 ```powershell
 dotnet restore .\CodexAppServerWinForms_corrected.slnx
@@ -69,28 +65,6 @@ dotnet build .\CodexAppServerWinForms_corrected.slnx
 dotnet run --project .\CodexAppServerBlazor\CodexAppServerBlazor.csproj
 ```
 
-Default ports are configured in `CodexAppServerBlazor/appsettings.json`:
-`BlazorHost:Url` controls the Blazor app URL and `Mcp:Url` controls the local
-MCP endpoint URL.
-
-Configured `CodingServices:TestProjectPaths` are part of the watched solution
-and index. The Source tab and initial bootstrap context use the product-source
-projection by default; the Tests tab and `GetTestProjectSummary` expose test
-structure explicitly when it is relevant.
-
-## Startup Check
-
-For a basic manual smoke test:
-
-1. Start the Blazor app.
-2. Choose or type the CWD.
-3. Click `Start Server`.
-4. Click `Start Thread`.
-5. Send a turn from the Assistant tab.
-6. Confirm the prompt and assistant response remain visible together.
-
-## When Editing
-
 - If you change turn construction, verify it remains CWD/workspace based.
-- If you change telemetry or protocol handling, keep raw protocol visibility intact.
-- If you change the UI, build and restart the Blazor app before reporting it is visible.
+- If you change UI behavior, rebuild and restart the Blazor app before claiming the change is visible.
+- If you change MCP, workflow, or index freshness behavior, verify both the runtime behavior and the status/protocol surfaces.

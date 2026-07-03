@@ -5,12 +5,12 @@ namespace CodexAppServerBlazor.Mcp;
 /// <summary>
 /// Workspace metadata exposed through the local MCP boundary.
 /// </summary>
-public sealed class HarnessWorkspaceWorkflow
+public sealed class HarnessWorkspaceContextService
 {
     private readonly WorkspaceState workspaceState;
     private readonly SourceWorkspaceService sourceWorkspaceService;
 
-    public HarnessWorkspaceWorkflow(WorkspaceState workspaceState, SourceWorkspaceService sourceWorkspaceService)
+    public HarnessWorkspaceContextService(WorkspaceState workspaceState, SourceWorkspaceService sourceWorkspaceService)
     {
         this.workspaceState = workspaceState;
         this.sourceWorkspaceService = sourceWorkspaceService;

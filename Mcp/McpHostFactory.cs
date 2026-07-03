@@ -22,7 +22,7 @@ public static class McpHostFactory
         builder.WebHost.UseUrls(endpointUrl);
         builder.Services.AddSingleton(workspaceState);
         builder.Services.AddSingleton(sourceWorkspaceService);
-        builder.Services.AddSingleton<HarnessWorkspaceWorkflow>();
+        builder.Services.AddSingleton<HarnessWorkspaceContextService>();
 
         builder.Services
             .AddMcpServer()

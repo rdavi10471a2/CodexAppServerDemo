@@ -14,6 +14,31 @@ promote the curated version into `AGENTS.md`.
 - Runtime state belongs under `runtime/`.
 - Tasks are the durable workflow/memory model.
 
+## Project Notes
+
+- This repository is the Blazor control UI and host for local Coding Services.
+- The root solution is `CodexAppServerWinForms_corrected.slnx`.
+- Default host configuration lives in `CodexAppServerBlazor/appsettings.json`.
+- `BlazorHost:Url` controls the Blazor app URL.
+- `Mcp:Url` controls the local MCP endpoint URL.
+- Configured `CodingServices:TestProjectPaths` are part of the watched solution/index but are not part of the default startup context unless explicitly loaded.
+
+## Repo Map
+
+- `CodexAppServerBlazor/`
+  Blazor UI, host, startup wiring, tabs, dialogs, and session/bootstrap behavior.
+- `CodexAppServerClient.cs`
+  JSON-RPC client for `codex app-server`, protocol handling, status, and token usage.
+- `Mcp/`
+  Local MCP host and currently exposed workspace-discovery tool surface.
+- `Mcp/HarnessWorkspaceContextService.cs`
+  Current MCP-facing workspace metadata service. Despite the older name, this
+  is discovery/bootstrap context only, not workflow orchestration.
+- `CodexAppServerBlazor.AICodingServices/Workflow/`
+  Governed edit, Roslyn symbol work, staging, validation, review, and index-refresh services.
+- `CodexAppServerBlazor.AICodingServices/Data/`
+  Solution index, task board, archived discussion persistence, and repository/database support.
+
 ## Turn Modes
 
 ### Discuss
@@ -47,6 +72,25 @@ promote the curated version into `AGENTS.md`.
   from native prompt injection.
 - Durable task memory comes from the task board database plus task-memory
   markdown files.
+
+## Build And Run
+
+Use from the repo root:
+
+```powershell
+dotnet restore .\CodexAppServerWinForms_corrected.slnx
+dotnet build .\CodexAppServerWinForms_corrected.slnx
+dotnet run --project .\CodexAppServerBlazor\CodexAppServerBlazor.csproj
+```
+
+## Manual Smoke Check
+
+1. Start the Blazor app.
+2. Choose or confirm the CWD.
+3. Click `Start Server`.
+4. Send a turn from the Assistant tab.
+5. Confirm the prompt and assistant response remain visible together.
+6. If MCP or indexed context changed, verify the expected discovery tools and summary surfaces still respond.
 
 ## Service Boundaries
 

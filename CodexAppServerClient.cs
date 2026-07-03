@@ -28,7 +28,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
     public event Action<CodexServerRequestEvent>? ServerRequest;
     public event Action<int>? Exited;
 
-    public bool IsStarted => _process is { HasExited: false };
+    public bool IsStarted => IsProcessRunning(_process);
     public string? ThreadId { get; private set; }
 
     public void ResetThreadState()
@@ -349,9 +349,11 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             return;
         }
 
-        var process = _process ?? throw new InvalidOperationException("Codex app-server is not started.");
-        if (process.HasExited)
+        var process = _process;
+        if (!IsProcessRunning(process))
+        {
             throw new InvalidOperationException("Codex app-server has exited.");
+        }
 
         await process.StandardInput.WriteLineAsync(json.AsMemory(), cancellationToken);
         await process.StandardInput.FlushAsync(cancellationToken);
@@ -924,6 +926,23 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         return sb.ToString();
     }
 
+    private static bool IsProcessRunning(Process? process)
+    {
+        if (process is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return !process.HasExited;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
     private static void ThrowIfRpcError(JsonRpcResponse response)
     {
         if (response.Error is not null)
@@ -934,7 +953,10 @@ public sealed class CodexAppServerClient : IAsyncDisposable
     {
         _cts.Cancel();
 
-        if (_process is { HasExited: false } process)
+        Process? process = _process;
+        _process = null;
+
+        if (IsProcessRunning(process))
         {
             try
             {
@@ -948,7 +970,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             }
         }
 
-        _process?.Dispose();
+        process?.Dispose();
         _cts.Dispose();
         await Task.CompletedTask;
     }

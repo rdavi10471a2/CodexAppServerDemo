@@ -42,22 +42,28 @@ public sealed class CodingServicesSettingsProvider
         string? configuredPath = configuration["CodingServices:WatchedSolutionPath"];
         if (!string.IsNullOrWhiteSpace(configuredPath))
         {
-            return ResolvePath(configuredPath, workspaceRoot);
+            string resolvedConfiguredPath = ResolvePath(configuredPath, workspaceRoot);
+            if (IsPathWithinRoot(resolvedConfiguredPath, workspaceRoot))
+            {
+                return resolvedConfiguredPath;
+            }
+
+            string? localSolutionPath = TryFindLocalSolutionPath(workspaceRoot);
+            if (!string.IsNullOrWhiteSpace(localSolutionPath))
+            {
+                return localSolutionPath;
+            }
+
+            return resolvedConfiguredPath;
         }
 
-        string[] solutionPaths = Directory
-            .EnumerateFiles(workspaceRoot, "*.slnx", SearchOption.TopDirectoryOnly)
-            .Concat(Directory.EnumerateFiles(workspaceRoot, "*.sln", SearchOption.TopDirectoryOnly))
-            .OrderBy(path => Path.GetExtension(path).Equals(".slnx", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
-            .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-
-        if (solutionPaths.Length == 0)
+        string? discoveredSolutionPath = TryFindLocalSolutionPath(workspaceRoot);
+        if (string.IsNullOrWhiteSpace(discoveredSolutionPath))
         {
             throw new InvalidOperationException($"No .slnx or .sln file was found in {workspaceRoot}.");
         }
 
-        return solutionPaths[0];
+        return discoveredSolutionPath;
     }
 
     private string ResolveConfiguredPath(string key, string defaultValue, string basePath)
@@ -88,5 +94,34 @@ public sealed class CodingServicesSettingsProvider
         }
 
         return Path.GetFullPath(Path.Combine(basePath, path));
+    }
+
+    private static string? TryFindLocalSolutionPath(string workspaceRoot)
+    {
+        string[] solutionPaths = Directory
+            .EnumerateFiles(workspaceRoot, "*.slnx", SearchOption.TopDirectoryOnly)
+            .Concat(Directory.EnumerateFiles(workspaceRoot, "*.sln", SearchOption.TopDirectoryOnly))
+            .OrderBy(path => Path.GetExtension(path).Equals(".slnx", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return solutionPaths.Length == 0
+            ? null
+            : solutionPaths[0];
+    }
+
+    private static bool IsPathWithinRoot(string candidatePath, string rootPath)
+    {
+        StringComparison comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        string normalizedRoot = Path.GetFullPath(rootPath)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string normalizedCandidate = Path.GetFullPath(candidatePath)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        return normalizedCandidate.Equals(normalizedRoot, comparison)
+            || normalizedCandidate.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, comparison)
+            || normalizedCandidate.StartsWith(normalizedRoot + Path.AltDirectorySeparatorChar, comparison);
     }
 }

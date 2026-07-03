@@ -15,6 +15,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
     private readonly IWorkspaceWorkflowContextService workspaceWorkflowContextService;
     private readonly ITaskWorkflowContextService taskWorkflowContextService;
     private readonly IWorkflowTurnContextComposer workflowTurnContextComposer;
+    private readonly SessionBootstrapPolicyService sessionBootstrapPolicyService;
     private readonly PermissionRequestService permissionRequestService = new();
     private CodexAppServerClient? client;
     private string assistantText = string.Empty;
@@ -31,6 +32,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
         WorkspaceState workspaceState,
         IWorkspaceWorkflowContextService workspaceWorkflowContextService,
         ITaskWorkflowContextService taskWorkflowContextService,
+        SessionBootstrapPolicyService sessionBootstrapPolicyService,
         IWorkflowTurnContextComposer workflowTurnContextComposer,
         Func<CodexAppServerClient>? clientFactory = null)
     {
@@ -38,6 +40,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
         this.workspaceState = workspaceState;
         this.workspaceWorkflowContextService = workspaceWorkflowContextService;
         this.taskWorkflowContextService = taskWorkflowContextService;
+        this.sessionBootstrapPolicyService = sessionBootstrapPolicyService;
         this.workflowTurnContextComposer = workflowTurnContextComposer;
     }
 
@@ -177,14 +180,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
                 throw new InvalidOperationException("Wait for the current turn to finish before resetting the conversation.");
             }
 
-            lock (gate)
-            {
-                assistantText = string.Empty;
-                currentTurnNoticeText = string.Empty;
-                permissionRequestService.Clear();
-                workflowSessionState = null;
-            }
-
+            ClearConversationArtifactsForReset();
             activeClient.ResetThreadState();
             AddEvent(
                 statusEvents,
@@ -199,6 +195,20 @@ public sealed class CodexConnectionService : IAsyncDisposable
         {
             operationGate.Release();
             Changed?.Invoke();
+        }
+    }
+
+    private void ClearConversationArtifactsForReset()
+    {
+        lock (gate)
+        {
+            assistantText = string.Empty;
+            currentTurnNoticeText = string.Empty;
+            statusEvents.Clear();
+            toolEvents.Clear();
+            rawLines.Clear();
+            permissionRequestService.Clear();
+            workflowSessionState = null;
         }
     }
 
@@ -234,6 +244,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
 
             workspaceState.SetRepoRoot(repoRoot);
             workflowSessionState ??= new WorkflowSessionState(repoRoot, mode);
+            SessionBootstrapPolicy sessionBootstrapPolicy = sessionBootstrapPolicyService.LoadPolicy();
             WorkflowPromptSection workspaceContext = workspaceWorkflowContextService.BuildTurnContext(repoRoot);
             WorkflowTurnTaskContext taskContext = mode == WorkflowTurnMode.Work
                 ? taskWorkflowContextService.BuildTurnContext(repoRoot)
@@ -243,8 +254,18 @@ public sealed class CodexConnectionService : IAsyncDisposable
                 repoRoot,
                 mode,
                 workflowSessionState,
+                sessionBootstrapPolicy,
                 workspaceContext,
                 taskContext);
+            if (!workflowSessionState.HasAttachedSessionBootstrap)
+            {
+                AddEvent(
+                    statusEvents,
+                    "SessionBootstrap",
+                    sessionBootstrapPolicy.HasPrompt ? "ok" : "skipped",
+                    "coding-services",
+                    BuildSessionBootstrapDetail(sessionBootstrapPolicy, envelope.IncludedSessionBootstrap));
+            }
             if (!workflowSessionState.HasAttachedWorkspaceContext)
             {
                 AddEvent(
@@ -292,6 +313,10 @@ public sealed class CodexConnectionService : IAsyncDisposable
             if (envelope.IncludedWorkspaceContext)
             {
                 workflowSessionState.HasAttachedWorkspaceContext = true;
+            }
+            if (envelope.IncludedSessionBootstrap)
+            {
+                workflowSessionState.HasAttachedSessionBootstrap = true;
             }
 
             AddEvent(statusEvents, "TurnMode", "ok", "coding-services", $"Turn mode set to {mode}.");
@@ -405,8 +430,15 @@ public sealed class CodexConnectionService : IAsyncDisposable
             NormalizeSandbox(sandbox),
             cancellationToken);
         workflowSessionState = new WorkflowSessionState(repoRoot, mode);
+        SessionBootstrapPolicy sessionBootstrapPolicy = sessionBootstrapPolicyService.LoadPolicy();
         AddEvent(statusEvents, "ThreadPolicy", "ok", "codex", $"Thread policy set to approval={NormalizeApprovalPolicy(approvalPolicy)}, sandbox={NormalizeSandbox(sandbox)}.");
         AddEvent(statusEvents, "ThreadMode", "ok", "coding-services", $"Thread initialized in {mode} mode.");
+        AddEvent(
+            statusEvents,
+            "SessionBootstrap",
+            sessionBootstrapPolicy.HasPrompt ? "ready" : "skipped",
+            "coding-services",
+            BuildThreadBootstrapStatusDetail(sessionBootstrapPolicy));
         AddEvent(statusEvents, "WorkspaceContext", "ready", "coding-services", "Brief indexed workspace context will be attached to the next eligible user turn.");
     }
 
@@ -643,6 +675,33 @@ public sealed class CodexConnectionService : IAsyncDisposable
             .FirstOrDefault()
             ?? "Command failed after approval.";
         return "Diagnostic: " + firstLine;
+    }
+
+    private static string BuildThreadBootstrapStatusDetail(SessionBootstrapPolicy policy)
+    {
+        if (!policy.HasPrompt)
+        {
+            return policy.Status;
+        }
+
+        return string.IsNullOrWhiteSpace(policy.SourcePath)
+            ? "Session bootstrap policy is loaded and will be attached on the first eligible user turn."
+            : $"Session bootstrap policy is loaded from {policy.SourcePath} and will be attached on the first eligible user turn.";
+    }
+
+    private static string BuildSessionBootstrapDetail(SessionBootstrapPolicy policy, bool included)
+    {
+        if (!policy.HasPrompt)
+        {
+            return policy.Status;
+        }
+
+        string pathDetail = string.IsNullOrWhiteSpace(policy.SourcePath)
+            ? "Session bootstrap policy loaded."
+            : $"Session bootstrap policy loaded from {policy.SourcePath}.";
+        return included
+            ? pathDetail + " Attached to this turn."
+            : pathDetail + " Already attached earlier in this thread.";
     }
 
     private static string NormalizeApprovalPolicy(string value)

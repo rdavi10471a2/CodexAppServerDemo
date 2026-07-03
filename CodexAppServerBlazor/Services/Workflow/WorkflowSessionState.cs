@@ -15,5 +15,7 @@ public sealed class WorkflowSessionState
 
     public DateTimeOffset StartedAt { get; }
 
+    public bool HasAttachedSessionBootstrap { get; set; }
+
     public bool HasAttachedWorkspaceContext { get; set; }
 }

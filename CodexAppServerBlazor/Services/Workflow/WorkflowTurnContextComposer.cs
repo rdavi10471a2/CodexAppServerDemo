@@ -10,6 +10,7 @@ public sealed class WorkflowTurnContextComposer : IWorkflowTurnContextComposer
         string workspaceRoot,
         WorkflowTurnMode mode,
         WorkflowSessionState sessionState,
+        SessionBootstrapPolicy sessionBootstrapPolicy,
         WorkflowPromptSection workspaceContext,
         WorkflowTurnTaskContext taskContext)
     {
@@ -18,11 +19,16 @@ public sealed class WorkflowTurnContextComposer : IWorkflowTurnContextComposer
             throw new InvalidOperationException("Cannot start a Work turn without active task context. " + taskContext.Status);
         }
 
+        bool includeSessionBootstrap = !sessionState.HasAttachedSessionBootstrap && sessionBootstrapPolicy.HasPrompt;
         bool includeWorkspaceContext = !sessionState.HasAttachedWorkspaceContext && workspaceContext.HasPrompt;
 
         StringBuilder prompt = new();
-        prompt.AppendLine(userPrompt);
-        prompt.AppendLine();
+        if (includeSessionBootstrap)
+        {
+            prompt.AppendLine("Coding Services session bootstrap policy:");
+            prompt.AppendLine(sessionBootstrapPolicy.PromptText);
+            prompt.AppendLine();
+        }
 
         if (mode == WorkflowTurnMode.Work)
         {
@@ -59,11 +65,16 @@ public sealed class WorkflowTurnContextComposer : IWorkflowTurnContextComposer
         }
 
         prompt.AppendLine("- When the user asks for tool results, report the results in the same response after the tool call completes; do not wait for a follow-up prompt.");
+        prompt.AppendLine();
+        prompt.AppendLine("User request:");
+        prompt.AppendLine(userPrompt);
 
         return new WorkflowTurnEnvelope(
             prompt.ToString(),
             mode,
+            includeSessionBootstrap,
             includeWorkspaceContext,
+            sessionBootstrapPolicy,
             workspaceContext,
             taskContext);
     }

@@ -195,6 +195,40 @@ public sealed class SourceWorkspaceService
     public async Task RebuildIndexAsync(string workspaceRoot, CancellationToken cancellationToken)
     {
         CodingServicesSettings settings = settingsProvider.GetSettings(workspaceRoot);
+        EnsureWorkspaceRuntimeArtifacts(settings);
+
+        await new SolutionIndexRebuildService().RebuildAsync(settings, cancellationToken);
+    }
+
+    public async Task EnsureWorkspaceArtifactsAsync(
+        string workspaceRoot,
+        bool rebuildIndexIfMissing,
+        CancellationToken cancellationToken)
+    {
+        CodingServicesSettings settings = settingsProvider.GetSettings(workspaceRoot);
+        EnsureWorkspaceRuntimeArtifacts(settings);
+
+        WorkflowTaskBoardRepository repository = new(
+            SystemDataPaths.GetDefaultPlanningDatabasePath(settings),
+            SystemDataPaths.GetDefaultTaskMemoryRoot(settings));
+        repository.EnsureCreated();
+
+        if (!rebuildIndexIfMissing)
+        {
+            return;
+        }
+
+        string databasePath = SystemDataPaths.GetDefaultIndexDatabasePath(settings);
+        if (File.Exists(databasePath))
+        {
+            return;
+        }
+
+        await new SolutionIndexRebuildService().RebuildAsync(settings, cancellationToken);
+    }
+
+    private static void EnsureWorkspaceRuntimeArtifacts(CodingServicesSettings settings)
+    {
         string workspaceDataRoot = SystemWorkspacePaths.GetWatchedSolutionWorkspaceRoot(settings);
         Directory.CreateDirectory(Path.Combine(workspaceDataRoot, "data"));
         Directory.CreateDirectory(Path.Combine(workspaceDataRoot, "workflow"));
@@ -202,8 +236,6 @@ public sealed class SourceWorkspaceService
         Directory.CreateDirectory(Path.Combine(workspaceDataRoot, "logs"));
         Directory.CreateDirectory(Path.Combine(workspaceDataRoot, "planning"));
         Directory.CreateDirectory(SystemDataPaths.GetDefaultTaskMemoryRoot(settings));
-
-        await new SolutionIndexRebuildService().RebuildAsync(settings, cancellationToken);
     }
 
     private static IReadOnlyList<IndexedProjectRow> FilterProjects(

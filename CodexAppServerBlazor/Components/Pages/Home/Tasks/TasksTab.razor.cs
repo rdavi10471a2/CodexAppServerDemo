@@ -8,6 +8,7 @@ namespace CodexAppServerBlazor.Components.Pages.Home.Tasks;
 public partial class TasksTab : ComponentBase, IAsyncDisposable
 {
     private TaskBoardViewModel model = TaskBoardViewModel.Empty;
+    private string? lastWorkspaceRoot;
     private string? selectedTaskId;
     private string? errorMessage;
     private bool isNavigatorVisible = true;
@@ -28,6 +29,15 @@ public partial class TasksTab : ComponentBase, IAsyncDisposable
 
     protected override void OnParametersSet()
     {
+        string normalizedWorkspaceRoot = NormalizeWorkspaceRoot(WorkspaceRoot);
+        if (!string.Equals(lastWorkspaceRoot, normalizedWorkspaceRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            lastWorkspaceRoot = normalizedWorkspaceRoot;
+            selectedTaskId = null;
+            errorMessage = null;
+            model = TaskBoardViewModel.Empty;
+        }
+
         Refresh();
     }
 
@@ -56,7 +66,7 @@ public partial class TasksTab : ComponentBase, IAsyncDisposable
             return;
         }
 
-        Load(selectedTaskId);
+        Execute(() => Load(selectedTaskId));
     }
 
     private void ToggleNavigator()
@@ -255,8 +265,17 @@ public partial class TasksTab : ComponentBase, IAsyncDisposable
         }
         catch (Exception ex)
         {
+            model = TaskBoardViewModel.Empty;
+            selectedTaskId = null;
             errorMessage = ex.Message;
         }
+    }
+
+    private static string NormalizeWorkspaceRoot(string? workspaceRoot)
+    {
+        return string.IsNullOrWhiteSpace(workspaceRoot)
+            ? string.Empty
+            : Path.GetFullPath(workspaceRoot);
     }
 
     public async ValueTask DisposeAsync()

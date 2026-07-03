@@ -3,7 +3,9 @@ using CodexAppServerBlazor.Mcp;
 using CodexAppServerBlazor.Services;
 using CodexAppServerBlazor.Services.Tasks;
 using CodexAppServerBlazor.Services.Workflow;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 
 namespace CodexAppServerBlazor.Tests;
 
@@ -263,6 +265,7 @@ public sealed class CodexConnectionServiceSequenceTests
         IConfiguration configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
+                ["WorkflowPolicy:SessionBootstrapPath"] = Path.Combine(workspaceRoot, "CS-SessionBootstrap.txt"),
                 ["CodingServices:RuntimeRoot"] = "runtime",
                 ["CodingServices:WatchedSolutionPath"] = "Sample.slnx"
             })
@@ -274,17 +277,43 @@ public sealed class CodexConnectionServiceSequenceTests
             File.WriteAllText(solutionPath, "<Solution />");
         }
 
+        string bootstrapPath = Path.Combine(workspaceRoot, "CS-SessionBootstrap.txt");
+        if (!File.Exists(bootstrapPath))
+        {
+            File.WriteAllText(bootstrapPath, "Host bootstrap.");
+        }
+
         WorkspaceState workspaceState = new();
         CodingServicesSettingsProvider settingsProvider = new(configuration);
         SourceWorkspaceService sourceWorkspaceService = new(settingsProvider);
         WorkspaceWorkflowContextService workspaceWorkflowContextService = new(sourceWorkspaceService);
         TaskWorkflowContextService taskWorkflowContextService = new(settingsProvider);
+        SessionBootstrapPolicyService sessionBootstrapPolicyService = new(
+            configuration,
+            new HostingEnvironmentStub(workspaceRoot));
         WorkflowTurnContextComposer workflowTurnContextComposer = new();
         return new CodexConnectionService(
             workspaceState,
             workspaceWorkflowContextService,
             taskWorkflowContextService,
+            sessionBootstrapPolicyService,
             workflowTurnContextComposer);
+    }
+
+    private sealed class HostingEnvironmentStub : IHostEnvironment
+    {
+        public HostingEnvironmentStub(string contentRootPath)
+        {
+            ContentRootPath = contentRootPath;
+        }
+
+        public string EnvironmentName { get; set; } = "Development";
+
+        public string ApplicationName { get; set; } = "CodexAppServerBlazor.Tests";
+
+        public string ContentRootPath { get; set; }
+
+        public IFileProvider ContentRootFileProvider { get; set; } = default!;
     }
 
     private static void InvokePrivate(object target, string methodName, params object[] arguments)

@@ -21,9 +21,15 @@
     <Compile Include="..\CodexEvents.cs" Link="Shared\CodexEvents.cs" />
     <Compile Include="..\JsonRpcMessage.cs" Link="Shared\JsonRpcMessage.cs" />
     <Compile Include="..\Mcp\WorkspaceMcpTools.cs" Link="Shared\Mcp\WorkspaceMcpTools.cs" />
-    <Compile Include="..\Mcp\HarnessWorkspaceWorkflow.cs" Link="Shared\Mcp\HarnessWorkspaceWorkflow.cs" />
+    <Compile Include="..\Mcp\HarnessWorkspaceContextService.cs" Link="Shared\Mcp\HarnessWorkspaceContextService.cs" />
     <Compile Include="..\Mcp\McpHostFactory.cs" Link="Shared\Mcp\McpHostFactory.cs" />
     <Compile Include="..\Mcp\WorkspaceState.cs" Link="Shared\Mcp\WorkspaceState.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="docs\policy\CS-SessionBootstrap.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
 </Project>

@@ -6,38 +6,38 @@ namespace CodexAppServerBlazor.Mcp;
 [McpServerToolType]
 public sealed class WorkspaceMcpTools
 {
-    private readonly HarnessWorkspaceWorkflow workflow;
+    private readonly HarnessWorkspaceContextService workspaceContextService;
 
-    public WorkspaceMcpTools(HarnessWorkspaceWorkflow workflow)
+    public WorkspaceMcpTools(HarnessWorkspaceContextService workspaceContextService)
     {
-        this.workflow = workflow;
+        this.workspaceContextService = workspaceContextService;
     }
 
     [McpServerTool]
     [Description("Returns metadata for the workspace CWD selected in the Coding Services Blazor control surface.")]
     public Task<WorkspaceResult> GetWorkspace(CancellationToken cancellationToken = default)
     {
-        return workflow.GetWorkspaceAsync(cancellationToken);
+        return workspaceContextService.GetWorkspaceAsync(cancellationToken);
     }
 
     [McpServerTool]
     [Description("Returns cheap watched-solution readiness metadata, counts, and a summary hash so an agent can decide whether to reload deeper context.")]
     public Task<WatchedSolutionDigestResult> GetWatchedSolutionDigest(CancellationToken cancellationToken = default)
     {
-        return workflow.GetWatchedSolutionDigestAsync(cancellationToken);
+        return workspaceContextService.GetWatchedSolutionDigestAsync(cancellationToken);
     }
 
     [McpServerTool]
     [Description("Returns the indexed watched-solution project/file/type/member tree for on-demand agent discovery. Does not include source file bodies.")]
     public Task<WatchedSolutionSummaryResult> GetWatchedSolutionSummary(CancellationToken cancellationToken = default)
     {
-        return workflow.GetWatchedSolutionSummaryAsync(cancellationToken);
+        return workspaceContextService.GetWatchedSolutionSummaryAsync(cancellationToken);
     }
 
     [McpServerTool]
     [Description("Returns the indexed project/file/type/member tree for configured test projects only. Does not include source file bodies.")]
     public Task<WatchedSolutionSummaryResult> GetTestProjectSummary(CancellationToken cancellationToken = default)
     {
-        return workflow.GetTestProjectSummaryAsync(cancellationToken);
+        return workspaceContextService.GetTestProjectSummaryAsync(cancellationToken);
     }
 }

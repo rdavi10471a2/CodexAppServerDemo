@@ -9,6 +9,7 @@ public interface IWorkflowTurnContextComposer
         string workspaceRoot,
         WorkflowTurnMode mode,
         WorkflowSessionState sessionState,
+        SessionBootstrapPolicy sessionBootstrapPolicy,
         WorkflowPromptSection workspaceContext,
         WorkflowTurnTaskContext taskContext);
 }

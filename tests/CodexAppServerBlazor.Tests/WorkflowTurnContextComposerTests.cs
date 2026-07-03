@@ -10,6 +10,7 @@ public sealed class WorkflowTurnContextComposerTests
     {
         WorkflowTurnContextComposer composer = new();
         WorkflowSessionState sessionState = new("C:\\Work", WorkflowTurnMode.Discuss);
+        SessionBootstrapPolicy sessionBootstrapPolicy = new("C:\\policy\\CS-SessionBootstrap.txt", "Host bootstrap.", "loaded");
         WorkflowPromptSection workspaceContext = new("Indexed workspace context.", "ready");
         WorkflowTurnTaskContext taskContext = new("Task details.", "loaded", "task-1");
 
@@ -18,14 +19,18 @@ public sealed class WorkflowTurnContextComposerTests
             "C:\\Work",
             WorkflowTurnMode.Discuss,
             sessionState,
+            sessionBootstrapPolicy,
             workspaceContext,
             taskContext);
 
+        Assert.True(envelope.IncludedSessionBootstrap);
         Assert.True(envelope.IncludedWorkspaceContext);
+        Assert.Contains("Host bootstrap.", envelope.Prompt, StringComparison.Ordinal);
         Assert.DoesNotContain("Task details.", envelope.Prompt, StringComparison.Ordinal);
         Assert.Contains("Workflow mode:", envelope.Prompt, StringComparison.Ordinal);
         Assert.Contains("- Discuss", envelope.Prompt, StringComparison.Ordinal);
         Assert.Contains("Indexed workspace context.", envelope.Prompt, StringComparison.Ordinal);
+        Assert.Contains("User request:", envelope.Prompt, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -40,6 +45,7 @@ public sealed class WorkflowTurnContextComposerTests
                 "C:\\Work",
                 WorkflowTurnMode.Work,
                 sessionState,
+                new SessionBootstrapPolicy("C:\\policy\\CS-SessionBootstrap.txt", "Host bootstrap.", "loaded"),
                 new WorkflowPromptSection("Indexed workspace context.", "ready"),
                 new WorkflowTurnTaskContext(null, "Task context skipped because no Active task is set.", null)));
 
@@ -52,6 +58,7 @@ public sealed class WorkflowTurnContextComposerTests
         WorkflowTurnContextComposer composer = new();
         WorkflowSessionState sessionState = new("C:\\Work", WorkflowTurnMode.Work)
         {
+            HasAttachedSessionBootstrap = true,
             HasAttachedWorkspaceContext = true
         };
 
@@ -60,11 +67,14 @@ public sealed class WorkflowTurnContextComposerTests
             "C:\\Work",
             WorkflowTurnMode.Work,
             sessionState,
+            new SessionBootstrapPolicy("C:\\policy\\CS-SessionBootstrap.txt", "Host bootstrap.", "loaded"),
             new WorkflowPromptSection("Indexed workspace context.", "ready"),
             new WorkflowTurnTaskContext("Task details.", "loaded", "task-1"));
 
+        Assert.False(envelope.IncludedSessionBootstrap);
         Assert.False(envelope.IncludedWorkspaceContext);
         Assert.Contains("Task details.", envelope.Prompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("Host bootstrap.", envelope.Prompt, StringComparison.Ordinal);
         Assert.DoesNotContain("Indexed workspace context.", envelope.Prompt, StringComparison.Ordinal);
         Assert.Contains("- Work", envelope.Prompt, StringComparison.Ordinal);
     }
