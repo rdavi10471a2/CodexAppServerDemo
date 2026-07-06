@@ -1,6 +1,6 @@
 // =============================================================================
 // WorkflowTurnContextComposer.cs - MODIFICATIONS
-// Part of: CodeHands_Implementation_Proposal.md
+// Part of: Codehands Proposal.md
 // Location: docs/proposed/
 // Target: CodexAppServerBlazor/Services/Workflow/WorkflowTurnContextComposer.cs
 // Description: Add edit session guidance to composed prompts

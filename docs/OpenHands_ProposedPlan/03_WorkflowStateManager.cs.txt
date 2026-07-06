@@ -1,6 +1,6 @@
 // =============================================================================
 // WorkflowStateManager.cs
-// Part of: CodeHands_Implementation_Proposal.md
+// Part of: Codehands Proposal.md
 // Location: docs/proposed/
 // Description: Manages workflow state transitions and edit session lifecycle
 // References: 01_EditSessionModels.cs, 02_FileCapabilitiesAnalyzer.cs

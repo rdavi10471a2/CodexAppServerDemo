@@ -1,6 +1,6 @@
 // =============================================================================
 // WorkspaceMcpTools.cs - ADDITIONS
-// Part of: CodeHands_Implementation_Proposal.md
+// Part of: Codehands Proposal.md
 // Location: docs/proposed/
 // Target: CodexAppServerBlazor/Mcp/WorkspaceMcpTools.cs
 // Description: Add new workflow MCP tools to existing tools
@@ -84,7 +84,7 @@ public sealed class WorkspaceMcpTools
     // --- File Capabilities ---
 
     [McpServerTool]
-    [Description("Analyze file capabilities for the CodeHands workflow. Returns file kind and allowed MCP tools.")]
+    [Description("Analyze file capabilities for the MCP Workflow. Returns file kind and allowed MCP tools.")]
     public FileCapabilitiesResult AnalyzeFileCapabilities(
         [Description("Source file path, absolute or relative to the workspace.")] string filePath)
     {
@@ -241,7 +241,7 @@ public sealed class WorkspaceMcpTools
     }
 
     [McpServerTool]
-    [Description("Return the CodeHands workflow tool manifest with edit priorities.")]
+    [Description("Return the MCP Workflow tool manifest with edit priorities.")]
     public string GetWorkflowToolManifest()
     {
         var composer = new EditSessionGuidanceComposer();

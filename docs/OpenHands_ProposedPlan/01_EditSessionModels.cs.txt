@@ -1,6 +1,6 @@
 // =============================================================================
 // EditSessionModels.cs
-// Part of: CodeHands_Implementation_Proposal.md
+// Part of: Codehands Proposal.md
 // Location: docs/proposed/
 // Description: Data models for edit sessions, merge tracking, and workflow phases
 // =============================================================================
@@ -54,7 +54,7 @@ public sealed class MergeReviewState
 }
 
 /// <summary>
-/// Workflow phases for the CodeHands edit session lifecycle.
+/// Workflow phases for the MCP Workflow edit session lifecycle.
 /// </summary>
 public enum WorkflowPhase
 {

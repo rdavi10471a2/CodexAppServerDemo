@@ -1,6 +1,6 @@
 // =============================================================================
 // EditSessionBridge.cs
-// Part of: CodeHands_Implementation_Proposal.md
+// Part of: Codehands Proposal.md
 // Location: docs/proposed/
 // Description: Bridges MCP tool events to workflow state manager
 // References: 01_EditSessionModels.cs, 03_WorkflowStateManager.cs

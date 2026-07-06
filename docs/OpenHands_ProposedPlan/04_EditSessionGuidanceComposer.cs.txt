@@ -1,6 +1,6 @@
 // =============================================================================
 // EditSessionGuidanceComposer.cs
-// Part of: CodeHands_Implementation_Proposal.md
+// Part of: Codehands Proposal.md
 // Location: docs/proposed/
 // Description: Generates tool priority guidance for prompts and session bootstrap
 // References: 01_EditSessionModels.cs, 02_FileCapabilitiesAnalyzer.cs

@@ -1,6 +1,6 @@
 // =============================================================================
 // CS-SessionBootstrap.txt - MODIFICATIONS
-// Part of: CodeHands_Implementation_Proposal.md
+// Part of: Codehands Proposal.md
 // Location: docs/proposed/
 // Target: CodexAppServerBlazor/docs/policy/CS-SessionBootstrap.txt
 // Description: Add MCP-first workflow policy with tool priority

@@ -1,8 +1,8 @@
-# CodeHands Implementation Proposal
+# OpenHands Proposed Plan: Coding Services MCP Workflow
 
 ## Overview
 
-This document describes the implementation plan for the CodeHands workflow system, which extends `WorkflowSessionState` to support a governed edit session workflow with:
+This document describes the implementation plan for the Coding Services MCP Workflow, which extends `WorkflowSessionState` to support a governed edit session workflow with:
 
 - Single edit session (multiple files)
 - Semantic MCP tools replacing Codex native `grep`/`ApplyPatch`

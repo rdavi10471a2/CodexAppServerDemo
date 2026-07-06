@@ -1,6 +1,6 @@
 // =============================================================================
 // FileCapabilitiesAnalyzer.cs
-// Part of: CodeHands_Implementation_Proposal.md
+// Part of: Codehands Proposal.md
 // Location: docs/proposed/
 // Description: Detects file kind and returns allowed MCP tools per file type
 // References: 01_EditSessionModels.cs
