@@ -68,31 +68,31 @@ CodexConnectionService
 
 | File | Purpose |
 |------|---------|
-| `01_EditSessionModels.cs` | Data models: EditSession, EditSessionFile, MergeReviewState, WorkflowPhase enum |
-| `02_FileCapabilitiesAnalyzer.cs` | Detects file kind and allowed tools per file |
-| `03_WorkflowStateManager.cs` | Manages workflow state transitions and edit session lifecycle |
-| `04_EditSessionGuidanceComposer.cs` | Generates tool priority guidance for prompts |
-| `05_EditSessionBridge.cs` | Bridges MCP events to state manager |
-| `06_WorkflowSessionState_Modification.cs` | **MODIFICATION**: Add extension properties to existing class |
-| `07_WorkflowTurnContextComposer_Modification.cs` | **MODIFICATION**: Add edit session guidance to prompts |
+| `01_EditSessionModels.cs.txt` | Data models: EditSession, EditSessionFile, MergeReviewState, WorkflowPhase enum |
+| `02_FileCapabilitiesAnalyzer.cs.txt` | Detects file kind and allowed tools per file |
+| `03_WorkflowStateManager.cs.txt` | Manages workflow state transitions and edit session lifecycle |
+| `04_EditSessionGuidanceComposer.cs.txt` | Generates tool priority guidance for prompts |
+| `05_EditSessionBridge.cs.txt` | Bridges MCP events to state manager |
+| `06_WorkflowSessionState_Modification.cs.txt` | **MODIFICATION**: Add extension properties to existing class |
+| `07_WorkflowTurnContextComposer_Modification.cs.txt` | **MODIFICATION**: Add edit session guidance to prompts |
 | `08_CS-SessionBootstrap_Modification.txt` | **MODIFICATION**: Add MCP-first workflow policy |
-| `09_WorkspaceMcpTools_Additions.cs` | **MODIFICATION**: Add new workflow MCP tools |
-| `10_CodexConnectionService_Modification.cs` | **MODIFICATION**: Integrate state manager and bridge |
+| `09_WorkspaceMcpTools_Additions.cs.txt` | **MODIFICATION**: Add new workflow MCP tools |
+| `10_CodexConnectionService_Modification.cs.txt` | **MODIFICATION**: Integrate state manager and bridge |
 
 ### Target Locations
 
 | Proposed File | Target Location |
 |---------------|-----------------|
-| `01_EditSessionModels.cs` | `CodexAppServerBlazor/Services/Workflow/` |
-| `02_FileCapabilitiesAnalyzer.cs` | `CodexAppServerBlazor/Services/Workflow/` |
-| `03_WorkflowStateManager.cs` | `CodexAppServerBlazor/Services/Workflow/` |
-| `04_EditSessionGuidanceComposer.cs` | `CodexAppServerBlazor/Services/Workflow/` |
-| `05_EditSessionBridge.cs` | `CodexAppServerBlazor/Services/Workflow/` |
-| `06_WorkflowSessionState_Modification.cs` | Edit `CodexAppServerBlazor/Services/Workflow/WorkflowSessionState.cs` |
-| `07_WorkflowTurnContextComposer_Modification.cs` | Edit `CodexAppServerBlazor/Services/Workflow/WorkflowTurnContextComposer.cs` |
+| `01_EditSessionModels.cs.txt` | `CodexAppServerBlazor/Services/Workflow/` |
+| `02_FileCapabilitiesAnalyzer.cs.txt` | `CodexAppServerBlazor/Services/Workflow/` |
+| `03_WorkflowStateManager.cs.txt` | `CodexAppServerBlazor/Services/Workflow/` |
+| `04_EditSessionGuidanceComposer.cs.txt` | `CodexAppServerBlazor/Services/Workflow/` |
+| `05_EditSessionBridge.cs.txt` | `CodexAppServerBlazor/Services/Workflow/` |
+| `06_WorkflowSessionState_Modification.cs.txt` | Edit `CodexAppServerBlazor/Services/Workflow/WorkflowSessionState.cs` |
+| `07_WorkflowTurnContextComposer_Modification.cs.txt` | Edit `CodexAppServerBlazor/Services/Workflow/WorkflowTurnContextComposer.cs` |
 | `08_CS-SessionBootstrap_Modification.txt` | Append to `CodexAppServerBlazor/docs/policy/CS-SessionBootstrap.txt` |
-| `09_WorkspaceMcpTools_Additions.cs` | Edit `CodexAppServerBlazor/Mcp/WorkspaceMcpTools.cs` |
-| `10_CodexConnectionService_Modification.cs` | Edit `CodexAppServerBlazor/Services/CodexConnectionService.cs` |
+| `09_WorkspaceMcpTools_Additions.cs.txt` | Edit `CodexAppServerBlazor/Mcp/WorkspaceMcpTools.cs` |
+| `10_CodexConnectionService_Modification.cs.txt` | Edit `CodexAppServerBlazor/Services/CodexConnectionService.cs` |
 
 ---
 
