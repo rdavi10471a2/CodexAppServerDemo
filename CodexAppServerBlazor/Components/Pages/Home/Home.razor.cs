@@ -58,6 +58,15 @@ public partial class Home : IDisposable, IAsyncDisposable
     private string renderedAssistantText = string.Empty;
     private string? lastPermissionResultToastKey;
     private string? errorMessage;
+    private bool showArchiveConversationPrompt;
+    private ConversationContinuation pendingConversationContinuation;
+    private string? pendingConversationTargetWorkspacePath;
+    private string? pendingConversationCurrentWorkspacePath;
+    private string archiveConversationMessage = string.Empty;
+    private string archiveConversationTriggerLabel = string.Empty;
+    private string archiveConversationContinueWithoutSavingText = "Continue";
+    private string archiveConversationSaveButtonText = "Save";
+    private string archiveConversationSuggestedName = string.Empty;
     private bool busy;
     private bool isRebuildingSourceIndex;
     private bool isConnectionPanelVisible = true;
@@ -555,7 +564,10 @@ public partial class Home : IDisposable, IAsyncDisposable
     }
 
     private async Task ClearChatHistory()
-        => await RequestConversationDispositionAsync(ConversationContinuation.StartNewConversation);
+    {
+        await RequestConversationDispositionAsync(ConversationContinuation.StartNewConversation);
+        await InvokeAsync(StateHasChanged);
+    }
 
     private async Task RequestConversationDispositionAsync(
         ConversationContinuation continuation,
@@ -597,35 +609,172 @@ public partial class Home : IDisposable, IAsyncDisposable
         };
         string continueWithoutSavingText = continuation switch
         {
-            ConversationContinuation.StartNewConversation => "Start New Conversation",
-            ConversationContinuation.ChangeWorkspace => "Change Workspace",
+            ConversationContinuation.StartNewConversation => "Restart Without Saving",
+            ConversationContinuation.ChangeWorkspace => "Switch Workspace",
             ConversationContinuation.StopServer => "Stop Server",
             _ => "Continue"
         };
-
-        ArchiveConversationDialogResult? decision = await DialogService.OpenAsync<ArchiveConversationDialog>(
-            "Save Current Conversation?",
-            new Dictionary<string, object?>
-            {
-                [nameof(ArchiveConversationDialog.Message)] = BuildDispositionMessage(continuation, targetLabel),
-                [nameof(ArchiveConversationDialog.TriggerLabel)] = GetTriggerLabel(continuation, targetWorkspacePath),
-                [nameof(ArchiveConversationDialog.MessageCount)] = chatMessages.Count,
-                [nameof(ArchiveConversationDialog.AttachmentCount)] = turnAttachments.Count,
-                [nameof(ArchiveConversationDialog.HasDraft)] = !string.IsNullOrWhiteSpace(chatDraft),
-                [nameof(ArchiveConversationDialog.ContinueWithoutSavingText)] = continueWithoutSavingText,
-                [nameof(ArchiveConversationDialog.SuggestedName)] = BuildSuggestedDiscussionName()
-            },
-            new DialogOptions
-            {
-                Width = "680px",
-                CloseDialogOnEsc = true,
-                CloseDialogOnOverlayClick = false,
-                Resizable = false,
-                Draggable = false
-            });
-
-        if (decision is null || decision.Decision == ArchiveConversationDecision.Cancel)
+        string saveButtonText = continuation switch
         {
+            ConversationContinuation.StartNewConversation => "Save",
+            ConversationContinuation.ChangeWorkspace => "Save",
+            ConversationContinuation.StopServer => "Save",
+            _ => "Save"
+        };
+
+        PrepareArchiveConversationPrompt(
+            continuation,
+            targetWorkspacePath,
+            currentWorkspacePath,
+            BuildDispositionMessage(continuation, targetLabel),
+            GetTriggerLabel(continuation, targetWorkspacePath),
+            continueWithoutSavingText,
+            saveButtonText,
+            BuildSuggestedDiscussionName());
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ContinueConversationActionAsync(
+        ConversationContinuation continuation,
+        string? targetWorkspacePath = null,
+        string? currentWorkspacePath = null)
+    {
+        switch (continuation)
+        {
+            case ConversationContinuation.StartNewConversation:
+                if (snapshot.IsServerStarted && !string.IsNullOrWhiteSpace(snapshot.ThreadId))
+                {
+                    await RunCommandAsync(() => ConnectionService.ResetConversationAsync(
+                        "Cleared the current chat history and reset the active Codex thread.",
+                        CancellationToken.None));
+                    if (errorMessage is not null)
+                    {
+                        return;
+                    }
+                }
+
+                ResetLocalConversationState(clearDraft: true);
+                NotificationService.Notify(new NotificationMessage
+                {
+                    Severity = NotificationSeverity.Info,
+                    Summary = "New conversation started",
+                    Detail = "The visible chat was cleared and the next turn will start fresh.",
+                    Duration = 4000
+                });
+                await InvokeAsync(StateHasChanged);
+                break;
+
+            case ConversationContinuation.ChangeWorkspace:
+                bool shouldResetConversation = !string.IsNullOrWhiteSpace(snapshot.ThreadId)
+                    || chatMessages.Count > 0
+                    || turnAttachments.Count > 0
+                    || !string.IsNullOrWhiteSpace(chatDraft);
+                if (shouldResetConversation && snapshot.IsServerStarted)
+                {
+                    string currentWorkspace = currentWorkspacePath ?? repoRoot;
+                    string nextWorkspace = targetWorkspacePath ?? repoRoot;
+                    await RunCommandAsync(() => ConnectionService.ResetConversationAsync(
+                        $"Reset the active Codex thread because the CWD changed from {currentWorkspace} to {nextWorkspace}.",
+                        CancellationToken.None));
+                    if (errorMessage is not null)
+                    {
+                        return;
+                    }
+                }
+
+                await SourceWorkspace.EnsureWorkspaceArtifactsAsync(
+                    targetWorkspacePath ?? repoRoot,
+                    rebuildIndexIfMissing: true,
+                    CancellationToken.None);
+                ResetLocalConversationState(clearDraft: true);
+                SetWorkspace(targetWorkspacePath);
+                await InvokeAsync(StateHasChanged);
+                NotificationService.Notify(new NotificationMessage
+                {
+                    Severity = NotificationSeverity.Info,
+                    Summary = "Workspace changed",
+                    Detail = shouldResetConversation
+                        ? "Changed the CWD and reset the current conversation so the next turn starts fresh."
+                        : "Changed the CWD.",
+                    Duration = 5000
+                });
+                break;
+
+            case ConversationContinuation.StopServer:
+                await RunCommandAsync(() => ConnectionService.StopServerAsync(CancellationToken.None));
+                if (errorMessage is not null)
+                {
+                    return;
+                }
+
+                ResetLocalConversationState(clearDraft: true);
+                await InvokeAsync(StateHasChanged);
+                break;
+        }
+    }
+
+    private void ResetLocalConversationState(bool clearDraft)
+    {
+        foreach (CodexTurnAttachment attachment in turnAttachments.ToArray())
+        {
+            TryDeleteRuntimeAttachment(attachment.Path);
+        }
+
+        chatMessages.Clear();
+        turnAttachments.Clear();
+        attachmentPickerKey = Guid.NewGuid().ToString("N");
+        activeAssistantMessageId = null;
+        renderedAssistantText = string.Empty;
+        assistantViewVersion++;
+        if (clearDraft)
+        {
+            chatDraft = string.Empty;
+        }
+    }
+
+    private void PrepareArchiveConversationPrompt(
+        ConversationContinuation continuation,
+        string? targetWorkspacePath,
+        string? currentWorkspacePath,
+        string message,
+        string triggerLabel,
+        string continueWithoutSavingText,
+        string saveButtonText,
+        string suggestedName)
+    {
+        pendingConversationContinuation = continuation;
+        pendingConversationTargetWorkspacePath = targetWorkspacePath;
+        pendingConversationCurrentWorkspacePath = currentWorkspacePath;
+        archiveConversationMessage = message;
+        archiveConversationTriggerLabel = triggerLabel;
+        archiveConversationContinueWithoutSavingText = continueWithoutSavingText;
+        archiveConversationSaveButtonText = saveButtonText;
+        archiveConversationSuggestedName = suggestedName;
+        showArchiveConversationPrompt = true;
+    }
+
+    private void DismissArchiveConversationPrompt()
+    {
+        showArchiveConversationPrompt = false;
+        pendingConversationTargetWorkspacePath = null;
+        pendingConversationCurrentWorkspacePath = null;
+        archiveConversationMessage = string.Empty;
+        archiveConversationTriggerLabel = string.Empty;
+        archiveConversationContinueWithoutSavingText = "Continue";
+        archiveConversationSaveButtonText = "Save";
+        archiveConversationSuggestedName = string.Empty;
+    }
+
+    private async Task CompleteArchiveConversationPrompt(ArchiveConversationDialogResult decision)
+    {
+        ConversationContinuation continuation = pendingConversationContinuation;
+        string? targetWorkspacePath = pendingConversationTargetWorkspacePath;
+        string? currentWorkspacePath = pendingConversationCurrentWorkspacePath;
+        DismissArchiveConversationPrompt();
+
+        if (decision.Decision == ArchiveConversationDecision.Cancel)
+        {
+            await InvokeAsync(StateHasChanged);
             return;
         }
 
@@ -656,6 +805,7 @@ public partial class Home : IDisposable, IAsyncDisposable
                     Detail = ex.Message,
                     Duration = 7000
                 });
+                await InvokeAsync(StateHasChanged);
                 return;
             }
 
@@ -669,94 +819,7 @@ public partial class Home : IDisposable, IAsyncDisposable
         }
 
         await ContinueConversationActionAsync(continuation, targetWorkspacePath, currentWorkspacePath);
-    }
-
-    private async Task ContinueConversationActionAsync(
-        ConversationContinuation continuation,
-        string? targetWorkspacePath = null,
-        string? currentWorkspacePath = null)
-    {
-        switch (continuation)
-        {
-            case ConversationContinuation.StartNewConversation:
-                if (snapshot.IsServerStarted && !string.IsNullOrWhiteSpace(snapshot.ThreadId))
-                {
-                    await RunCommandAsync(() => ConnectionService.ResetConversationAsync(
-                        "Cleared the current chat history and reset the active Codex thread.",
-                        CancellationToken.None));
-                    if (errorMessage is not null)
-                    {
-                        return;
-                    }
-                }
-
-                ResetLocalConversationState(clearDraft: true);
-                break;
-
-            case ConversationContinuation.ChangeWorkspace:
-                bool shouldResetConversation = !string.IsNullOrWhiteSpace(snapshot.ThreadId)
-                    || chatMessages.Count > 0
-                    || turnAttachments.Count > 0
-                    || !string.IsNullOrWhiteSpace(chatDraft);
-                if (shouldResetConversation && snapshot.IsServerStarted)
-                {
-                    string currentWorkspace = currentWorkspacePath ?? repoRoot;
-                    string nextWorkspace = targetWorkspacePath ?? repoRoot;
-                    await RunCommandAsync(() => ConnectionService.ResetConversationAsync(
-                        $"Reset the active Codex thread because the CWD changed from {currentWorkspace} to {nextWorkspace}.",
-                        CancellationToken.None));
-                    if (errorMessage is not null)
-                    {
-                        return;
-                    }
-                }
-
-                await SourceWorkspace.EnsureWorkspaceArtifactsAsync(
-                    targetWorkspacePath ?? repoRoot,
-                    rebuildIndexIfMissing: true,
-                    CancellationToken.None);
-                ResetLocalConversationState(clearDraft: true);
-                SetWorkspace(targetWorkspacePath);
-                NotificationService.Notify(new NotificationMessage
-                {
-                    Severity = NotificationSeverity.Info,
-                    Summary = "Workspace changed",
-                    Detail = shouldResetConversation
-                        ? "Changed the CWD and reset the current conversation so the next turn starts fresh."
-                        : "Changed the CWD.",
-                    Duration = 5000
-                });
-                break;
-
-            case ConversationContinuation.StopServer:
-                await RunCommandAsync(() => ConnectionService.StopServerAsync(CancellationToken.None));
-                if (errorMessage is not null)
-                {
-                    return;
-                }
-
-                ResetLocalConversationState(clearDraft: true);
-                break;
-        }
-    }
-
-    private void ResetLocalConversationState(bool clearDraft)
-    {
-        foreach (CodexTurnAttachment attachment in turnAttachments.ToArray())
-        {
-            TryDeleteRuntimeAttachment(attachment.Path);
-        }
-
-        chatMessages.Clear();
-        turnAttachments.Clear();
-        attachmentPickerKey = Guid.NewGuid().ToString("N");
-        activeAssistantMessageId = null;
-        renderedAssistantText = string.Empty;
-        assistantViewVersion++;
-        if (clearDraft)
-        {
-            chatDraft = string.Empty;
-        }
+        await InvokeAsync(StateHasChanged);
     }
 
     private bool HasUnsavedConversationState()

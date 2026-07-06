@@ -74,6 +74,12 @@ public partial class TasksTab : ComponentBase, IAsyncDisposable
         isNavigatorVisible = !isNavigatorVisible;
     }
 
+    private Task RefreshAsync()
+    {
+        Refresh();
+        return Task.CompletedTask;
+    }
+
     private async Task SelectTask(string taskId)
     {
         Load(taskId);

@@ -21,18 +21,21 @@
 
     <div class="archive-dialog-actions">
         <RadzenButton Icon="archive"
-                      Text="Save To Archived Discussions"
+                      Text="@SaveButtonText"
                       ButtonStyle="ButtonStyle.Primary"
+                      Size="ButtonSize.Small"
                       Disabled="@string.IsNullOrWhiteSpace(discussionName)"
                       Click="@SaveAndClose" />
         <RadzenButton Icon="delete_sweep"
                       Text="@ContinueWithoutSavingText"
                       ButtonStyle="ButtonStyle.Light"
-                      Click="@(() => Close(ArchiveConversationDecision.DiscardAndContinue, string.Empty))" />
+                      Size="ButtonSize.Small"
+                      Click="@DiscardAndClose" />
         <RadzenButton Icon="close"
                       Text="Cancel"
                       ButtonStyle="ButtonStyle.Secondary"
-                      Click="@(() => Close(ArchiveConversationDecision.Cancel, string.Empty))" />
+                      Size="ButtonSize.Small"
+                      Click="@CancelAndClose" />
     </div>
 </div>
 
@@ -56,7 +59,13 @@
     public string ContinueWithoutSavingText { get; set; } = "Continue Without Saving";
 
     [Parameter]
+    public string SaveButtonText { get; set; } = "Save";
+
+    [Parameter]
     public string SuggestedName { get; set; } = string.Empty;
+
+    [Parameter]
+    public EventCallback<ArchiveConversationDialogResult> Completed { get; set; }
 
     private string discussionName = string.Empty;
     private string DraftSummary => HasDraft ? "Unsent draft present" : "No unsent draft";
@@ -69,18 +78,35 @@
         }
     }
 
-    private void SaveAndClose()
+    private Task SaveAndClose()
     {
         if (string.IsNullOrWhiteSpace(discussionName))
         {
+            return Task.CompletedTask;
+        }
+
+        return CloseAsync(ArchiveConversationDecision.SaveAndContinue, discussionName);
+    }
+
+    private Task DiscardAndClose()
+    {
+        return CloseAsync(ArchiveConversationDecision.DiscardAndContinue, string.Empty);
+    }
+
+    private Task CancelAndClose()
+    {
+        return CloseAsync(ArchiveConversationDecision.Cancel, string.Empty);
+    }
+
+    private async Task CloseAsync(ArchiveConversationDecision decision, string name)
+    {
+        ArchiveConversationDialogResult result = new(decision, name.Trim());
+        if (Completed.HasDelegate)
+        {
+            await Completed.InvokeAsync(result);
             return;
         }
 
-        Close(ArchiveConversationDecision.SaveAndContinue, discussionName);
-    }
-
-    private void Close(ArchiveConversationDecision decision, string name)
-    {
-        DialogService.Close(new ArchiveConversationDialogResult(decision, name.Trim()));
+        DialogService.Close(result);
     }
 }

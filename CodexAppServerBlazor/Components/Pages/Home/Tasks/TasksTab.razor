@@ -4,19 +4,6 @@
 @inject IWorkflowTaskBoardViewService TaskBoardViewService
 
 <section class="tasks-tab">
-    <div class="tasks-header">
-        <RadzenButton Icon="dock_to_left"
-                      Text="@(isNavigatorVisible ? "Hide Task List" : "Show Task List")"
-                      ButtonStyle="ButtonStyle.Light"
-                      Size="ButtonSize.Small"
-                      Click="@ToggleNavigator" />
-        <RadzenButton Icon="refresh"
-                      Text="Refresh"
-                      ButtonStyle="ButtonStyle.Light"
-                      Size="ButtonSize.Small"
-                      Click="@Refresh" />
-    </div>
-
     @if (!string.IsNullOrWhiteSpace(errorMessage))
     {
         <div class="task-error">@errorMessage</div>
@@ -85,10 +72,13 @@
         <div class="task-workspace-shell" @ref="taskWorkspacePane">
             <TaskWorkspace Task="@model.SelectedTask"
                            StateOptions="@BoardStateOptions"
+                           IsNavigatorVisible="@isNavigatorVisible"
                            OnSaveDetails="@SaveTaskDetails"
                            OnSaveNotes="@SaveNotes"
                            OnAddFile="@AddFile"
-                           OnAddComment="@AddComment" />
+                           OnAddComment="@AddComment"
+                           OnToggleNavigator="@ToggleNavigator"
+                           OnRefresh="@RefreshAsync" />
         </div>
     </div>
 </section>

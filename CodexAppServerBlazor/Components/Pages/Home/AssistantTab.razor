@@ -72,6 +72,24 @@
                 }
             </div>
         }
+        @if (ShowArchiveConversationPrompt)
+        {
+            <div class="transcript-task-panel archive-prompt-panel">
+                <div class="archive-prompt-header">
+                    <span>Save Current Conversation?</span>
+                    <small>Choose what should happen before we continue.</small>
+                </div>
+                <ArchiveConversationDialog Message="@ArchiveConversationMessage"
+                                           TriggerLabel="@ArchiveConversationTriggerLabel"
+                                           MessageCount="@ArchiveConversationMessageCount"
+                                           AttachmentCount="@ArchiveConversationAttachmentCount"
+                                           HasDraft="@ArchiveConversationHasDraft"
+                                           ContinueWithoutSavingText="@ArchiveConversationContinueWithoutSavingText"
+                                           SaveButtonText="@ArchiveConversationSaveButtonText"
+                                           SuggestedName="@ArchiveConversationSuggestedName"
+                                           Completed="@HandleArchiveConversationPrompt" />
+            </div>
+        }
         <div class="transcript-view"
              @ref="transcriptView"
              role="log"
@@ -229,9 +247,11 @@
         </div>
         <textarea @ref="chatInput"
                   class="chat-composer-input"
-                  value="@ChatDraft"
+                  @bind:get="ChatDraft"
+                  @bind:set="OnChatDraftChanged"
+                  @bind:event="oninput"
                   placeholder="Inspect the current workspace..."
-                  @oninput="OnChatInput"></textarea>
+                  ></textarea>
         <RadzenButton Icon="send"
                       ButtonStyle="ButtonStyle.Primary"
                       Click="@SendChatDraft"
@@ -293,6 +313,36 @@
 
     [Parameter]
     public EventCallback ClearHistory { get; set; }
+
+    [Parameter]
+    public bool ShowArchiveConversationPrompt { get; set; }
+
+    [Parameter]
+    public string ArchiveConversationMessage { get; set; } = string.Empty;
+
+    [Parameter]
+    public string ArchiveConversationTriggerLabel { get; set; } = string.Empty;
+
+    [Parameter]
+    public int ArchiveConversationMessageCount { get; set; }
+
+    [Parameter]
+    public int ArchiveConversationAttachmentCount { get; set; }
+
+    [Parameter]
+    public bool ArchiveConversationHasDraft { get; set; }
+
+    [Parameter]
+    public string ArchiveConversationContinueWithoutSavingText { get; set; } = "Continue";
+
+    [Parameter]
+    public string ArchiveConversationSaveButtonText { get; set; } = "Save";
+
+    [Parameter]
+    public string ArchiveConversationSuggestedName { get; set; } = string.Empty;
+
+    [Parameter]
+    public EventCallback<ArchiveConversationDialogResult> ArchiveConversationPromptCompleted { get; set; }
 
     [Parameter]
     public EventCallback<int> DenyPermission { get; set; }
@@ -530,9 +580,9 @@
     private ElementReference chatInput;
     private IJSObjectReference? resizeModule;
 
-    private Task OnChatInput(ChangeEventArgs args)
+    private Task OnChatDraftChanged(string value)
     {
-        return ChatDraftChanged.InvokeAsync(args.Value?.ToString() ?? string.Empty);
+        return ChatDraftChanged.InvokeAsync(value);
     }
 
     private Task OnTaskTitleInput(ChangeEventArgs args)
@@ -572,9 +622,14 @@
         await resizeModule.InvokeVoidAsync("openHtmlDocument", TranscriptHtml, "Coding Services Chat History");
     }
 
-    private Task ClearTranscript()
+    private async Task ClearTranscript()
     {
-        return ClearHistory.InvokeAsync();
+        await ClearHistory.InvokeAsync();
+    }
+
+    private async Task HandleArchiveConversationPrompt(ArchiveConversationDialogResult result)
+    {
+        await ArchiveConversationPromptCompleted.InvokeAsync(result);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)

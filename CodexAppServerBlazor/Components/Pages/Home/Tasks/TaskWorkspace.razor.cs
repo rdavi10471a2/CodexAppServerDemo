@@ -28,6 +28,9 @@ public partial class TaskWorkspace : ComponentBase
     public IReadOnlyList<TaskBoardColumnViewModel> StateOptions { get; set; } = [];
 
     [Parameter]
+    public bool IsNavigatorVisible { get; set; }
+
+    [Parameter]
     public EventCallback<TaskDetailsSaveRequest> OnSaveDetails { get; set; }
 
     [Parameter]
@@ -38,6 +41,12 @@ public partial class TaskWorkspace : ComponentBase
 
     [Parameter]
     public EventCallback<string> OnAddComment { get; set; }
+
+    [Parameter]
+    public EventCallback OnToggleNavigator { get; set; }
+
+    [Parameter]
+    public EventCallback OnRefresh { get; set; }
 
     protected override void OnParametersSet()
     {
@@ -110,6 +119,16 @@ public partial class TaskWorkspace : ComponentBase
 
         await OnAddComment.InvokeAsync(newComment);
         newComment = string.Empty;
+    }
+
+    private Task ToggleNavigator()
+    {
+        return OnToggleNavigator.InvokeAsync();
+    }
+
+    private Task RefreshWorkspace()
+    {
+        return OnRefresh.InvokeAsync();
     }
 
     private void SelectPane(string pane)

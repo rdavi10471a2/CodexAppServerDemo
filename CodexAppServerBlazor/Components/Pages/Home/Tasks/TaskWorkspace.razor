@@ -21,6 +21,16 @@
                 {
                     <span class="archived-chip">Archived</span>
                 }
+                <RadzenButton Icon="dock_to_left"
+                              Text="@(IsNavigatorVisible ? "Hide List" : "Show List")"
+                              ButtonStyle="ButtonStyle.Light"
+                              Size="ButtonSize.Small"
+                              Click="@ToggleNavigator" />
+                <RadzenButton Icon="refresh"
+                              Text="Refresh"
+                              ButtonStyle="ButtonStyle.Light"
+                              Size="ButtonSize.Small"
+                              Click="@RefreshWorkspace" />
                 <RadzenButton Icon="save"
                               Text="Save Task"
                               ButtonStyle="ButtonStyle.Secondary"
@@ -60,14 +70,16 @@
             }
             else if (IsPane("Notes"))
             {
-                <section class="detail-section grow-section">
-                    <textarea class="task-notes"
-                              @bind="notesMarkdown"></textarea>
+                <section class="detail-section grow-section notes-pane-section">
+                    <div class="notes-scroll-shell">
+                        <textarea class="task-notes"
+                                  @bind="notesMarkdown"></textarea>
+                    </div>
                 </section>
             }
             else if (IsPane("Agent"))
             {
-                <section class="detail-section grow-section">
+                <section class="detail-section grow-section notes-pane-section">
                     <div class="readonly-notes">
                         @if (string.IsNullOrWhiteSpace(Task.AgentNotesMarkdown))
                         {
@@ -75,7 +87,9 @@
                         }
                         else
                         {
-                            <div class="agent-markdown">@((MarkupString)RenderMarkdown(Task.AgentNotesMarkdown))</div>
+                            <div class="notes-scroll-shell">
+                                <div class="agent-markdown">@((MarkupString)RenderMarkdown(Task.AgentNotesMarkdown))</div>
+                            </div>
                         }
                     </div>
                 </section>

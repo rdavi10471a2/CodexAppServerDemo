@@ -214,3 +214,33 @@ The safest next MCP additions are narrow tools that map to existing services:
 
 That gives the agent better structured options without turning the host app into
 one large workflow script engine.
+
+## Missing Governed Workflow Loop
+
+The current repository still does not implement the full governed MCP workflow
+target discussed for task-driven work.
+
+The intended target loop is:
+
+0. read current task scope and memory
+1. discover broadly through Roslyn/index
+2. declare edit scope
+3. receive allowed operation classes per declared file
+4. mutate only through approved semantic/structured tools
+5. compile the overlay with reduced feedback
+6. enter review for the frozen candidate snapshot
+7. record human accept/reject decisions
+8. rebuild/reindex after accepted changes
+9. update current task memory
+
+What is still missing for that target:
+
+- a real MCP workflow surface for the full loop above
+- a server-side session/boundary model for that loop
+- central policy gating by operation class rather than ad hoc per-tool logic
+- enforcement that line-based fallback tools require human approval for governed files
+- enforcement that only declared edit-scope files can be mutated
+- a clean separation between repo-wide read scope and session-scoped write scope
+
+The current state is therefore best described as partial primitives, not the
+finished governed workflow.

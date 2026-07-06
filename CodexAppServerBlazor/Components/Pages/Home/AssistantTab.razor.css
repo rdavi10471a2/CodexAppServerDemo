@@ -115,6 +115,29 @@
     font-weight: 700;
 }
 
+.archive-prompt-panel {
+    gap: 14px;
+    background: #fff8f1;
+}
+
+.archive-prompt-header {
+    display: grid;
+    gap: 4px;
+}
+
+.archive-prompt-header span {
+    color: #7c4a11;
+    font-size: .82rem;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.archive-prompt-header small {
+    color: #6a5a49;
+    font-size: .82rem;
+    font-weight: 600;
+}
+
 .current-turn-panel {
     display: flex;
     flex-direction: column;
