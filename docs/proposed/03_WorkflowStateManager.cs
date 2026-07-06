@@ -1,0 +1,241 @@
+// =============================================================================
+// WorkflowStateManager.cs
+// Part of: CodeHands_Implementation_Proposal.md
+// Location: docs/proposed/
+// Description: Manages workflow state transitions and edit session lifecycle
+// References: 01_EditSessionModels.cs, 02_FileCapabilitiesAnalyzer.cs
+// =============================================================================
+
+namespace CodexAppServerBlazor.Services.Workflow;
+
+/// <summary>
+/// Interface for managing workflow state transitions.
+/// </summary>
+public interface IWorkflowStateManager
+{
+    WorkflowSessionState GetOrCreateSession(string workspaceRoot, WorkflowTurnMode mode);
+    void StartEditSession(WorkflowSessionState session, IReadOnlyList<string> filePaths, FileCapabilitiesAnalyzer analyzer);
+    void CompleteEditSession(WorkflowSessionState session);
+    void AdvancePhase(WorkflowSessionState session, WorkflowPhase newPhase);
+    void MarkFileEdited(WorkflowSessionState session, string filePath);
+    void MarkFileMerged(WorkflowSessionState session, string filePath);
+    void RejectFile(WorkflowSessionState session, string filePath, string reason);
+    void RecordToolUsage(WorkflowSessionState session, string toolName);
+    void ResetSession(WorkflowSessionState session);
+    EditSessionSummary GetEditSessionSummary(WorkflowSessionState session);
+}
+
+/// <summary>
+/// Manages workflow state transitions and edit session lifecycle.
+/// </summary>
+public sealed class WorkflowStateManager : IWorkflowStateManager
+{
+    /// <summary>
+    /// Creates a new edit session with the given files.
+    /// </summary>
+    public void StartEditSession(WorkflowSessionState session, IReadOnlyList<string> filePaths, FileCapabilitiesAnalyzer analyzer)
+    {
+        var files = filePaths.Select(path =>
+        {
+            var caps = analyzer.GetCapabilities(path);
+            return new EditSessionFile
+            {
+                RelativePath = path,
+                FileKind = caps.Kind,
+                AllowedTools = caps.AllowedTools,
+                Warnings = caps.Warnings,
+                WorkingFilePath = GetWorkingFilePath(path)
+            };
+        }).ToList();
+
+        session.CurrentEditSession = new EditSession
+        {
+            SessionId = Guid.NewGuid().ToString(),
+            CreatedAt = DateTimeOffset.UtcNow,
+            Files = files
+        };
+
+        session.CurrentPhase = WorkflowPhase.Editing;
+        session.HasPresentedEditGuidance = false;
+    }
+
+    /// <summary>
+    /// Signals that editing is complete and moves to overlay build.
+    /// </summary>
+    public void CompleteEditSession(WorkflowSessionState session)
+    {
+        if (session.CurrentEditSession == null)
+        {
+            throw new InvalidOperationException("No active edit session.");
+        }
+
+        session.CurrentPhase = WorkflowPhase.OverlayBuild;
+    }
+
+    /// <summary>
+    /// Advances to a new workflow phase with validation.
+    /// </summary>
+    public void AdvancePhase(WorkflowSessionState session, WorkflowPhase newPhase)
+    {
+        if (!WorkflowPhaseTransitions.CanTransition(session.CurrentPhase, newPhase))
+        {
+            throw new InvalidOperationException(
+                $"Cannot transition from {session.CurrentPhase} to {newPhase}.");
+        }
+
+        session.CurrentPhase = newPhase;
+    }
+
+    /// <summary>
+    /// Marks a file as edited.
+    /// </summary>
+    public void MarkFileEdited(WorkflowSessionState session, string filePath)
+    {
+        var file = GetSessionFile(session, filePath);
+        file.IsEdited = true;
+    }
+
+    /// <summary>
+    /// Marks a file as merged and checks if all files are complete.
+    /// </summary>
+    public void MarkFileMerged(WorkflowSessionState session, string filePath)
+    {
+        var file = GetSessionFile(session, filePath);
+        file.IsMerged = true;
+        
+        CheckMergeComplete(session);
+    }
+
+    /// <summary>
+    /// Rejects a file with a reason and triggers discussion.
+    /// </summary>
+    public void RejectFile(WorkflowSessionState session, string filePath, string reason)
+    {
+        var file = GetSessionFile(session, filePath);
+        file.IsRejected = true;
+        file.RejectionReason = reason;
+        session.RejectedFiles.Add(filePath);
+        
+        CheckMergeComplete(session);
+    }
+
+    /// <summary>
+    /// Records tool usage for diagnostics.
+    /// </summary>
+    public void RecordToolUsage(WorkflowSessionState session, string toolName)
+    {
+        if (!session.ToolUsageCounts.TryGetValue(toolName, out var count))
+        {
+            count = 0;
+        }
+        session.ToolUsageCounts[toolName] = count + 1;
+    }
+
+    /// <summary>
+    /// Resets the session to idle state.
+    /// </summary>
+    public void ResetSession(WorkflowSessionState session)
+    {
+        session.CurrentEditSession = null;
+        session.CurrentPhase = WorkflowPhase.Idle;
+        session.MergeReviewState = new MergeReviewState();
+        session.RejectedFiles.Clear();
+        session.LastOverlayBuild = OverlayBuildState.None;
+        session.ToolUsageCounts.Clear();
+    }
+
+    /// <summary>
+    /// Gets a summary of the current edit session.
+    /// </summary>
+    public EditSessionSummary GetEditSessionSummary(WorkflowSessionState session)
+    {
+        var editSession = session.CurrentEditSession;
+        if (editSession == null)
+        {
+            return new EditSessionSummary(null, 0, 0, 0, 0, [], WorkflowPhase.Idle);
+        }
+
+        return new EditSessionSummary(
+            editSession.SessionId,
+            editSession.Files.Count,
+            editSession.Files.Count(f => f.IsEdited),
+            editSession.Files.Count(f => f.IsMerged),
+            editSession.Files.Count(f => f.IsRejected),
+            editSession.Files.Where(f => f.IsRejected)
+                .Select(f => new RejectedFile(f.RelativePath, f.RejectionReason ?? "")),
+            session.CurrentPhase);
+    }
+
+    private void CheckMergeComplete(WorkflowSessionState session)
+    {
+        if (session.CurrentEditSession == null) return;
+
+        var allDone = session.CurrentEditSession.Files.All(f => f.IsMerged || f.IsRejected);
+        if (allDone)
+        {
+            session.CurrentPhase = session.RejectedFiles.Count > 0 
+                ? WorkflowPhase.DiscussionPending 
+                : WorkflowPhase.MergeComplete;
+        }
+    }
+
+    private EditSessionFile GetSessionFile(WorkflowSessionState session, string filePath)
+    {
+        var file = session.CurrentEditSession?.Files
+            .FirstOrDefault(f => f.RelativePath.Equals(filePath, StringComparison.OrdinalIgnoreCase));
+        
+        if (file == null)
+        {
+            throw new InvalidOperationException($"File not in edit session: {filePath}");
+        }
+        
+        return file;
+    }
+
+    private string GetWorkingFilePath(string relativePath)
+    {
+        // TODO: Integration with WorkflowEditPaths from AICodingServices
+        // This would use: paths.GetWorkingFilePath(fullWatchedPath)
+        throw new NotImplementedException("Integration with WorkflowEditPaths required");
+    }
+}
+
+/// <summary>
+/// Summary of current edit session state.
+/// </summary>
+public sealed record EditSessionSummary(
+    string? SessionId,
+    int TotalFiles,
+    int EditedFiles,
+    int MergedFiles,
+    int RejectedFiles,
+    IReadOnlyList<RejectedFile> Rejections,
+    WorkflowPhase CurrentPhase);
+
+/// <summary>
+/// Represents a rejected file with reason.
+/// </summary>
+public sealed record RejectedFile(string RelativePath, string Reason);
+
+/// <summary>
+/// Validates workflow phase transitions.
+/// </summary>
+public static class WorkflowPhaseTransitions
+{
+    public static bool CanTransition(WorkflowPhase from, WorkflowPhase to) => (from, to) switch
+    {
+        (WorkflowPhase.Idle, WorkflowPhase.Discovery) => true,
+        (WorkflowPhase.Discovery, WorkflowPhase.Editing) => true,
+        (WorkflowPhase.Editing, WorkflowPhase.OverlayBuild) => true,
+        (WorkflowPhase.OverlayBuild, WorkflowPhase.Editing) => true,          // Build failed
+        (WorkflowPhase.OverlayBuild, WorkflowPhase.MergePending) => true,     // Build succeeded
+        (WorkflowPhase.MergePending, WorkflowPhase.MergeComplete) => true,    // All accepted
+        (WorkflowPhase.MergePending, WorkflowPhase.DiscussionPending) => true, // Has rejections
+        (WorkflowPhase.DiscussionPending, WorkflowPhase.Editing) => true,     // Re-discuss
+        (WorkflowPhase.DiscussionPending, WorkflowPhase.Discovery) => true,   // New proposal
+        (WorkflowPhase.MergeComplete, WorkflowPhase.Rebooting) => true,
+        (WorkflowPhase.Rebooting, WorkflowPhase.Idle) => true,
+        (WorkflowPhase.MergeComplete, WorkflowPhase.SelfEditWarning) => true,
+        _ => false
+    };
+}

@@ -1,0 +1,132 @@
+// =============================================================================
+// WorkflowTurnContextComposer.cs - MODIFICATIONS
+// Part of: CodeHands_Implementation_Proposal.md
+// Location: docs/proposed/
+// Target: CodexAppServerBlazor/Services/Workflow/WorkflowTurnContextComposer.cs
+// Description: Add edit session guidance to composed prompts
+// References: 04_EditSessionGuidanceComposer.cs
+// =============================================================================
+
+// CHANGES:
+// 1. Add EditSessionGuidanceComposer field to class
+// 2. Add guidance to Compose method
+
+namespace CodexAppServerBlazor.Services.Workflow;
+
+public sealed class WorkflowTurnContextComposer : IWorkflowTurnContextComposer
+{
+    // ADD this field:
+    private readonly EditSessionGuidanceComposer _guidanceComposer = new();
+
+    // ... existing code ...
+
+    public WorkflowTurnEnvelope Compose(
+        string userPrompt,
+        string workspaceRoot,
+        WorkflowTurnMode mode,
+        WorkflowSessionState sessionState,
+        SessionBootstrapPolicy sessionBootstrapPolicy,
+        WorkflowPromptSection workspaceContext,
+        WorkflowTurnTaskContext taskContext)
+    {
+        // ... existing validation code ...
+
+        StringBuilder prompt = new();
+        
+        // === EXISTING CODE (preserve) ===
+        // Session bootstrap (existing)
+        if (includeSessionBootstrap)
+        {
+            prompt.AppendLine("Coding Services session bootstrap policy:");
+            prompt.AppendLine(sessionBootstrapPolicy.PromptText);
+            prompt.AppendLine();
+        }
+
+        // Task context (existing)
+        if (mode == WorkflowTurnMode.Work)
+        {
+            prompt.AppendLine(taskContext.PromptMarkdown);
+            prompt.AppendLine();
+        }
+
+        // Workspace context (existing)
+        if (includeWorkspaceContext)
+        {
+            prompt.AppendLine(workspaceContext.PromptMarkdown);
+            prompt.AppendLine();
+        }
+
+        // === NEW CODE (add after existing context sections) ===
+        
+        // Add MCP-first workflow manifest to session bootstrap
+        if (includeSessionBootstrap)
+        {
+            prompt.AppendLine(_guidanceComposer.ComposeSessionBootstrapCapabilityManifest());
+        }
+        
+        // Add edit session guidance (once per session)
+        if (sessionState.CurrentEditSession != null && !sessionState.HasPresentedEditGuidance)
+        {
+            prompt.AppendLine(_guidanceComposer.ComposeEditSessionGuidance(sessionState.CurrentEditSession));
+            prompt.AppendLine();
+            sessionState.HasPresentedEditGuidance = true;
+        }
+        
+        // Add phase-specific guidance
+        if (sessionState.CurrentPhase != WorkflowPhase.Idle)
+        {
+            prompt.AppendLine(_guidanceComposer.ComposePhaseGuidance(
+                sessionState.CurrentPhase, 
+                sessionState.CurrentEditSession));
+            prompt.AppendLine();
+        }
+
+        // === EXISTING CODE (preserve) ===
+        prompt.AppendLine("Codex cwd:");
+        prompt.AppendLine(workspaceRoot);
+        prompt.AppendLine();
+        prompt.AppendLine("Workflow mode:");
+        prompt.AppendLine("- " + mode);
+        prompt.AppendLine();
+        
+        // User request (existing)
+        prompt.AppendLine("User request:");
+        prompt.AppendLine(userPrompt);
+
+        return new WorkflowTurnEnvelope(
+            prompt.ToString(),
+            mode,
+            includeSessionBootstrap,
+            includeWorkspaceContext,
+            sessionBootstrapPolicy,
+            workspaceContext,
+            taskContext);
+    }
+}
+
+// ADD to ComposePhaseGuidance method (or add new private method):
+/*
+private string ComposePhaseGuidance(WorkflowSessionState session)
+{
+    return session.CurrentPhase switch
+    {
+        WorkflowPhase.Discovery => 
+            "Phase: DISCOVERY - Analyze the workspace and propose which files need editing.",
+        WorkflowPhase.Editing => 
+            $"Phase: EDITING - Make edits using MCP tools. {session.CurrentEditSession?.Files.Count ?? 0} files in session.",
+        WorkflowPhase.OverlayBuild => 
+            "Phase: OVERLAY BUILD - Building to verify edits. Do not make further changes.",
+        WorkflowPhase.MergePending => 
+            $"Phase: MERGE PENDING - Awaiting human review. {session.MergeReviewState.MergedCount}/{session.MergeReviewState.TotalCount} files merged.",
+        WorkflowPhase.DiscussionPending => 
+            $"Phase: DISCUSSION NEEDED - {session.RejectedFiles.Count} file(s) rejected. Discuss with user.",
+        WorkflowPhase.MergeComplete => 
+            "Phase: MERGE COMPLETE - All files accepted. Ready for rebuild.",
+        WorkflowPhase.Rebooting => 
+            "Phase: REBOOTING - Stopping and restarting application.",
+        WorkflowPhase.SelfEditWarning => 
+            "Phase: SELF-EDIT WARNING - Self-editing detected. Restart from VS.",
+        _ => string.Empty
+    };
+}
+*/
