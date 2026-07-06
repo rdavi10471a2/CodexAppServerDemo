@@ -62,7 +62,7 @@ CodexConnectionService
 
 | Folder | Purpose |
 |--------|---------|
-| `docs/reference_mcp_server/` | Complete MCP server implementation to integrate |
+| `reference_mcp_server/` | Complete MCP server implementation to integrate |
 
 ### New Source Files
 
@@ -205,7 +205,7 @@ The following services exist in `AICodingServices/Workflow/` but are NOT exposed
 The complete MCP server implementation that this proposal builds upon is located at:
 
 ```
-docs/reference_mcp_server/*.cs.bak
+reference_mcp_server/*.cs.bak
 ```
 
 Key capabilities in the reference implementation:
