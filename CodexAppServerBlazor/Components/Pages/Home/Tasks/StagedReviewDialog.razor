@@ -154,6 +154,8 @@
     </div>
 </div>
 
+@implements IAsyncDisposable
+
 @code {
     private IReadOnlyList<StagedReviewQueueItem> pendingItems = [];
     private StagedReviewPageModel? selectedModel;
@@ -161,6 +163,8 @@
     private string? selectedRecordId;
     private string? errorMessage;
     private bool actionBusy;
+    private CancellationTokenSource? sessionMonitorCts;
+    private Task? sessionMonitorTask;
 
     private int LineCount => Math.Max(diffModel?.NewText.Lines.Count ?? 0, diffModel?.OldText.Lines.Count ?? 0);
     private bool UseSessionFlow => !string.IsNullOrWhiteSpace(SessionId);
@@ -189,6 +193,7 @@
     protected override void OnParametersSet()
     {
         LoadReview(preserveSelection: false);
+        EnsureSessionMonitor();
     }
 
     private Task RefreshReview()
@@ -314,6 +319,64 @@
         return Task.CompletedTask;
     }
 
+    private void EnsureSessionMonitor()
+    {
+        if (!UseSessionFlow)
+        {
+            StopSessionMonitor();
+            return;
+        }
+
+        if (sessionMonitorTask is not null)
+        {
+            return;
+        }
+
+        sessionMonitorCts = new CancellationTokenSource();
+        sessionMonitorTask = MonitorSessionAsync(sessionMonitorCts.Token);
+    }
+
+    private void StopSessionMonitor()
+    {
+        CancellationTokenSource? cts = sessionMonitorCts;
+        sessionMonitorCts = null;
+        sessionMonitorTask = null;
+        cts?.Cancel();
+        cts?.Dispose();
+    }
+
+    private async Task MonitorSessionAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using PeriodicTimer timer = new(TimeSpan.FromSeconds(1));
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                await InvokeAsync(async () =>
+                {
+                    LoadReview(preserveSelection: true);
+                    await StateHasChangedAsync();
+
+                    if (UseSessionFlow
+                        && AutoCloseWhenComplete
+                        && (selectedModel?.IsSessionComplete ?? false))
+                    {
+                        await ForceCloseDialogAsync();
+                    }
+                });
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private Task StateHasChangedAsync()
+    {
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
     private void LoadReview(bool preserveSelection)
     {
         try
@@ -417,5 +480,11 @@
             ChangeType.Imaginary => "imaginary",
             _ => "unchanged"
         };
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        StopSessionMonitor();
+        return ValueTask.CompletedTask;
     }
 }
