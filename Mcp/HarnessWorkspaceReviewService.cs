@@ -7,26 +7,22 @@ namespace CodexAppServerBlazor.Mcp;
 
 /// <summary>
 /// Staged review operations exposed through the local MCP boundary for the currently selected workspace.
+/// The governed accept/reject gate is driven by MCP elicitation (see <see cref="IReviewElicitor"/>): staging
+/// a candidate blocks until the operator answers the elicitation, and the answer maps directly to
+/// accept/reject. This replaces the earlier out-of-band GovernedReviewCoordinator HTTP-hold, which could not
+/// reliably suspend the agent turn.
 /// </summary>
 public sealed class HarnessWorkspaceReviewService
 {
-    private static readonly TimeSpan DefaultGovernedReviewTimeout = TimeSpan.FromMinutes(30);
-
     private readonly WorkspaceState workspaceState;
     private readonly CodingServicesSettingsProvider settingsProvider;
-    private readonly GovernedReviewCoordinatorService governedReviewCoordinator;
-    private readonly TimeSpan governedReviewTimeout;
 
     public HarnessWorkspaceReviewService(
         WorkspaceState workspaceState,
-        CodingServicesSettingsProvider settingsProvider,
-        GovernedReviewCoordinatorService governedReviewCoordinator,
-        TimeSpan? governedReviewTimeout = null)
+        CodingServicesSettingsProvider settingsProvider)
     {
         this.workspaceState = workspaceState;
         this.settingsProvider = settingsProvider;
-        this.governedReviewCoordinator = governedReviewCoordinator;
-        this.governedReviewTimeout = governedReviewTimeout ?? DefaultGovernedReviewTimeout;
     }
 
     public IReadOnlyList<StagedReviewQueueItem> ListPending()
@@ -46,22 +42,26 @@ public sealed class HarnessWorkspaceReviewService
 
     public StagedReviewPageActionResult Accept(string stagedRecordId, bool forceApproveValidation = false)
     {
-        ThrowIfGovernedReviewIsOwnedByHost(stagedRecordId);
         return CreateReviewService().Accept(GetWorkspaceRoot(), stagedRecordId, forceApproveValidation);
     }
 
     public StagedReviewPageActionResult Reject(string stagedRecordId)
     {
-        ThrowIfGovernedReviewIsOwnedByHost(stagedRecordId);
         return CreateReviewService().Reject(GetWorkspaceRoot(), stagedRecordId);
     }
 
     public async Task<StageForReviewResult> StageCurrentCandidateForReviewAsync(
+        IReviewElicitor elicitor,
         string watchedFilePath,
         string? sessionId = null,
         string? ledgerSummary = null,
         CancellationToken cancellationToken = default)
     {
+        if (elicitor is null)
+        {
+            throw new ArgumentNullException(nameof(elicitor));
+        }
+
         string workspaceRoot = GetWorkspaceRoot();
         CodingServicesSettings settings = settingsProvider.GetSettings(workspaceRoot);
         WorkflowEditService workflowService = new(settings);
@@ -89,38 +89,43 @@ public sealed class HarnessWorkspaceReviewService
         string reviewUrl = BuildReviewUrl(workspaceRoot, record);
         string sessionLabel = string.IsNullOrWhiteSpace(record.SessionId) ? "single-file review" : $"edit session '{record.SessionId}'";
         string launchMessage = validation.IsError
-            ? $"Governed review queued in the host UI for {sessionLabel}, but pre-merge validation reported issues. ReviewUrl (diagnostic only): {reviewUrl}"
-            : $"Governed review queued in the host UI for {sessionLabel}. ReviewUrl (diagnostic only): {reviewUrl}";
+            ? $"Governed review elicitation raised for {sessionLabel}, but pre-merge validation reported issues. ReviewUrl (diagnostic only): {reviewUrl}"
+            : $"Governed review elicitation raised for {sessionLabel}. ReviewUrl (diagnostic only): {reviewUrl}";
         record = workflowService.RecordDiffLaunch(record.StagedRecordId, launched: true, launchMessage);
 
         int pendingCount = reviewService.ListPending(workspaceRoot)
             .Count(item => item.SessionId.Equals(record.SessionId, StringComparison.Ordinal));
-        using CancellationTokenSource timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(governedReviewTimeout);
 
-        GovernedReviewResolution resolution;
-        try
+        ReviewDecision decision = await elicitor.RequestDecisionAsync(
+            new ReviewElicitationRequest(
+                record.RelativePath,
+                sessionLabel,
+                pendingCount,
+                validation.IsError,
+                validation.Status,
+                validation.DiagnosticCount,
+                reviewUrl),
+            cancellationToken);
+
+        string completionMessage;
+        switch (decision)
         {
-            resolution = await governedReviewCoordinator.QueueAndWaitAsync(
-                new GovernedReviewRequest(
-                    record.SessionId,
-                    record.RelativePath,
-                    pendingCount,
-                    record.PreMergeValidationIsError,
-                    record.PreMergeValidationForceApproved),
-                timeoutCts.Token);
+            case ReviewDecision.Accepted:
+                // The operator saw the validation status in the elicitation message; accepting a validation-
+                // failed record is an explicit override, so force-approve in that case.
+                CreateReviewService().Accept(workspaceRoot, record.StagedRecordId, forceApproveValidation: validation.IsError);
+                completionMessage = $"Governed review accepted via elicitation for {sessionLabel}.";
+                break;
+            case ReviewDecision.Rejected:
+                CreateReviewService().Reject(workspaceRoot, record.StagedRecordId);
+                completionMessage = $"Governed review rejected via elicitation for {sessionLabel}. Watched source unchanged.";
+                break;
+            default:
+                throw new OperationCanceledException(
+                    $"Governed review cancelled for {sessionLabel}. Staged record '{record.StagedRecordId}' left pending; watched source unchanged.");
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            throw new TimeoutException(
-                $"Governed review for edit session '{record.SessionId}' timed out after {governedReviewTimeout.TotalMinutes:0} minutes without a host decision.");
-        }
+
         StagedEditRecord refreshedRecord = workflowService.GetStagedRecord(record.StagedRecordId);
-
-        string completionMessage = string.IsNullOrWhiteSpace(resolution.Message)
-            ? launchMessage
-            : resolution.Message;
-
         return new StageForReviewResult(
             workflowService.CreateSummary(refreshedRecord),
             validation,
@@ -131,20 +136,6 @@ public sealed class HarnessWorkspaceReviewService
     private IStagedReviewPageService CreateReviewService()
     {
         return new StagedReviewPageService(settingsProvider);
-    }
-
-    private void ThrowIfGovernedReviewIsOwnedByHost(string stagedRecordId)
-    {
-        string workspaceRoot = GetWorkspaceRoot();
-        CodingServicesSettings settings = settingsProvider.GetSettings(workspaceRoot);
-        WorkflowEditService workflowService = new(settings);
-        StagedEditRecord record = workflowService.GetStagedRecord(stagedRecordId);
-
-        if (!string.IsNullOrWhiteSpace(record.SessionId) && governedReviewCoordinator.IsSessionPending(record.SessionId))
-        {
-            throw new InvalidOperationException(
-                $"Staged record '{stagedRecordId}' belongs to active governed review session '{record.SessionId}'. Use the host review dialog buttons to accept or reject it instead of calling MCP accept/reject directly.");
-        }
     }
 
     private string GetWorkspaceRoot()

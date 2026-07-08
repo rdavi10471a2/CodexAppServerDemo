@@ -26,6 +26,7 @@
     <Compile Include="..\Mcp\HarnessWorkspaceContextService.cs" Link="Shared\Mcp\HarnessWorkspaceContextService.cs" />
     <Compile Include="..\Mcp\HarnessWorkspaceEditService.cs" Link="Shared\Mcp\HarnessWorkspaceEditService.cs" />
     <Compile Include="..\Mcp\HarnessWorkspaceReviewService.cs" Link="Shared\Mcp\HarnessWorkspaceReviewService.cs" />
+    <Compile Include="..\Mcp\ReviewElicitation.cs" Link="Shared\Mcp\ReviewElicitation.cs" />
     <Compile Include="..\Mcp\McpHostFactory.cs" Link="Shared\Mcp\McpHostFactory.cs" />
     <Compile Include="..\Mcp\WorkspaceEditMcpTools.cs" Link="Shared\Mcp\WorkspaceEditMcpTools.cs" />
     <Compile Include="..\Mcp\WorkspaceReviewMcpTools.cs" Link="Shared\Mcp\WorkspaceReviewMcpTools.cs" />

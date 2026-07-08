@@ -39,14 +39,20 @@ public sealed class WorkspaceReviewMcpTools
     }
 
     [McpServerTool]
-    [Description("Stages the current governed Working candidate for a workspace file into review, records pre-merge validation, and queues the host's modal review flow. The returned review URL is diagnostic only and should not replace the in-app governed review boundary.")]
+    [Description("Stages the current governed Working candidate for a workspace file into review, records pre-merge validation, and raises a governed accept/reject elicitation to the operator. This call BLOCKS until the operator answers: accept applies the change to watched source, decline rejects it, cancel leaves it pending. The returned review URL is diagnostic only.")]
     public Task<StageForReviewResult> StageCurrentCandidateForReview(
+        McpServer server,
         string watchedFilePath,
         string? sessionId = null,
         string? ledgerSummary = null,
         CancellationToken cancellationToken = default)
     {
-        return workspaceReviewService.StageCurrentCandidateForReviewAsync(watchedFilePath, sessionId, ledgerSummary, cancellationToken);
+        return workspaceReviewService.StageCurrentCandidateForReviewAsync(
+            new McpServerReviewElicitor(server),
+            watchedFilePath,
+            sessionId,
+            ledgerSummary,
+            cancellationToken);
     }
 
     [McpServerTool]

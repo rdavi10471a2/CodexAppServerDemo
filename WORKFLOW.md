@@ -138,6 +138,35 @@ When running multiple instances, always pin `CodingServices:WatchedSolutionPath`
   Holds only small per-thread/per-session facts such as workspace root, thread
   bootstrap state, and selected mode baseline.
 
+## Governed Review Gate (Elicitation)
+
+The staged-review accept/reject gate is driven by MCP elicitation, not by an
+out-of-band UI hold.
+
+- `StageCurrentCandidateForReview` (MCP tool) stages the candidate, runs pre-merge
+  validation, then raises an MCP elicitation and BLOCKS the tool call until the
+  operator answers.
+- The elicitation travels the app-server (stdio) `mcpServer/elicitation/request`
+  server-request channel -- the same channel security/sandbox approvals use -- so
+  the agent turn genuinely suspends until the operator answers, and it pops the
+  same yes/no surface as security prompts.
+- Answer mapping: accept -> apply the staged change to watched source;
+  decline -> reject and leave source unchanged; cancel -> leave pending and cancel
+  the call.
+- Requires the granular approval policy to have `mcp_elicitations = true` (see
+  `CodexAppServerClient.CreateApprovalPolicy`). With it false, no elicitation is
+  forwarded and only sandbox/security prompts surface.
+- The elicitor is abstracted behind `IReviewElicitor` (`Mcp/ReviewElicitation.cs`);
+  the real implementation wraps `McpServer.ElicitAsync`. Decision-mapping logic
+  lives in `HarnessWorkspaceReviewService` so it is unit-testable with a stub.
+- `GovernedReviewCoordinatorService` (the older HTTP-hold) is DORMANT -- kept only
+  so existing `Home.razor.cs` dialog scaffolding compiles. Do not route new gates
+  through it.
+
+UNVERIFIED until a live run with tokens: whether Codex's HTTP MCP client advertises
+the elicitation capability to the harness. Validate with a trivial form elicitation
+before relying on the review gate.
+
 ## Architecture Guardrails
 
 - Do not let `CodexConnectionService` become the workflow-management god object.

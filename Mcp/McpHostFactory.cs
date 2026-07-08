@@ -11,7 +11,6 @@ public static class McpHostFactory
     public static IHost Create(
         WorkspaceState workspaceState,
         SourceWorkspaceService sourceWorkspaceService,
-        GovernedReviewCoordinatorService governedReviewCoordinator,
         string? localMcpUrl)
     {
         string endpointUrl = NormalizeLocalUrl(localMcpUrl, DefaultLocalMcpUrl);
@@ -20,7 +19,6 @@ public static class McpHostFactory
         builder.WebHost.UseUrls(endpointUrl);
         builder.Services.AddSingleton(workspaceState);
         builder.Services.AddSingleton(sourceWorkspaceService);
-        builder.Services.AddSingleton(governedReviewCoordinator);
         builder.Services.AddSingleton<HarnessWorkspaceContextService>();
         builder.Services.AddSingleton<CodingServicesSettingsProvider>();
         builder.Services.AddSingleton<HarnessWorkspaceEditService>();

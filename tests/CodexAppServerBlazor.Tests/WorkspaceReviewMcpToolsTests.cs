@@ -10,6 +10,7 @@ namespace CodexAppServerBlazor.Tests;
 public sealed class WorkspaceReviewMcpToolsTests
 {
     private const string BuildableProjectText = "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>";
+    private const string RazorRelativePath = "Components/Layout/MainLayout.razor";
 
     [Fact]
     public void ListPendingStagedReviews_returns_workspace_pending_queue()
@@ -114,80 +115,138 @@ public sealed class WorkspaceReviewMcpToolsTests
     }
 
     [Fact]
-    public void StageCurrentCandidateForReview_returns_review_url_and_pending_record_for_non_csharp_files()
+    public async Task StageCurrentCandidateForReview_raises_elicitation_with_review_context()
     {
+        // The accept path applies through StagedReviewPageService.Accept (a real overlay build), which is
+        // covered by the AcceptStagedReview tool tests. Here we verify the gate raises the elicitation with
+        // the correct review context and honors a decline without touching source.
         using TemporaryRepository repository = TemporaryRepository.Create();
-        string projectPath = CreateProject(repository.RootPath);
-        string sourcePath = CreateWatchedFile(
-            repository.RootPath,
-            Path.Combine("Components", "Layout", "MainLayout.razor"),
-            "<h1>Schema Studio Web</h1>");
+        CreateProject(repository.RootPath);
+        string sourcePath = CreateWatchedFile(repository.RootPath, RazorRelativePath, "<h1>Schema Studio Web</h1>");
 
-        WorkflowEditService workflowService = CreateWorkflowService(repository.RootPath, projectPath);
+        WorkflowEditService workflowService = CreateWorkflowService(repository.RootPath, Path.Combine(repository.RootPath, "Example.csproj"));
         EditSessionStatus status = workflowService.Refresh(sourcePath);
         File.WriteAllText(status.WorkingFilePath, "<h1>Schema Studio Web <span style=\"color: red;\">--Coding Services =3</span></h1>");
 
-        GovernedReviewCoordinatorService coordinator = new();
-        WorkspaceReviewMcpTools tools = CreateTools(repository.RootPath, coordinator);
-        Task<StageForReviewResult> stageTask = Task.Run(() => tools.StageCurrentCandidateForReview(sourcePath));
-        GovernedReviewPendingRequest pendingRequest = WaitForPendingRequest(coordinator);
-        coordinator.Complete(
-            pendingRequest.Request.SessionId,
-            new GovernedReviewResolution(
-                pendingRequest.Request.SessionId,
-                Completed: true,
-                AcceptedWithOverride: false,
-                RemainingPendingCount: 0,
-                Message: "Governed review completed in host UI."));
+        HarnessWorkspaceReviewService service = CreateReviewService(repository.RootPath);
+        StubReviewElicitor elicitor = new(ReviewDecision.Rejected);
 
-        StageForReviewResult result = stageTask.GetAwaiter().GetResult();
+        StageForReviewResult result = await service.StageCurrentCandidateForReviewAsync(elicitor, sourcePath);
 
-        Assert.False(string.IsNullOrWhiteSpace(result.StagedRecord.StagedRecordId));
-        Assert.Equal(status.EditSessionId, result.StagedRecord.SessionId);
-        Assert.Contains($"/review/session/{status.EditSessionId}", result.ReviewUrl, StringComparison.Ordinal);
-        Assert.Contains("workspace=", result.ReviewUrl, StringComparison.Ordinal);
-        Assert.Contains("Governed review completed in host UI", result.Message, StringComparison.Ordinal);
-        Assert.Equal("launched", result.StagedRecord.LaunchStatus);
-        Assert.False(result.Validation.IsError);
-
-        IReadOnlyList<StagedReviewQueueItem> pending = tools.ListPendingStagedReviews().GetAwaiter().GetResult();
-        StagedReviewQueueItem item = Assert.Single(pending);
-        Assert.Equal(result.StagedRecord.StagedRecordId, item.StagedRecordId);
-        Assert.Equal(Path.Combine("Components", "Layout", "MainLayout.razor"), item.RelativePath);
+        Assert.Equal(1, elicitor.CallCount);
+        Assert.NotNull(elicitor.LastRequest);
+        Assert.Contains("MainLayout.razor", elicitor.LastRequest!.RelativePath, StringComparison.Ordinal);
+        Assert.Contains($"/review/session/{status.EditSessionId}", elicitor.LastRequest.ReviewUrl, StringComparison.Ordinal);
+        Assert.False(elicitor.LastRequest.ValidationIsError);
+        Assert.Contains("rejected", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("<h1>Schema Studio Web</h1>", File.ReadAllText(sourcePath));
     }
 
     [Fact]
-    public void StageCurrentCandidateForReview_uses_current_edit_session_when_tool_call_omits_session_id()
+    public async Task StageCurrentCandidateForReview_reject_decision_leaves_source_unchanged()
     {
         using TemporaryRepository repository = TemporaryRepository.Create();
-        string projectPath = CreateProject(repository.RootPath);
-        string sourcePath = CreateWatchedFile(
-            repository.RootPath,
-            Path.Combine("Components", "Layout", "MainLayout.razor"),
-            "<h1>Schema Studio Web</h1>");
+        CreateProject(repository.RootPath);
+        string sourcePath = CreateWatchedFile(repository.RootPath, RazorRelativePath, "<h1>Schema Studio Web</h1>");
 
-        WorkflowEditService workflowService = CreateWorkflowService(repository.RootPath, projectPath);
+        WorkflowEditService workflowService = CreateWorkflowService(repository.RootPath, Path.Combine(repository.RootPath, "Example.csproj"));
         EditSessionStatus status = workflowService.Refresh(sourcePath);
         File.WriteAllText(status.WorkingFilePath, "<h1>Schema Studio Web <span style=\"color: red;\">--Coding Services =5</span></h1>");
 
-        GovernedReviewCoordinatorService coordinator = new();
-        WorkspaceReviewMcpTools tools = CreateTools(repository.RootPath, coordinator);
-        Task<StageForReviewResult> stageTask = Task.Run(() => tools.StageCurrentCandidateForReview(sourcePath));
-        GovernedReviewPendingRequest pendingRequest = WaitForPendingRequest(coordinator);
-        coordinator.Complete(
-            pendingRequest.Request.SessionId,
-            new GovernedReviewResolution(
-                pendingRequest.Request.SessionId,
-                Completed: true,
-                AcceptedWithOverride: false,
-                RemainingPendingCount: 0,
-                Message: "Governed review completed in host UI."));
+        HarnessWorkspaceReviewService service = CreateReviewService(repository.RootPath);
+        StubReviewElicitor elicitor = new(ReviewDecision.Rejected);
 
-        StageForReviewResult result = stageTask.GetAwaiter().GetResult();
+        StageForReviewResult result = await service.StageCurrentCandidateForReviewAsync(elicitor, sourcePath);
+
+        Assert.Equal(1, elicitor.CallCount);
+        Assert.Contains("rejected", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("<h1>Schema Studio Web</h1>", File.ReadAllText(sourcePath));
+    }
+
+    [Fact]
+    public async Task StageCurrentCandidateForReview_uses_current_edit_session_when_tool_call_omits_session_id()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        CreateProject(repository.RootPath);
+        string sourcePath = CreateWatchedFile(repository.RootPath, RazorRelativePath, "<h1>Schema Studio Web</h1>");
+
+        WorkflowEditService workflowService = CreateWorkflowService(repository.RootPath, Path.Combine(repository.RootPath, "Example.csproj"));
+        EditSessionStatus status = workflowService.Refresh(sourcePath);
+        File.WriteAllText(status.WorkingFilePath, "<h1>Schema Studio Web <span style=\"color: red;\">--Coding Services =6</span></h1>");
+
+        HarnessWorkspaceReviewService service = CreateReviewService(repository.RootPath);
+        StubReviewElicitor elicitor = new(ReviewDecision.Rejected);
+
+        StageForReviewResult result = await service.StageCurrentCandidateForReviewAsync(elicitor, sourcePath);
 
         Assert.Equal(status.EditSessionId, result.StagedRecord.SessionId);
         Assert.Contains($"/review/session/{status.EditSessionId}", result.ReviewUrl, StringComparison.Ordinal);
-        Assert.Contains("Governed review completed in host UI", result.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StageCurrentCandidateForReview_cancel_decision_throws_and_leaves_source_unchanged()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        CreateProject(repository.RootPath);
+        string sourcePath = CreateWatchedFile(repository.RootPath, RazorRelativePath, "<h1>Schema Studio Web</h1>");
+
+        WorkflowEditService workflowService = CreateWorkflowService(repository.RootPath, Path.Combine(repository.RootPath, "Example.csproj"));
+        EditSessionStatus status = workflowService.Refresh(sourcePath);
+        File.WriteAllText(status.WorkingFilePath, "<h1>Schema Studio Web <span style=\"color: red;\">--Coding Services =7</span></h1>");
+
+        HarnessWorkspaceReviewService service = CreateReviewService(repository.RootPath);
+        StubReviewElicitor elicitor = new(ReviewDecision.Cancelled);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            service.StageCurrentCandidateForReviewAsync(elicitor, sourcePath));
+
+        Assert.Equal("<h1>Schema Studio Web</h1>", File.ReadAllText(sourcePath));
+    }
+
+    [Fact]
+    public async Task StageCurrentCandidateForReview_blocks_until_elicitation_is_answered()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        CreateProject(repository.RootPath);
+        string sourcePath = CreateWatchedFile(repository.RootPath, RazorRelativePath, "<h1>Schema Studio Web</h1>");
+
+        WorkflowEditService workflowService = CreateWorkflowService(repository.RootPath, Path.Combine(repository.RootPath, "Example.csproj"));
+        EditSessionStatus status = workflowService.Refresh(sourcePath);
+        File.WriteAllText(status.WorkingFilePath, "<h1>Schema Studio Web <span style=\"color: red;\">--Coding Services =8</span></h1>");
+
+        HarnessWorkspaceReviewService service = CreateReviewService(repository.RootPath);
+        GatedReviewElicitor elicitor = new();
+
+        Task<StageForReviewResult> stageTask = service.StageCurrentCandidateForReviewAsync(elicitor, sourcePath);
+        await elicitor.Raised;
+        await Task.Delay(150);
+        Assert.False(stageTask.IsCompleted, "Stage must block while the elicitation is unanswered.");
+
+        elicitor.Complete(ReviewDecision.Rejected);
+        StageForReviewResult result = await stageTask;
+        Assert.Contains("rejected", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task StageCurrentCandidateForReview_honors_cancellation_token()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        CreateProject(repository.RootPath);
+        string sourcePath = CreateWatchedFile(repository.RootPath, RazorRelativePath, "<h1>Schema Studio Web</h1>");
+
+        WorkflowEditService workflowService = CreateWorkflowService(repository.RootPath, Path.Combine(repository.RootPath, "Example.csproj"));
+        EditSessionStatus status = workflowService.Refresh(sourcePath);
+        File.WriteAllText(status.WorkingFilePath, "<h1>Schema Studio Web <span style=\"color: red;\">--Coding Services =9</span></h1>");
+
+        HarnessWorkspaceReviewService service = CreateReviewService(repository.RootPath);
+        GatedReviewElicitor elicitor = new();
+        using CancellationTokenSource cts = new();
+
+        Task<StageForReviewResult> stageTask = service.StageCurrentCandidateForReviewAsync(elicitor, sourcePath, cancellationToken: cts.Token);
+        await elicitor.Raised;
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => stageTask);
     }
 
     [Fact]
@@ -211,98 +270,50 @@ public sealed class WorkspaceReviewMcpToolsTests
         Assert.True(result.Model.PreMergeValidationForceApproved);
     }
 
-    [Fact]
-    public void AcceptStagedReview_throws_when_host_owned_review_session_is_pending()
+    private sealed class StubReviewElicitor : IReviewElicitor
     {
-        using TemporaryRepository repository = TemporaryRepository.Create();
-        string projectPath = CreateProject(repository.RootPath);
-        string sourcePath = CreateWatchedFile(
-            repository.RootPath,
-            Path.Combine("Components", "Layout", "MainLayout.razor"),
-            "<h1>Schema Studio Web</h1>");
+        private readonly ReviewDecision decision;
 
-        WorkflowEditService workflowService = CreateWorkflowService(repository.RootPath, projectPath);
-        EditSessionStatus status = workflowService.Refresh(sourcePath);
-        File.WriteAllText(status.WorkingFilePath, "<h1>Schema Studio Web <span style=\"color: red;\">--Coding Services =35</span></h1>");
+        public StubReviewElicitor(ReviewDecision decision)
+        {
+            this.decision = decision;
+        }
 
-        GovernedReviewCoordinatorService coordinator = new();
-        WorkspaceReviewMcpTools tools = CreateTools(repository.RootPath, coordinator);
-        Task<StageForReviewResult> stageTask = Task.Run(() => tools.StageCurrentCandidateForReview(sourcePath));
-        GovernedReviewPendingRequest pendingRequest = WaitForPendingRequest(coordinator);
-        Assert.False(stageTask.Wait(TimeSpan.FromMilliseconds(200)), "StageCurrentCandidateForReview should block until the governed review resolves.");
-        StagedReviewQueueItem pendingItem = Assert.Single(tools.ListPendingStagedReviews().GetAwaiter().GetResult());
+        public int CallCount { get; private set; }
 
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
-            tools.AcceptStagedReview(pendingItem.StagedRecordId).GetAwaiter().GetResult());
+        public ReviewElicitationRequest? LastRequest { get; private set; }
 
-        Assert.Contains("host review dialog buttons", ex.Message, StringComparison.Ordinal);
-        Assert.Equal("<h1>Schema Studio Web</h1>", File.ReadAllText(sourcePath));
-
-        coordinator.Complete(
-            pendingRequest.Request.SessionId,
-            new GovernedReviewResolution(
-                pendingRequest.Request.SessionId,
-                Completed: false,
-                AcceptedWithOverride: false,
-                RemainingPendingCount: 1,
-                Message: "Governed review remained pending."));
-
-        stageTask.GetAwaiter().GetResult();
+        public Task<ReviewDecision> RequestDecisionAsync(ReviewElicitationRequest request, CancellationToken cancellationToken)
+        {
+            CallCount++;
+            LastRequest = request;
+            return Task.FromResult(decision);
+        }
     }
 
-    [Fact]
-    public async Task StageCurrentCandidateForReview_times_out_and_clears_pending_request_when_host_never_resolves()
+    private sealed class GatedReviewElicitor : IReviewElicitor
     {
-        using TemporaryRepository repository = TemporaryRepository.Create();
-        string projectPath = CreateProject(repository.RootPath);
-        string sourcePath = CreateWatchedFile(
-            repository.RootPath,
-            Path.Combine("Components", "Layout", "MainLayout.razor"),
-            "<h1>Schema Studio Web</h1>");
+        private readonly TaskCompletionSource<ReviewDecision> gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource raisedSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        WorkflowEditService workflowService = CreateWorkflowService(repository.RootPath, projectPath);
-        EditSessionStatus status = workflowService.Refresh(sourcePath);
-        File.WriteAllText(status.WorkingFilePath, "<h1>Schema Studio Web <span style=\"color: red;\">--Coding Services =7</span></h1>");
+        public Task Raised => raisedSource.Task;
 
-        GovernedReviewCoordinatorService coordinator = new();
-        WorkspaceReviewMcpTools tools = CreateTools(repository.RootPath, coordinator, reviewTimeout: TimeSpan.FromMilliseconds(100));
+        public void Complete(ReviewDecision decision)
+        {
+            gate.TrySetResult(decision);
+        }
 
-        TimeoutException ex = await Assert.ThrowsAsync<TimeoutException>(() =>
-            tools.StageCurrentCandidateForReview(sourcePath));
-
-        Assert.Contains("timed out", ex.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Null(coordinator.GetPendingRequest());
+        public async Task<ReviewDecision> RequestDecisionAsync(ReviewElicitationRequest request, CancellationToken cancellationToken)
+        {
+            raisedSource.TrySetResult();
+            using (cancellationToken.Register(() => gate.TrySetCanceled(cancellationToken)))
+            {
+                return await gate.Task;
+            }
+        }
     }
 
-    [Fact]
-    public async Task StageCurrentCandidateForReview_honors_cancellation_token_and_clears_pending_request()
-    {
-        using TemporaryRepository repository = TemporaryRepository.Create();
-        string projectPath = CreateProject(repository.RootPath);
-        string sourcePath = CreateWatchedFile(
-            repository.RootPath,
-            Path.Combine("Components", "Layout", "MainLayout.razor"),
-            "<h1>Schema Studio Web</h1>");
-
-        WorkflowEditService workflowService = CreateWorkflowService(repository.RootPath, projectPath);
-        EditSessionStatus status = workflowService.Refresh(sourcePath);
-        File.WriteAllText(status.WorkingFilePath, "<h1>Schema Studio Web <span style=\"color: red;\">--Coding Services =9</span></h1>");
-
-        GovernedReviewCoordinatorService coordinator = new();
-        WorkspaceReviewMcpTools tools = CreateTools(repository.RootPath, coordinator);
-        using CancellationTokenSource cts = new(TimeSpan.FromMilliseconds(100));
-
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            tools.StageCurrentCandidateForReview(sourcePath, cancellationToken: cts.Token));
-
-        Assert.Null(coordinator.GetPendingRequest());
-    }
-
-    private static WorkspaceReviewMcpTools CreateTools(
-        string workspaceRoot,
-        GovernedReviewCoordinatorService? coordinator = null,
-        string? editSessionId = null,
-        TimeSpan? reviewTimeout = null)
+    private static HarnessWorkspaceReviewService CreateReviewService(string workspaceRoot, string? editSessionId = null)
     {
         IConfiguration configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -316,19 +327,12 @@ public sealed class WorkspaceReviewMcpToolsTests
         workspaceState.SetRepoRoot(workspaceRoot);
         workspaceState.SetCurrentEditSessionId(editSessionId);
         CodingServicesSettingsProvider settingsProvider = new(configuration);
-        HarnessWorkspaceReviewService reviewService = new(
-            workspaceState,
-            settingsProvider,
-            coordinator ?? new GovernedReviewCoordinatorService(),
-            reviewTimeout);
-        return new WorkspaceReviewMcpTools(reviewService);
+        return new HarnessWorkspaceReviewService(workspaceState, settingsProvider);
     }
 
-    private static GovernedReviewPendingRequest WaitForPendingRequest(GovernedReviewCoordinatorService coordinator)
+    private static WorkspaceReviewMcpTools CreateTools(string workspaceRoot)
     {
-        bool ready = SpinWait.SpinUntil(() => coordinator.GetPendingRequest() is not null, TimeSpan.FromSeconds(5));
-        Assert.True(ready, "Timed out waiting for governed review request.");
-        return coordinator.GetPendingRequest()!;
+        return new WorkspaceReviewMcpTools(CreateReviewService(workspaceRoot));
     }
 
     private static WorkflowEditService CreateWorkflowService(string repositoryRoot, string projectPath)

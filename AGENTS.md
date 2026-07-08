@@ -44,6 +44,13 @@
 - When a shell or tool action requires runtime approval, prefer the formal approval flow over conversational permission text alone.
 - If a tool or command is denied, cancelled, sandboxed, or fails after approval, treat that as an execution result and continue with the best viable fallback unless the user must choose.
 
+## Governed Review Gate
+
+- The staged-review accept/reject decision is a governed gate driven by MCP elicitation. `StageCurrentCandidateForReview` BLOCKS until the operator answers the elicitation; do not expect it to return before the human decides.
+- Accept applies the staged change to watched source; decline rejects and leaves source unchanged; cancel leaves it pending. Never work around the gate by calling accept/reject tools to bypass an unanswered elicitation.
+- The gate depends on `mcp_elicitations = true` in the granular approval policy (`CodexAppServerClient.CreateApprovalPolicy`). The elicitation uses the same server-request channel as security/sandbox approvals.
+- `GovernedReviewCoordinatorService` is dormant; the elicitation path in `HarnessWorkspaceReviewService` (`IReviewElicitor`) is the live gate. See WORKFLOW.md "Governed Review Gate (Elicitation)".
+
 ## Architectural Boundaries
 
 - Keep `CodexConnectionService` focused on transport, session orchestration, and turn lifecycle.

@@ -7,19 +7,16 @@ public sealed class HarnessMcpHostedService : IHostedService, IDisposable
 {
     private readonly WorkspaceState workspaceState;
     private readonly SourceWorkspaceService sourceWorkspaceService;
-    private readonly GovernedReviewCoordinatorService governedReviewCoordinator;
     private readonly IConfiguration configuration;
     private IHost? host;
 
     public HarnessMcpHostedService(
         WorkspaceState workspaceState,
         SourceWorkspaceService sourceWorkspaceService,
-        GovernedReviewCoordinatorService governedReviewCoordinator,
         IConfiguration configuration)
     {
         this.workspaceState = workspaceState;
         this.sourceWorkspaceService = sourceWorkspaceService;
-        this.governedReviewCoordinator = governedReviewCoordinator;
         this.configuration = configuration;
     }
 
@@ -31,7 +28,7 @@ public sealed class HarnessMcpHostedService : IHostedService, IDisposable
         }
 
         string mcpUrl = configuration["Mcp:Url"] ?? McpHostFactory.DefaultLocalMcpUrl;
-        host = McpHostFactory.Create(workspaceState, sourceWorkspaceService, governedReviewCoordinator, mcpUrl);
+        host = McpHostFactory.Create(workspaceState, sourceWorkspaceService, mcpUrl);
         return host.StartAsync(cancellationToken);
     }
 
