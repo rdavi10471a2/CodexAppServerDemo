@@ -109,7 +109,7 @@ public sealed class CodexAppServerPermissionRequestTests
         Assert.NotNull(threadStart);
         Assert.NotNull(turnStart);
         Assert.True(threadParameters?["approvalPolicy"]?["granular"]?["sandbox_approval"]?.GetValue<bool>());
-        Assert.False(threadParameters?["approvalPolicy"]?["granular"]?["mcp_elicitations"]?.GetValue<bool>());
+        Assert.True(threadParameters?["approvalPolicy"]?["granular"]?["mcp_elicitations"]?.GetValue<bool>());
         Assert.False(threadParameters?["approvalPolicy"]?["granular"]?["rules"]?.GetValue<bool>());
         Assert.Null(threadParameters?["approvalPolicy"]?["granular"]?["request_permissions"]);
         Assert.Null(threadParameters?["approvalPolicy"]?["granular"]?["skill_approval"]);
@@ -117,7 +117,7 @@ public sealed class CodexAppServerPermissionRequestTests
         Assert.Equal("C:\\Work", parameters?["cwd"]?.GetValue<string>());
         Assert.Equal("gpt-5.4", parameters?["model"]?.GetValue<string>());
         Assert.True(parameters?["approvalPolicy"]?["granular"]?["sandbox_approval"]?.GetValue<bool>());
-        Assert.False(parameters?["approvalPolicy"]?["granular"]?["mcp_elicitations"]?.GetValue<bool>());
+        Assert.True(parameters?["approvalPolicy"]?["granular"]?["mcp_elicitations"]?.GetValue<bool>());
         Assert.False(parameters?["approvalPolicy"]?["granular"]?["rules"]?.GetValue<bool>());
         Assert.Null(parameters?["approvalPolicy"]?["granular"]?["request_permissions"]);
         Assert.Null(parameters?["approvalPolicy"]?["granular"]?["skill_approval"]);

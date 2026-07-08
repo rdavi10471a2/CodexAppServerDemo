@@ -214,7 +214,13 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             {
                 granular = new
                 {
-                    mcp_elicitations = false,
+                    // Enabled so MCP-server elicitations are forwarded to the client as
+                    // mcpServer/elicitation/request server-requests over the app-server (stdio)
+                    // channel -- the same path security/sandbox approvals already use. With this
+                    // false, only sandbox_approval prompts surface, which is why the host sees
+                    // policy warnings but no general yes/no elicitation pop-ups. A tool must still
+                    // ISSUE an elicitation for one to appear; this flag only permits forwarding.
+                    mcp_elicitations = true,
                     rules = false,
                     sandbox_approval = true
                 }
