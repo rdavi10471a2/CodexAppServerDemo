@@ -48,6 +48,29 @@
     justify-content: flex-end;
 }
 
+.validation-gate-warning-action,
+.validation-gate-secondary-action {
+    border: 1px solid transparent;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 700;
+    min-height: 2.25rem;
+    padding: 0.45rem 0.8rem;
+}
+
+.validation-gate-warning-action {
+    background: #fff4e5;
+    border-color: #f2c37b;
+    color: #9a3412;
+}
+
+.validation-gate-secondary-action {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    color: #334155;
+}
+
 @media (max-width: 800px) {
     .validation-gate-summary {
         grid-template-columns: 1fr;

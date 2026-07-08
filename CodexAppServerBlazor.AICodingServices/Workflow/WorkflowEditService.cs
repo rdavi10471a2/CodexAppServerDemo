@@ -263,6 +263,64 @@ public sealed class WorkflowEditService
         return GetStatus(fullWatchedPath);
     }
 
+    public int AbandonPendingSessionArtifacts(string sessionId, string message)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return 0;
+        }
+
+        int retiredRecords = 0;
+        foreach (StagedEditRecord record in ListStagedRecords(sessionId)
+            .Where(record => !IsTerminalDecision(record.Decision))
+            .Where(record => !IsTerminalDecision(record.Classification))
+            .Where(record => !IsSuperseded(record)))
+        {
+            record.Status = "superseded";
+            record.Classification = "superseded";
+            record.SupersededByStagedRecordId = $"abandoned-{sessionId}";
+            record.SupersededAtUtc = DateTimeOffset.UtcNow.ToString("O");
+            record.Message = message;
+            SaveStagedRecord(record);
+            retiredRecords++;
+        }
+
+        if (!Directory.Exists(paths.MetadataRoot))
+        {
+            return retiredRecords;
+        }
+
+        foreach (string manifestPath in Directory.EnumerateFiles(paths.MetadataRoot, "*.json", SearchOption.AllDirectories))
+        {
+            EditSessionManifest? manifest;
+            try
+            {
+                manifest = DeserializeManifestFile(manifestPath);
+            }
+            catch (JsonException)
+            {
+                continue;
+            }
+
+            if (manifest is null
+                || string.IsNullOrWhiteSpace(manifest.EditSessionId)
+                || !manifest.EditSessionId.Equals(sessionId, StringComparison.Ordinal)
+                || manifest.RequiresRefresh)
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(manifest.WorkingFilePath) && File.Exists(manifest.WorkingFilePath))
+            {
+                File.Delete(manifest.WorkingFilePath);
+            }
+
+            File.Delete(manifestPath);
+        }
+
+        return retiredRecords;
+    }
+
     public EditSessionStatus WriteWorkingCandidate(
         string watchedFilePath,
         string content,
@@ -679,10 +737,18 @@ public sealed class WorkflowEditService
             manifest,
             stagedFilePath,
             ledgerSummary);
+        string resolvedSessionId = string.IsNullOrWhiteSpace(sessionId)
+            ? manifest.EditSessionId
+            : sessionId;
+        if (string.IsNullOrWhiteSpace(resolvedSessionId))
+        {
+            throw new InvalidOperationException("An active edit session id is required before staging a governed review candidate.");
+        }
+
         StagedEditRecord record = new()
         {
             StagedRecordId = stagedRecordId,
-            SessionId = sessionId ?? string.Empty,
+            SessionId = resolvedSessionId,
             WatchedFilePath = fullWatchedPath,
             WorkingFilePath = manifest.WorkingFilePath,
             StagedFilePath = stagedFilePath,

@@ -22,11 +22,11 @@ public sealed class WorkspaceReviewMcpToolsTests
         EditSessionStatus status = workflowService.Refresh(sourcePath);
         File.WriteAllText(status.WorkingFilePath, "proposed");
         StagedEditRecord record = workflowService.Stage(sourcePath);
-        RecordReviewReady(workflowService, record.StagedRecordId);
+        RecordValidationFailure(workflowService, record.StagedRecordId);
 
         WorkspaceReviewMcpTools tools = CreateTools(repository.RootPath);
 
-        IReadOnlyList<StagedReviewQueueItem> pending = tools.ListPendingStagedReviews();
+        IReadOnlyList<StagedReviewQueueItem> pending = tools.ListPendingStagedReviews().GetAwaiter().GetResult();
 
         StagedReviewQueueItem item = Assert.Single(pending);
         Assert.Equal(record.StagedRecordId, item.StagedRecordId);
@@ -34,25 +34,32 @@ public sealed class WorkspaceReviewMcpToolsTests
     }
 
     [Fact]
-    public void AcceptStagedReview_copies_candidate_into_source_through_tool_surface()
+    public void AcceptStagedReview_throws_when_terminal_validation_fails_before_copy()
     {
         using TemporaryRepository repository = TemporaryRepository.Create();
         string projectPath = CreateProject(repository.RootPath);
-        string sourcePath = CreateWatchedFile(repository.RootPath, "Example.cs", "original");
+        string sourcePath = CreateWatchedFile(
+            repository.RootPath,
+            "Example.cs",
+            "namespace Example; public sealed class Example { public int Value => 1; }");
 
         WorkflowEditService workflowService = CreateWorkflowService(repository.RootPath, projectPath);
         EditSessionStatus status = workflowService.Refresh(sourcePath);
-        File.WriteAllText(status.WorkingFilePath, "proposed");
+        File.WriteAllText(
+            status.WorkingFilePath,
+            "namespace Example; public sealed class Example { public int Value => 2; }");
         StagedEditRecord record = workflowService.Stage(sourcePath);
         RecordReviewReady(workflowService, record.StagedRecordId);
 
         WorkspaceReviewMcpTools tools = CreateTools(repository.RootPath);
 
-        StagedReviewPageActionResult result = tools.AcceptStagedReview(record.StagedRecordId);
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            tools.AcceptStagedReview(record.StagedRecordId).GetAwaiter().GetResult());
 
-        Assert.Equal("proposed", File.ReadAllText(sourcePath));
-        Assert.True(result.Model.IsDecided);
-        Assert.Equal("accepted (accepted)", result.Model.DecisionStatus);
+        Assert.Contains("Terminal planned pre-merge validation failed", ex.Message, StringComparison.Ordinal);
+        Assert.Equal(
+            "namespace Example; public sealed class Example { public int Value => 1; }",
+            File.ReadAllText(sourcePath));
     }
 
     [Fact]
@@ -70,7 +77,7 @@ public sealed class WorkspaceReviewMcpToolsTests
 
         WorkspaceReviewMcpTools tools = CreateTools(repository.RootPath);
 
-        StagedReviewPageActionResult result = tools.RejectStagedReview(record.StagedRecordId);
+        StagedReviewPageActionResult result = tools.RejectStagedReview(record.StagedRecordId).GetAwaiter().GetResult();
 
         Assert.Equal("original", File.ReadAllText(sourcePath));
         Assert.True(result.Model.IsDecided);
@@ -98,9 +105,9 @@ public sealed class WorkspaceReviewMcpToolsTests
 
         WorkspaceReviewMcpTools tools = CreateTools(repository.RootPath);
 
-        StagedReviewPageModel firstModel = tools.LoadNextSessionReview(sessionId);
-        tools.AcceptStagedReview(firstModel.StagedRecordId);
-        StagedReviewPageModel secondModel = tools.LoadNextSessionReview(sessionId);
+        StagedReviewPageModel firstModel = tools.LoadNextSessionReview(sessionId).GetAwaiter().GetResult();
+        tools.AcceptStagedReview(firstModel.StagedRecordId).GetAwaiter().GetResult();
+        StagedReviewPageModel secondModel = tools.LoadNextSessionReview(sessionId).GetAwaiter().GetResult();
 
         Assert.Equal(firstRecord.StagedRecordId, firstModel.StagedRecordId);
         Assert.Equal(secondRecord.StagedRecordId, secondModel.StagedRecordId);
@@ -143,7 +150,7 @@ public sealed class WorkspaceReviewMcpToolsTests
         Assert.Equal("launched", result.StagedRecord.LaunchStatus);
         Assert.False(result.Validation.IsError);
 
-        IReadOnlyList<StagedReviewQueueItem> pending = tools.ListPendingStagedReviews();
+        IReadOnlyList<StagedReviewQueueItem> pending = tools.ListPendingStagedReviews().GetAwaiter().GetResult();
         StagedReviewQueueItem item = Assert.Single(pending);
         Assert.Equal(result.StagedRecord.StagedRecordId, item.StagedRecordId);
         Assert.Equal(Path.Combine("Components", "Layout", "MainLayout.razor"), item.RelativePath);
@@ -198,7 +205,7 @@ public sealed class WorkspaceReviewMcpToolsTests
 
         WorkspaceReviewMcpTools tools = CreateTools(repository.RootPath);
 
-        StagedReviewPageActionResult result = tools.AcceptStagedReview(record.StagedRecordId, forceApproveValidation: true);
+        StagedReviewPageActionResult result = tools.AcceptStagedReview(record.StagedRecordId, forceApproveValidation: true).GetAwaiter().GetResult();
 
         Assert.Equal("proposed", File.ReadAllText(sourcePath));
         Assert.True(result.Model.PreMergeValidationForceApproved);
@@ -223,10 +230,10 @@ public sealed class WorkspaceReviewMcpToolsTests
         Task<StageForReviewResult> stageTask = Task.Run(() => tools.StageCurrentCandidateForReview(sourcePath));
         GovernedReviewPendingRequest pendingRequest = WaitForPendingRequest(coordinator);
         Assert.False(stageTask.Wait(TimeSpan.FromMilliseconds(200)), "StageCurrentCandidateForReview should block until the governed review resolves.");
-        StagedReviewQueueItem pendingItem = Assert.Single(tools.ListPendingStagedReviews());
+        StagedReviewQueueItem pendingItem = Assert.Single(tools.ListPendingStagedReviews().GetAwaiter().GetResult());
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
-            tools.AcceptStagedReview(pendingItem.StagedRecordId));
+            tools.AcceptStagedReview(pendingItem.StagedRecordId).GetAwaiter().GetResult());
 
         Assert.Contains("host review dialog buttons", ex.Message, StringComparison.Ordinal);
         Assert.Equal("<h1>Schema Studio Web</h1>", File.ReadAllText(sourcePath));
@@ -243,10 +250,59 @@ public sealed class WorkspaceReviewMcpToolsTests
         stageTask.GetAwaiter().GetResult();
     }
 
+    [Fact]
+    public async Task StageCurrentCandidateForReview_times_out_and_clears_pending_request_when_host_never_resolves()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        string projectPath = CreateProject(repository.RootPath);
+        string sourcePath = CreateWatchedFile(
+            repository.RootPath,
+            Path.Combine("Components", "Layout", "MainLayout.razor"),
+            "<h1>Schema Studio Web</h1>");
+
+        WorkflowEditService workflowService = CreateWorkflowService(repository.RootPath, projectPath);
+        EditSessionStatus status = workflowService.Refresh(sourcePath);
+        File.WriteAllText(status.WorkingFilePath, "<h1>Schema Studio Web <span style=\"color: red;\">--Coding Services =7</span></h1>");
+
+        GovernedReviewCoordinatorService coordinator = new();
+        WorkspaceReviewMcpTools tools = CreateTools(repository.RootPath, coordinator, reviewTimeout: TimeSpan.FromMilliseconds(100));
+
+        TimeoutException ex = await Assert.ThrowsAsync<TimeoutException>(() =>
+            tools.StageCurrentCandidateForReview(sourcePath));
+
+        Assert.Contains("timed out", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(coordinator.GetPendingRequest());
+    }
+
+    [Fact]
+    public async Task StageCurrentCandidateForReview_honors_cancellation_token_and_clears_pending_request()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        string projectPath = CreateProject(repository.RootPath);
+        string sourcePath = CreateWatchedFile(
+            repository.RootPath,
+            Path.Combine("Components", "Layout", "MainLayout.razor"),
+            "<h1>Schema Studio Web</h1>");
+
+        WorkflowEditService workflowService = CreateWorkflowService(repository.RootPath, projectPath);
+        EditSessionStatus status = workflowService.Refresh(sourcePath);
+        File.WriteAllText(status.WorkingFilePath, "<h1>Schema Studio Web <span style=\"color: red;\">--Coding Services =9</span></h1>");
+
+        GovernedReviewCoordinatorService coordinator = new();
+        WorkspaceReviewMcpTools tools = CreateTools(repository.RootPath, coordinator);
+        using CancellationTokenSource cts = new(TimeSpan.FromMilliseconds(100));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            tools.StageCurrentCandidateForReview(sourcePath, cancellationToken: cts.Token));
+
+        Assert.Null(coordinator.GetPendingRequest());
+    }
+
     private static WorkspaceReviewMcpTools CreateTools(
         string workspaceRoot,
         GovernedReviewCoordinatorService? coordinator = null,
-        string? editSessionId = null)
+        string? editSessionId = null,
+        TimeSpan? reviewTimeout = null)
     {
         IConfiguration configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -260,7 +316,11 @@ public sealed class WorkspaceReviewMcpToolsTests
         workspaceState.SetRepoRoot(workspaceRoot);
         workspaceState.SetCurrentEditSessionId(editSessionId);
         CodingServicesSettingsProvider settingsProvider = new(configuration);
-        HarnessWorkspaceReviewService reviewService = new(workspaceState, settingsProvider, coordinator ?? new GovernedReviewCoordinatorService());
+        HarnessWorkspaceReviewService reviewService = new(
+            workspaceState,
+            settingsProvider,
+            coordinator ?? new GovernedReviewCoordinatorService(),
+            reviewTimeout);
         return new WorkspaceReviewMcpTools(reviewService);
     }
 

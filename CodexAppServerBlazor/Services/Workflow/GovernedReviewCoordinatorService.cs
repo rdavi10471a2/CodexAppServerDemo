@@ -29,11 +29,18 @@ public sealed class GovernedReviewCoordinatorService
         }
     }
 
-    public Task<GovernedReviewResolution> QueueAndWaitAsync(GovernedReviewRequest request)
+    public Task<GovernedReviewResolution> QueueAndWaitAsync(
+        GovernedReviewRequest request,
+        CancellationToken cancellationToken = default)
     {
         if (request is null)
         {
             throw new ArgumentNullException(nameof(request));
+        }
+
+        if (string.IsNullOrWhiteSpace(request.SessionId))
+        {
+            throw new ArgumentException("Session id is required.", nameof(request));
         }
 
         GovernedReviewPendingRequest activeRequest;
@@ -61,6 +68,34 @@ public sealed class GovernedReviewCoordinatorService
         if (notifyChanged)
         {
             Changed?.Invoke();
+        }
+
+        if (cancellationToken.CanBeCanceled)
+        {
+            cancellationToken.Register(() =>
+            {
+                GovernedReviewPendingRequest? canceledRequest = null;
+                bool notifyCanceled = false;
+                lock (gate)
+                {
+                    if (pendingRequest is null
+                        || !pendingRequest.Request.SessionId.Equals(request.SessionId, StringComparison.Ordinal))
+                    {
+                        return;
+                    }
+
+                    canceledRequest = pendingRequest;
+                    pendingRequest = null;
+                    notifyCanceled = true;
+                }
+
+                canceledRequest?.Completion.TrySetCanceled(cancellationToken);
+
+                if (notifyCanceled)
+                {
+                    Changed?.Invoke();
+                }
+            });
         }
 
         return activeRequest.Completion.Task;

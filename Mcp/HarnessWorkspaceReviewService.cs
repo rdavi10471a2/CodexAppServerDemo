@@ -10,18 +10,23 @@ namespace CodexAppServerBlazor.Mcp;
 /// </summary>
 public sealed class HarnessWorkspaceReviewService
 {
+    private static readonly TimeSpan DefaultGovernedReviewTimeout = TimeSpan.FromMinutes(30);
+
     private readonly WorkspaceState workspaceState;
     private readonly CodingServicesSettingsProvider settingsProvider;
     private readonly GovernedReviewCoordinatorService governedReviewCoordinator;
+    private readonly TimeSpan governedReviewTimeout;
 
     public HarnessWorkspaceReviewService(
         WorkspaceState workspaceState,
         CodingServicesSettingsProvider settingsProvider,
-        GovernedReviewCoordinatorService governedReviewCoordinator)
+        GovernedReviewCoordinatorService governedReviewCoordinator,
+        TimeSpan? governedReviewTimeout = null)
     {
         this.workspaceState = workspaceState;
         this.settingsProvider = settingsProvider;
         this.governedReviewCoordinator = governedReviewCoordinator;
+        this.governedReviewTimeout = governedReviewTimeout ?? DefaultGovernedReviewTimeout;
     }
 
     public IReadOnlyList<StagedReviewQueueItem> ListPending()
@@ -51,7 +56,11 @@ public sealed class HarnessWorkspaceReviewService
         return CreateReviewService().Reject(GetWorkspaceRoot(), stagedRecordId);
     }
 
-    public StageForReviewResult StageCurrentCandidateForReview(string watchedFilePath, string? sessionId = null, string? ledgerSummary = null)
+    public async Task<StageForReviewResult> StageCurrentCandidateForReviewAsync(
+        string watchedFilePath,
+        string? sessionId = null,
+        string? ledgerSummary = null,
+        CancellationToken cancellationToken = default)
     {
         string workspaceRoot = GetWorkspaceRoot();
         CodingServicesSettings settings = settingsProvider.GetSettings(workspaceRoot);
@@ -64,6 +73,11 @@ public sealed class HarnessWorkspaceReviewService
                 ? editSession.EditSessionId
                 : workspaceState.CurrentEditSessionId)
             : sessionId;
+        if (string.IsNullOrWhiteSpace(resolvedSessionId))
+        {
+            throw new InvalidOperationException(
+                $"No active governed edit session exists for '{editSession.RelativePath}'. Refresh the file through governed edit MCP first, then retry staging.");
+        }
 
         StagedEditRecord record = workflowService.Stage(fullWatchedPath, ledgerSummary, resolvedSessionId);
         workspaceState.SetCurrentEditSessionId(record.SessionId);
@@ -81,13 +95,26 @@ public sealed class HarnessWorkspaceReviewService
 
         int pendingCount = reviewService.ListPending(workspaceRoot)
             .Count(item => item.SessionId.Equals(record.SessionId, StringComparison.Ordinal));
-        GovernedReviewResolution resolution = governedReviewCoordinator.QueueAndWaitAsync(
-            new GovernedReviewRequest(
-                record.SessionId,
-                record.RelativePath,
-                pendingCount,
-                record.PreMergeValidationIsError,
-                record.PreMergeValidationForceApproved)).GetAwaiter().GetResult();
+        using CancellationTokenSource timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(governedReviewTimeout);
+
+        GovernedReviewResolution resolution;
+        try
+        {
+            resolution = await governedReviewCoordinator.QueueAndWaitAsync(
+                new GovernedReviewRequest(
+                    record.SessionId,
+                    record.RelativePath,
+                    pendingCount,
+                    record.PreMergeValidationIsError,
+                    record.PreMergeValidationForceApproved),
+                timeoutCts.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException(
+                $"Governed review for edit session '{record.SessionId}' timed out after {governedReviewTimeout.TotalMinutes:0} minutes without a host decision.");
+        }
         StagedEditRecord refreshedRecord = workflowService.GetStagedRecord(record.StagedRecordId);
 
         string completionMessage = string.IsNullOrWhiteSpace(resolution.Message)

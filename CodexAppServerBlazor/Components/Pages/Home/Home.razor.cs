@@ -3,6 +3,7 @@ using CodexAppServerBlazor.Services;
 using CodexAppServerBlazor.Services.ArchivedDiscussions;
 using CodexAppServerBlazor.Services.Tasks;
 using CodexAppServerBlazor.Services.Workflow;
+using CodexAppServerBlazor.AICodingServices.Workflow;
 using CodexAppServerBlazor.Components.Pages.Home.Tasks;
 using Markdig;
 using Markdig.Extensions.MediaLinks;
@@ -136,6 +137,9 @@ public partial class Home : IDisposable, IAsyncDisposable
     public IStagedReviewPageService StagedReviewPageService { get; set; } = default!;
 
     [Inject]
+    public CodingServicesSettingsProvider SettingsProvider { get; set; } = default!;
+
+    [Inject]
     public GovernedReviewCoordinatorService GovernedReviewCoordinator { get; set; } = default!;
 
     [Inject]
@@ -245,6 +249,7 @@ public partial class Home : IDisposable, IAsyncDisposable
 
     private void ResetGovernedReviewStateForNewTurn(bool clearEditSessionId)
     {
+        string? priorEditSessionId = WorkspaceState.CurrentEditSessionId;
         validationGateCompletion?.TrySetResult(false);
         validationGateCompletion = null;
         validationGateModel = null;
@@ -262,7 +267,13 @@ public partial class Home : IDisposable, IAsyncDisposable
 
         if (clearEditSessionId)
         {
+            int retiredCount = RetirePendingArtifactsForSession(priorEditSessionId);
             WorkspaceState.SetCurrentEditSessionId(null);
+            AddDebugEvent(
+                "TurnPrep",
+                "retire-session",
+                "home",
+                $"Retired {retiredCount} pending staged record(s) for previous edit session '{priorEditSessionId ?? "<none>"}' before starting a new Work turn.");
         }
 
         AddDebugEvent(
@@ -270,6 +281,31 @@ public partial class Home : IDisposable, IAsyncDisposable
             "reset-governed-state",
             "home",
             $"Reset queued review, validation gate, and dialog state before starting a new {(turnMode == WorkflowTurnMode.Work ? "Work" : "Discuss")} turn. ClearedEditSessionId={clearEditSessionId}.");
+    }
+
+    private int RetirePendingArtifactsForSession(string? sessionId)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(repoRoot) || !Directory.Exists(repoRoot))
+        {
+            return 0;
+        }
+
+        try
+        {
+            WorkflowEditService workflowService = new(SettingsProvider.GetSettings(repoRoot));
+            return workflowService.AbandonPendingSessionArtifacts(
+                sessionId,
+                "A new governed Work turn started before this pending edit session was resolved.");
+        }
+        catch (Exception ex)
+        {
+            AddDebugEvent(
+                "TurnPrep",
+                "retire-session-error",
+                "home",
+                $"Failed to retire pending edit-session artifacts for '{sessionId}': {ex.Message}");
+            return 0;
+        }
     }
 
     private async Task CreateTaskFromTranscript(string taskName)

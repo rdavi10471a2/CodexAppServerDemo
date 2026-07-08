@@ -8,26 +8,39 @@ namespace CodexAppServerBlazor.Tests;
 
 public sealed class StagedReviewPageServiceTests
 {
-    private const string BuildableProjectText = "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>";
+    private const string BuildableProjectText = """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+            <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+          </PropertyGroup>
+          <ItemGroup>
+            <Compile Include="**\*.cs" Exclude="bin\**\*.cs;obj\**\*.cs;runtime-test\**\*.cs" />
+          </ItemGroup>
+        </Project>
+        """;
 
     [Fact]
     public void Accept_copies_staged_candidate_into_watched_source_and_records_decision()
     {
         using TemporaryRepository repository = TemporaryRepository.Create();
         string projectPath = CreateProject(repository.RootPath);
-        string sourcePath = CreateWatchedFile(repository.RootPath, "Example.cs", "original");
+        string sourcePath = CreateWatchedFile(
+            repository.RootPath,
+            "Example.cs",
+            "namespace Example; public sealed class Example { public int Value => 1; }");
 
         CodingServicesSettings settings = CreateSettings(repository.RootPath, projectPath);
         WorkflowEditService workflowService = new(settings);
         EditSessionStatus status = workflowService.Refresh(sourcePath);
-        File.WriteAllText(status.WorkingFilePath, "proposed");
+        File.WriteAllText(status.WorkingFilePath, "namespace Example; public sealed class Example { public int Value => 2; }");
         StagedEditRecord record = workflowService.Stage(sourcePath);
         RecordReviewReady(workflowService, record.StagedRecordId);
 
         StagedReviewPageService service = CreateService(repository.RootPath, projectPath);
         StagedReviewPageActionResult result = service.Accept(repository.RootPath, record.StagedRecordId);
 
-        Assert.Equal("proposed", File.ReadAllText(sourcePath));
+        Assert.Equal("namespace Example; public sealed class Example { public int Value => 2; }", File.ReadAllText(sourcePath));
         Assert.True(result.Model.IsDecided);
         Assert.Equal("accepted (accepted)", result.Model.DecisionStatus);
         Assert.Contains("Index was rebuilt after accept.", result.Message, StringComparison.Ordinal);
@@ -84,6 +97,53 @@ public sealed class StagedReviewPageServiceTests
         Assert.Equal(secondRecord.StagedRecordId, secondModel.StagedRecordId);
         Assert.False(secondModel.IsSessionComplete);
         Assert.Contains("public int Value => 2;", secondModel.ProposedText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LoadNextForSession_returns_session_complete_after_last_accept()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        string projectPath = CreateProject(repository.RootPath);
+        string sourcePath = CreateWatchedFile(repository.RootPath, "Example.cs", "namespace Example; public sealed class Example { }");
+        CodingServicesSettings settings = CreateSettings(repository.RootPath, projectPath);
+        WorkflowEditService workflowService = new(settings);
+        EditSessionStatus status = workflowService.Refresh(sourcePath);
+        string sessionId = status.EditSessionId;
+        File.WriteAllText(status.WorkingFilePath, "namespace Example; public sealed class Example { public int Value => 2; }");
+        StagedEditRecord record = workflowService.Stage(sourcePath, sessionId: sessionId);
+        RecordReviewReady(workflowService, record.StagedRecordId);
+
+        StagedReviewPageService service = CreateService(repository.RootPath, projectPath);
+        service.Accept(repository.RootPath, record.StagedRecordId);
+        StagedReviewPageModel completedModel = service.LoadNextForSession(repository.RootPath, sessionId);
+
+        Assert.True(completedModel.IsSessionComplete);
+        Assert.Equal("Session complete", completedModel.DecisionStatus);
+    }
+
+    [Fact]
+    public void AbandonPendingSessionArtifacts_retires_staged_records_and_removes_manifest_and_working_file()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        string projectPath = CreateProject(repository.RootPath);
+        string sourcePath = CreateWatchedFile(repository.RootPath, "Example.cs", "original");
+        CodingServicesSettings settings = CreateSettings(repository.RootPath, projectPath);
+        WorkflowEditService workflowService = new(settings);
+        EditSessionStatus status = workflowService.Refresh(sourcePath);
+        string sessionId = status.EditSessionId;
+        File.WriteAllText(status.WorkingFilePath, "proposed");
+        StagedEditRecord record = workflowService.Stage(sourcePath, sessionId: sessionId);
+        RecordReviewReady(workflowService, record.StagedRecordId);
+
+        int retired = workflowService.AbandonPendingSessionArtifacts(sessionId, "test cleanup");
+        EditSessionStatus postStatus = workflowService.GetStatus(sourcePath);
+        StagedEditRecord retiredRecord = workflowService.GetStagedRecord(record.StagedRecordId);
+
+        Assert.Equal(1, retired);
+        Assert.False(File.Exists(status.WorkingFilePath));
+        Assert.False(postStatus.HasSession);
+        Assert.Equal("superseded", retiredRecord.Classification);
+        Assert.StartsWith("abandoned-", retiredRecord.SupersededByStagedRecordId, StringComparison.Ordinal);
     }
 
     [Fact]

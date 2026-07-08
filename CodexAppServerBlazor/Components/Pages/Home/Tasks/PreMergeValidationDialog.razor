@@ -27,16 +27,16 @@
     </p>
 
     <div class="validation-gate-actions">
-        <RadzenButton Icon="visibility"
-                      Text="Continue To Review"
-                      ButtonStyle="ButtonStyle.Warning"
-                      Size="ButtonSize.Small"
-                      Click="@ContinueToReviewAsync" />
-        <RadzenButton Icon="close"
-                      Text="Not Now"
-                      ButtonStyle="ButtonStyle.Secondary"
-                      Size="ButtonSize.Small"
-                      Click="@DismissAsync" />
+        <button class="validation-gate-warning-action"
+                type="button"
+                @onclick="ContinueToReviewAsync">
+            Continue To Review
+        </button>
+        <button class="validation-gate-secondary-action"
+                type="button"
+                @onclick="DismissAsync">
+            Not Now
+        </button>
     </div>
 </div>
 

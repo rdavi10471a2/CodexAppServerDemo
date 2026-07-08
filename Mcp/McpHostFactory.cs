@@ -1,9 +1,5 @@
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
 using CodexAppServerBlazor.Services;
 using CodexAppServerBlazor.Services.Workflow;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 
 namespace CodexAppServerBlazor.Mcp;
 
@@ -34,9 +30,9 @@ public static class McpHostFactory
             .AddMcpServer()
             .WithHttpTransport(options =>
             {
-                // This harness only exposes local workspace metadata and does not rely on
-                // long-lived MCP sessions or server-to-client callbacks.
-                options.Stateless = true;
+                // Governed review waits depend on a stateful MCP conversation between
+                // the Blazor host and the active tool call, so transport must preserve session state.
+                options.Stateless = false;
             })
             .WithTools<WorkspaceMcpTools>()
             .WithTools<WorkspaceEditMcpTools>()
@@ -48,7 +44,7 @@ public static class McpHostFactory
             status = "ok",
             mcpEndpoint = endpointUrl,
             transport = "streamable-http",
-            stateless = true,
+            stateless = false,
             requiredAccept = "application/json, text/event-stream",
             responseFormat = "Successful MCP calls are returned as text/event-stream frames with JSON content in event: message payloads.",
             tools = new[]

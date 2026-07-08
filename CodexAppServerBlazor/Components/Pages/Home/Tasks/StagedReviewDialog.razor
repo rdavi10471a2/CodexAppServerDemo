@@ -12,18 +12,18 @@
             <p>@DialogSubtitle</p>
         </div>
         <div class="staged-review-dialog-actions">
-            <RadzenButton Icon="refresh"
-                          Text="Refresh"
-                          ButtonStyle="ButtonStyle.Light"
-                          Size="ButtonSize.Small"
-                          Click="@RefreshReview" />
+            <button class="staged-review-secondary-action"
+                    type="button"
+                    @onclick="RefreshReview">
+                Refresh
+            </button>
             @if (CanCloseDialog)
             {
-                <RadzenButton Icon="close"
-                              Text="Close"
-                              ButtonStyle="ButtonStyle.Secondary"
-                              Size="ButtonSize.Small"
-                              Click="@CloseDialogAsync" />
+                <button class="staged-review-secondary-action"
+                        type="button"
+                        @onclick="CloseDialogAsync">
+                    Close
+                </button>
             }
         </div>
     </div>
@@ -130,24 +130,24 @@
                 </section>
 
                 <div class="staged-review-detail-actions">
-                    <RadzenButton Icon="check"
-                                  Text="Accept Proposed"
-                                  ButtonStyle="ButtonStyle.Success"
-                                  Size="ButtonSize.Small"
-                                  Disabled="@selectedModel.IsDecided"
-                                  Click="@AcceptSelectedAsync" />
-                    <RadzenButton Icon="warning"
-                                  Text="Accept With Validation Override"
-                                  ButtonStyle="ButtonStyle.Warning"
-                                  Size="ButtonSize.Small"
-                                  Disabled="@(!CanForceAccept)"
-                                  Click="@AcceptSelectedWithOverrideAsync" />
-                    <RadzenButton Icon="close"
-                                  Text="Reject"
-                                  ButtonStyle="ButtonStyle.Danger"
-                                  Size="ButtonSize.Small"
-                                  Disabled="@selectedModel.IsDecided"
-                                  Click="@RejectSelectedAsync" />
+                    <button class="staged-review-primary-action"
+                            type="button"
+                            disabled="@(selectedModel.IsDecided || actionBusy)"
+                            @onclick="AcceptSelectedAsync">
+                        Accept Proposed
+                    </button>
+                    <button class="staged-review-warning-action"
+                            type="button"
+                            disabled="@(!CanForceAccept || actionBusy)"
+                            @onclick="AcceptSelectedWithOverrideAsync">
+                        Accept With Validation Override
+                    </button>
+                    <button class="staged-review-danger-action"
+                            type="button"
+                            disabled="@(selectedModel.IsDecided || actionBusy)"
+                            @onclick="RejectSelectedAsync">
+                        Reject
+                    </button>
                 </div>
             }
         </section>
@@ -160,6 +160,7 @@
     private SideBySideDiffModel? diffModel;
     private string? selectedRecordId;
     private string? errorMessage;
+    private bool actionBusy;
 
     private int LineCount => Math.Max(diffModel?.NewText.Lines.Count ?? 0, diffModel?.OldText.Lines.Count ?? 0);
     private bool UseSessionFlow => !string.IsNullOrWhiteSpace(SessionId);
@@ -243,11 +244,12 @@
 
     private async Task AcceptSelectedCoreAsync(bool forceApproveValidation)
     {
-        if (string.IsNullOrWhiteSpace(selectedRecordId))
+        if (string.IsNullOrWhiteSpace(selectedRecordId) || actionBusy)
         {
             return;
         }
 
+        actionBusy = true;
         try
         {
             StagedReviewPageActionResult result = StagedReviewPageService.Accept(WorkspaceRoot, selectedRecordId, forceApproveValidation);
@@ -258,15 +260,21 @@
         {
             errorMessage = ex.Message;
         }
+        finally
+        {
+            actionBusy = false;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private async Task RejectSelectedAsync()
     {
-        if (string.IsNullOrWhiteSpace(selectedRecordId))
+        if (string.IsNullOrWhiteSpace(selectedRecordId) || actionBusy)
         {
             return;
         }
 
+        actionBusy = true;
         try
         {
             StagedReviewPageActionResult result = StagedReviewPageService.Reject(WorkspaceRoot, selectedRecordId);
@@ -277,15 +285,33 @@
         {
             errorMessage = ex.Message;
         }
+        finally
+        {
+            actionBusy = false;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private async Task LoadNextStateAsync()
     {
         LoadReview(preserveSelection: false);
-        if (UseSessionFlow && (selectedModel?.IsSessionComplete ?? false) && AutoCloseWhenComplete)
+        bool sessionComplete = UseSessionFlow && (selectedModel?.IsSessionComplete ?? false);
+        await InvokeAsync(StateHasChanged);
+        if (sessionComplete && AutoCloseWhenComplete)
         {
-            await CloseDialogAsync();
+            await ForceCloseDialogAsync();
         }
+    }
+
+    private Task ForceCloseDialogAsync()
+    {
+        if (CloseRequested.HasDelegate)
+        {
+            return CloseRequested.InvokeAsync();
+        }
+
+        DialogService.Close();
+        return Task.CompletedTask;
     }
 
     private void LoadReview(bool preserveSelection)
