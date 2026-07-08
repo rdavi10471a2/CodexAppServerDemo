@@ -74,6 +74,11 @@ public sealed class WorkflowTurnContextComposerTests
         Assert.False(envelope.IncludedSessionBootstrap);
         Assert.False(envelope.IncludedWorkspaceContext);
         Assert.Contains("Task details.", envelope.Prompt, StringComparison.Ordinal);
+        Assert.Contains("Work-mode task authority:", envelope.Prompt, StringComparison.Ordinal);
+        Assert.Contains("host-selected Active task above is authoritative", envelope.Prompt, StringComparison.Ordinal);
+        Assert.Contains("host governance attached above remains active even if the selected workspace has no local AGENTS.md file", envelope.Prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("attempt that governed MCP path before claiming the discovery surface is unavailable", envelope.Prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("do not use shell search, broad task-memory scans, or fallback repo scans", envelope.Prompt, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Host bootstrap.", envelope.Prompt, StringComparison.Ordinal);
         Assert.DoesNotContain("Indexed workspace context.", envelope.Prompt, StringComparison.Ordinal);
         Assert.Contains("- Work", envelope.Prompt, StringComparison.Ordinal);

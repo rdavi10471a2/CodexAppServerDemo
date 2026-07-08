@@ -40,4 +40,18 @@ public sealed class WorkspaceMcpTools
     {
         return workspaceContextService.GetTestProjectSummaryAsync(cancellationToken);
     }
+
+    [McpServerTool]
+    [Description("Returns the current Active task for the selected workspace, or reports that no current task is set.")]
+    public Task<CurrentTaskResult> GetCurrentTask(CancellationToken cancellationToken = default)
+    {
+        return workspaceContextService.GetCurrentTaskAsync(cancellationToken);
+    }
+
+    [McpServerTool]
+    [Description("Rebuilds the watched solution index for the selected workspace and returns the refreshed readiness metadata.")]
+    public Task<ReindexWorkspaceResult> RebuildSolutionIndex(CancellationToken cancellationToken = default)
+    {
+        return workspaceContextService.RebuildSolutionIndexAsync(cancellationToken);
+    }
 }

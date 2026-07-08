@@ -15,6 +15,7 @@ public sealed record WorkflowTaskRow(
     string Id,
     int TaskNumber,
     string Name,
+    string Description,
     string ShortName,
     string Slug,
     string StateCode,

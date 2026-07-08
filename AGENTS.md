@@ -23,6 +23,11 @@
 - Keep changes small, explicit, and easy to verify.
 - Prefer MCP/index-backed discovery over broad shell/text search when the needed workspace context is available there.
 - Treat repo-local workflow rules as operational requirements, not optional guidance.
+- User requests such as "implement", "execute", "do it", or "plan the current task and execute it" do not waive the governed workflow. They authorize progress through the required workflow stages, not skipping proposal, review, merge, or other required gates.
+- In governed editing, complete the intended change for the current file in the Working candidate before staging it for review.
+- Do not stage partial file work unless the workflow explicitly calls for an intermediate checkpoint.
+- Prefer finishing one file cleanly, then moving to the next required file.
+- If a task truly requires coordinated multi-file work, stage those files deliberately under one review session after each file-level change is complete enough to review.
 
 ## Freshness Rules
 
@@ -64,6 +69,17 @@ dotnet restore .\CodexAppServerWinForms_corrected.slnx
 dotnet build .\CodexAppServerWinForms_corrected.slnx
 dotnet run --project .\CodexAppServerBlazor\CodexAppServerBlazor.csproj
 ```
+
+For repeatable dual-instance runs, prefer the pinned scripts under `scripts/`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\Start-CodingServices-SelfHost.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\Start-CodingServices-Child.ps1
+```
+
+- SelfHost should pin `C:\CodexAppServerWinForms_corrected\CodexAppServerWinForms_corrected.slnx`.
+- Child should pin the watched solution for the selected external workspace explicitly with `--CodingServices:WatchedSolutionPath=...`.
+- Do not rely on fallback solution discovery when restarting or testing the child instance.
 
 - If you change turn construction, verify it remains CWD/workspace based.
 - If you change UI behavior, rebuild and restart the Blazor app before claiming the change is visible.

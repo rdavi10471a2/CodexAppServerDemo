@@ -31,7 +31,7 @@
             <RadzenDropDown TValue="string"
                             Value="@Sandbox"
                             ValueChanged="@OnSandboxChanged"
-                            Data="@Sandboxes" />
+                            Data="@AvailableSandboxes" />
         </label>
     </div>
 
@@ -166,9 +166,15 @@
         return SandboxChanged.InvokeAsync(value ?? "read-only");
     }
 
-    private Task OnTurnModeChanged(WorkflowTurnMode value)
+    private async Task OnTurnModeChanged(WorkflowTurnMode value)
     {
-        return TurnModeChanged.InvokeAsync(value);
+        if (value == WorkflowTurnMode.Work
+            && !string.Equals(Sandbox, "read-only", StringComparison.Ordinal))
+        {
+            await SandboxChanged.InvokeAsync("read-only");
+        }
+
+        await TurnModeChanged.InvokeAsync(value);
     }
 
     private static readonly string[] ApprovalPolicies =
@@ -185,6 +191,10 @@
         "workspace-write",
         "danger-full-access"
     ];
+
+    private IReadOnlyList<string> AvailableSandboxes => TurnMode == WorkflowTurnMode.Work
+        ? ["read-only"]
+        : Sandboxes;
 
     private static readonly WorkflowTurnMode[] TurnModes =
     [

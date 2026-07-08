@@ -11,6 +11,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
     private readonly object gate = new();
     private readonly SemaphoreSlim operationGate = new(1, 1);
     private readonly Func<CodexAppServerClient> clientFactory;
+    private readonly IConfiguration configuration;
     private readonly WorkspaceState workspaceState;
     private readonly IWorkspaceWorkflowContextService workspaceWorkflowContextService;
     private readonly ITaskWorkflowContextService taskWorkflowContextService;
@@ -29,6 +30,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
     private WorkflowSessionState? workflowSessionState;
 
     public CodexConnectionService(
+        IConfiguration configuration,
         WorkspaceState workspaceState,
         IWorkspaceWorkflowContextService workspaceWorkflowContextService,
         ITaskWorkflowContextService taskWorkflowContextService,
@@ -36,6 +38,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
         IWorkflowTurnContextComposer workflowTurnContextComposer,
         Func<CodexAppServerClient>? clientFactory = null)
     {
+        this.configuration = configuration;
         this.clientFactory = clientFactory ?? (() => new CodexAppServerClient());
         this.workspaceState = workspaceState;
         this.workspaceWorkflowContextService = workspaceWorkflowContextService;
@@ -89,7 +92,12 @@ public sealed class CodexConnectionService : IAsyncDisposable
             client.ServerRequest += OnServerRequest;
             client.Exited += OnClientExited;
 
-            await client.StartAsync(codexExe, cancellationToken);
+            string? harnessMcpUrl = configuration["Mcp:Url"];
+            await client.StartAsync(codexExe, harnessMcpUrl, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(harnessMcpUrl))
+            {
+                AddEvent(statusEvents, "ServerLaunchConfig", "ok", "coding-services", $"Launched codex app-server with harness MCP override {harnessMcpUrl}.");
+            }
             AddEvent(statusEvents, "ServerStarted", "ok", "codex app-server", "Blazor connection initialized codex app-server.");
         }
         finally
@@ -124,6 +132,8 @@ public sealed class CodexConnectionService : IAsyncDisposable
                 isTurnRunning = false;
                 workflowSessionState = null;
             }
+
+            workspaceState.SetCurrentEditSessionId(null);
 
             AddEvent(statusEvents, "ServerStopped", "ok", "codex app-server", "Stopped codex app-server.");
         }
@@ -210,6 +220,8 @@ public sealed class CodexConnectionService : IAsyncDisposable
             permissionRequestService.Clear();
             workflowSessionState = null;
         }
+
+        workspaceState.SetCurrentEditSessionId(null);
     }
 
     public async Task SendTurnAsync(
@@ -244,6 +256,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
 
             workspaceState.SetRepoRoot(repoRoot);
             workflowSessionState ??= new WorkflowSessionState(repoRoot, mode);
+            workspaceState.SetCurrentEditSessionId(null);
             SessionBootstrapPolicy sessionBootstrapPolicy = sessionBootstrapPolicyService.LoadPolicy();
             WorkflowPromptSection workspaceContext = workspaceWorkflowContextService.BuildTurnContext(repoRoot);
             WorkflowTurnTaskContext taskContext = mode == WorkflowTurnMode.Work
@@ -423,6 +436,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
         CancellationToken cancellationToken)
     {
         workspaceState.SetRepoRoot(repoRoot);
+        workspaceState.SetCurrentEditSessionId(null);
         await activeClient.StartThreadAsync(
             repoRoot,
             model,

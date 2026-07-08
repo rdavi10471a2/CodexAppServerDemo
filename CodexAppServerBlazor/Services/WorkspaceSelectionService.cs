@@ -1,7 +1,12 @@
+using System.Text;
+
 namespace CodexAppServerBlazor.Services;
 
 public sealed class WorkspaceSelectionService
 {
+    private const int SaveWorkspaceRetryCount = 8;
+    private static readonly TimeSpan SaveWorkspaceRetryDelay = TimeSpan.FromMilliseconds(50);
+
     private readonly IConfiguration configuration;
     private readonly string persistencePath;
 
@@ -38,7 +43,48 @@ public sealed class WorkspaceSelectionService
 
         string fullWorkspaceRoot = Path.GetFullPath(workspaceRoot);
         Directory.CreateDirectory(Path.GetDirectoryName(persistencePath) ?? AppContext.BaseDirectory);
-        File.WriteAllText(persistencePath, fullWorkspaceRoot + Environment.NewLine);
+        if (string.Equals(TryReadPersistedWorkspace(), fullWorkspaceRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        Exception? lastException = null;
+        for (int attempt = 0; attempt < SaveWorkspaceRetryCount; attempt++)
+        {
+            try
+            {
+                using FileStream stream = new(
+                    persistencePath,
+                    FileMode.Create,
+                    FileAccess.Write,
+                    FileShare.Read);
+                using StreamWriter writer = new(stream, Encoding.UTF8);
+                writer.Write(fullWorkspaceRoot);
+                writer.Write(Environment.NewLine);
+                return;
+            }
+            catch (IOException ex) when (attempt < SaveWorkspaceRetryCount - 1)
+            {
+                lastException = ex;
+                Thread.Sleep(SaveWorkspaceRetryDelay);
+            }
+            catch (UnauthorizedAccessException ex) when (attempt < SaveWorkspaceRetryCount - 1)
+            {
+                lastException = ex;
+                Thread.Sleep(SaveWorkspaceRetryDelay);
+            }
+        }
+
+        if (lastException is UnauthorizedAccessException unauthorizedAccessException)
+        {
+            throw new UnauthorizedAccessException(
+                $"Workspace selection persistence file remained locked: {persistencePath}",
+                unauthorizedAccessException);
+        }
+
+        throw new IOException(
+            $"Workspace selection persistence file remained locked: {persistencePath}",
+            lastException);
     }
 
     private string? TryReadPersistedWorkspace()

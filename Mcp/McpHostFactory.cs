@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using CodexAppServerBlazor.Services;
+using CodexAppServerBlazor.Services.Workflow;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -14,6 +15,7 @@ public static class McpHostFactory
     public static IHost Create(
         WorkspaceState workspaceState,
         SourceWorkspaceService sourceWorkspaceService,
+        GovernedReviewCoordinatorService governedReviewCoordinator,
         string? localMcpUrl)
     {
         string endpointUrl = NormalizeLocalUrl(localMcpUrl, DefaultLocalMcpUrl);
@@ -22,7 +24,11 @@ public static class McpHostFactory
         builder.WebHost.UseUrls(endpointUrl);
         builder.Services.AddSingleton(workspaceState);
         builder.Services.AddSingleton(sourceWorkspaceService);
+        builder.Services.AddSingleton(governedReviewCoordinator);
         builder.Services.AddSingleton<HarnessWorkspaceContextService>();
+        builder.Services.AddSingleton<CodingServicesSettingsProvider>();
+        builder.Services.AddSingleton<HarnessWorkspaceEditService>();
+        builder.Services.AddSingleton<HarnessWorkspaceReviewService>();
 
         builder.Services
             .AddMcpServer()
@@ -32,7 +38,9 @@ public static class McpHostFactory
                 // long-lived MCP sessions or server-to-client callbacks.
                 options.Stateless = true;
             })
-            .WithTools<WorkspaceMcpTools>();
+            .WithTools<WorkspaceMcpTools>()
+            .WithTools<WorkspaceEditMcpTools>()
+            .WithTools<WorkspaceReviewMcpTools>();
 
         var app = builder.Build();
         app.MapGet(HealthPath, () => Results.Json(new
@@ -64,6 +72,131 @@ public static class McpHostFactory
                 {
                     name = "get_test_project_summary",
                     description = "Indexed project/file/type/member tree for configured test projects only. Does not include source file bodies."
+                },
+                new
+                {
+                    name = "get_current_task",
+                    description = "Returns the current Active task for the selected workspace, or reports that no current task is set."
+                },
+                new
+                {
+                    name = "rebuild_solution_index",
+                    description = "Rebuilds the watched solution index for the selected workspace and returns the refreshed readiness metadata."
+                },
+                new
+                {
+                    name = "get_edit_session_state",
+                    description = "Returns the current governed edit-session status for a workspace file path."
+                },
+                new
+                {
+                    name = "refresh_file",
+                    description = "Creates or refreshes the governed Working candidate for an existing workspace file."
+                },
+                new
+                {
+                    name = "new_file",
+                    description = "Creates a new-file governed edit session for a file path that does not yet exist inside the selected workspace."
+                },
+                new
+                {
+                    name = "replace_text_in_file",
+                    description = "Replaces text inside the governed Working candidate for a workspace file."
+                },
+                new
+                {
+                    name = "replace_span_in_file",
+                    description = "Replaces a line/column span inside the governed Working candidate for a workspace file."
+                },
+                new
+                {
+                    name = "get_file_outline",
+                    description = "Returns a Roslyn outline for a C# source file."
+                },
+                new
+                {
+                    name = "get_symbol",
+                    description = "Reads a single symbol body from a C# source file in the governed Working candidate."
+                },
+                new
+                {
+                    name = "submit_symbol",
+                    description = "Replaces a single symbol in a C# source file in the governed Working candidate."
+                },
+                new
+                {
+                    name = "add_field",
+                    description = "Adds a field to a containing C# type in the governed Working candidate."
+                },
+                new
+                {
+                    name = "add_property",
+                    description = "Adds a property to a containing C# type in the governed Working candidate."
+                },
+                new
+                {
+                    name = "add_method",
+                    description = "Adds a method to a containing C# type in the governed Working candidate."
+                },
+                new
+                {
+                    name = "add_constructor",
+                    description = "Adds a constructor to a containing C# type in the governed Working candidate."
+                },
+                new
+                {
+                    name = "add_nested_type",
+                    description = "Adds a nested type to a containing C# type in the governed Working candidate."
+                },
+                new
+                {
+                    name = "set_type_partial",
+                    description = "Adds or removes the partial modifier on a containing C# type in the governed Working candidate."
+                },
+                new
+                {
+                    name = "add_using",
+                    description = "Adds a using directive to a C# source file in the governed Working candidate."
+                },
+                new
+                {
+                    name = "remove_using",
+                    description = "Removes a using directive from a C# source file in the governed Working candidate."
+                },
+                new
+                {
+                    name = "remove_symbol",
+                    description = "Removes a single symbol from a C# source file in the governed Working candidate."
+                },
+                new
+                {
+                    name = "list_pending_staged_reviews",
+                    description = "Lists pending staged review records for the currently selected workspace."
+                },
+                new
+                {
+                    name = "load_staged_review",
+                    description = "Loads the staged review model for a specific staged record id."
+                },
+                new
+                {
+                    name = "load_next_session_review",
+                    description = "Loads the next pending staged review model for a staged-edit session id."
+                },
+                new
+                {
+                    name = "stage_current_candidate_for_review",
+                    description = "Stages the current governed Working candidate for a workspace file into review and returns the review URL."
+                },
+                new
+                {
+                    name = "accept_staged_review",
+                    description = "Accepts a staged review record into watched source and records the workflow decision."
+                },
+                new
+                {
+                    name = "reject_staged_review",
+                    description = "Rejects a staged review record and records the workflow decision without changing watched source."
                 }
             }
         }));

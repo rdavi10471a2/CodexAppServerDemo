@@ -149,60 +149,60 @@
                 else
                 {
                     <div class="agent-request-list">
-                        @foreach (CodexPermissionRequest request in VisibleRequests)
+                        @if (CurrentVisibleRequest is not null)
                         {
-                            bool isPending = IsPending(request);
-                            <article class="@GetRequestCardClass(request)">
-                                <div class="agent-request-main">
-                                    <span>@request.Method</span>
-                                    <strong>@request.Summary</strong>
-                                    <code>#@request.RequestId</code>
-                                    <div class="agent-request-state">
-                                        <span>@GetRequestStatusText(request)</span>
-                                        <time>@GetRequestTimeText(request)</time>
-                                    </div>
-                                </div>
+                            bool isPending = IsPending(CurrentVisibleRequest);
+                            <article class="@GetRequestCardClass(CurrentVisibleRequest)">
                                 @if (isPending)
                                 {
                                     <div class="agent-request-actions">
-                                        <RadzenButton Text="@GetApproveButtonText(request)"
+                                        <RadzenButton Text="@GetApproveButtonText(CurrentVisibleRequest)"
                                                       ButtonStyle="ButtonStyle.Success"
                                                       Size="ButtonSize.Small"
                                                       Disabled="@Busy"
-                                                      Click="@(() => ApprovePermission.InvokeAsync(request.RequestId))" />
-                                        @if (request.SupportsSessionApproval)
+                                                      Click="@(() => ApprovePermission.InvokeAsync(CurrentVisibleRequest.RequestId))" />
+                                        @if (CurrentVisibleRequest.SupportsSessionApproval)
                                         {
                                             <RadzenButton Text="Allow Session"
                                                           ButtonStyle="ButtonStyle.Success"
                                                           Size="ButtonSize.Small"
                                                           Disabled="@Busy"
-                                                          Click="@(() => ApprovePermissionForSession.InvokeAsync(request.RequestId))" />
+                                                          Click="@(() => ApprovePermissionForSession.InvokeAsync(CurrentVisibleRequest.RequestId))" />
                                         }
-                                        @if (request.SupportsPersistentApproval)
+                                        @if (CurrentVisibleRequest.SupportsPersistentApproval)
                                         {
                                             <RadzenButton Text="Allow Always"
                                                           ButtonStyle="ButtonStyle.Warning"
                                                           Size="ButtonSize.Small"
                                                           Disabled="@Busy"
-                                                          Click="@(() => ApprovePermissionAlways.InvokeAsync(request.RequestId))" />
+                                                          Click="@(() => ApprovePermissionAlways.InvokeAsync(CurrentVisibleRequest.RequestId))" />
                                         }
                                         <RadzenButton Text="Deny"
                                                       ButtonStyle="ButtonStyle.Light"
                                                       Size="ButtonSize.Small"
                                                       Disabled="@Busy"
-                                                      Click="@(() => DenyPermission.InvokeAsync(request.RequestId))" />
+                                                      Click="@(() => DenyPermission.InvokeAsync(CurrentVisibleRequest.RequestId))" />
                                         <RadzenButton Text="Cancel Turn"
                                                       ButtonStyle="ButtonStyle.Danger"
                                                       Size="ButtonSize.Small"
                                                       Disabled="@Busy"
-                                                      Click="@(() => CancelPermission.InvokeAsync(request.RequestId))" />
+                                                      Click="@(() => CancelPermission.InvokeAsync(CurrentVisibleRequest.RequestId))" />
                                     </div>
-                                    @if (!request.SupportsSessionApproval && !request.SupportsPersistentApproval)
-                                    {
-                                        <div class="agent-request-scope-note">
-                                            One-shot response only for this request type.
-                                        </div>
-                                    }
+                                }
+                                <div class="agent-request-main">
+                                    <span>@CurrentVisibleRequest.Method</span>
+                                    <strong>@CurrentVisibleRequest.Summary</strong>
+                                    <code>#@CurrentVisibleRequest.RequestId</code>
+                                    <div class="agent-request-state">
+                                        <span>@GetRequestStatusText(CurrentVisibleRequest)</span>
+                                        <time>@GetRequestTimeText(CurrentVisibleRequest)</time>
+                                    </div>
+                                </div>
+                                @if (isPending && !CurrentVisibleRequest.SupportsSessionApproval && !CurrentVisibleRequest.SupportsPersistentApproval)
+                                {
+                                    <div class="agent-request-scope-note">
+                                        One-shot response only for this request type.
+                                    </div>
                                 }
                             </article>
                         }
@@ -372,16 +372,12 @@
     private IReadOnlyList<CodexPermissionRequest> PendingRequests =>
         PermissionRequests
             .Where(IsPending)
+            .OrderBy(request => request.CreatedAt)
             .ToArray();
     private IReadOnlyList<CodexPermissionRequest> VisibleRequests =>
-        PendingRequests
-            .OrderBy(request => request.CreatedAt)
-            .Concat(PermissionRequests
-                .Where(request => !IsPending(request))
-                .OrderByDescending(request => request.ResolvedAt ?? request.CreatedAt)
-                .Take(5))
-            .DistinctBy(request => request.RequestId)
-            .ToArray();
+        CurrentVisibleRequest is null ? [] : [CurrentVisibleRequest];
+    private CodexPermissionRequest? CurrentVisibleRequest =>
+        PendingRequests.FirstOrDefault();
 
     private void SelectRailTab(RailTab tab)
     {

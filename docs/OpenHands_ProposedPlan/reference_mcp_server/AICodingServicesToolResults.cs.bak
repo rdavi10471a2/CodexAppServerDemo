@@ -40,7 +40,7 @@ public sealed record AICodingServicesWorkflowStatus(
     string RuntimeRoot,
     string WorkingRoot,
     string? ResolvedDiffToolPath,
-    IReadOnlyList<string> WinMergeCandidatePaths);
+    IReadOnlyList<string> ReviewToolCandidatePaths);
 
 public sealed record AICodingServicesToolErrorResult(
     bool IsError,

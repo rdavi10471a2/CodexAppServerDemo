@@ -20,6 +20,36 @@ dotnet build .\CodexAppServerWinForms_corrected.slnx
 dotnet run --project .\CodexAppServerBlazor\CodexAppServerBlazor.csproj
 ```
 
+## Dual Instance Launch
+
+Prefer the pinned launch scripts instead of retyping command lines:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\Start-CodingServices-SelfHost.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\Start-CodingServices-Child.ps1
+```
+
+Or start both:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\Start-CodingServices-DualInstance.ps1
+```
+
+The child script accepts overrides when targeting a different watched project:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\Start-CodingServices-Child.ps1 `
+  -WorkspaceRoot C:\SchemaStudioWebViewer1 `
+  -WatchedSolutionPath C:\SchemaStudioWebViewer1\SchemaStudioWebViewer.sln
+```
+
+Important:
+
+- Always pin `CodingServices:WatchedSolutionPath` explicitly for non-self-host runs.
+- Do not rely on fallback solution discovery when running multiple instances.
+- `5205/6278` are reserved for SelfHost.
+- `5215/6289` are reserved for Child by convention in this repo.
+
 The default app and MCP ports are configured in
 `CodexAppServerBlazor/appsettings.json`:
 

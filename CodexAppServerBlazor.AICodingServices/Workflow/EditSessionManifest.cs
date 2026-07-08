@@ -2,6 +2,8 @@ namespace CodexAppServerBlazor.AICodingServices.Workflow;
 
 public sealed class EditSessionManifest
 {
+    public string EditSessionId { get; set; } = string.Empty;
+
     public string WatchedFilePath { get; set; } = string.Empty;
 
     public string WorkingFilePath { get; set; } = string.Empty;

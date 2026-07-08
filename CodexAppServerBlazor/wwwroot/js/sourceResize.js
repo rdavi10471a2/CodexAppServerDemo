@@ -348,6 +348,19 @@ export function openHtmlDocument(html, title) {
     popup.document.close();
 }
 
+export function openUrlInNewTab(url) {
+    if (!url) {
+        return;
+    }
+
+    const popup = window.open(url, "_blank");
+    if (!popup) {
+        return;
+    }
+
+    popup.opener = null;
+}
+
 export function setBeforeUnloadGuard(enabled, message) {
     if (enabled) {
         window.__codingServicesBeforeUnloadMessage = message || "Refreshing will reset the current Coding Services session.";

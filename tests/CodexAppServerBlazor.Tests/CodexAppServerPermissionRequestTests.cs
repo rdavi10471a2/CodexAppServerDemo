@@ -7,6 +7,35 @@ namespace CodexAppServerBlazor.Tests;
 public sealed class CodexAppServerPermissionRequestTests
 {
     [Fact]
+    public void BuildAppServerArguments_includes_harness_override_when_url_is_provided()
+    {
+        IReadOnlyList<string> arguments = CodexAppServerClient.BuildAppServerArguments("http://localhost:6289");
+
+        Assert.Equal("app-server", arguments[0]);
+        Assert.Equal("-c", arguments[1]);
+        Assert.Equal("features.js_repl=true", arguments[2]);
+        Assert.Equal("-c", arguments[3]);
+        Assert.Equal("mcp_servers.harness.url=\"http://localhost:6289\"", arguments[4]);
+        Assert.Equal("-c", arguments[5]);
+        Assert.Equal("mcp_servers.harness.default_tools_approval_mode=\"auto\"", arguments[6]);
+        Assert.Equal("-c", arguments[7]);
+        Assert.Equal("mcp_servers.harness.tools.accept_staged_review.approval_mode=\"approve\"", arguments[8]);
+        Assert.Equal("-c", arguments[9]);
+        Assert.Equal("mcp_servers.harness.tools.reject_staged_review.approval_mode=\"approve\"", arguments[10]);
+    }
+
+    [Fact]
+    public void BuildAppServerArguments_omits_harness_override_when_url_is_missing()
+    {
+        IReadOnlyList<string> arguments = CodexAppServerClient.BuildAppServerArguments(null);
+
+        Assert.Equal(3, arguments.Count);
+        Assert.Equal("app-server", arguments[0]);
+        Assert.Equal("-c", arguments[1]);
+        Assert.Equal("features.js_repl=true", arguments[2]);
+    }
+
+    [Fact]
     public async Task StartTurnAsync_sends_policy_reviewer_and_sandbox_policy()
     {
         List<string> sentMessages = [];

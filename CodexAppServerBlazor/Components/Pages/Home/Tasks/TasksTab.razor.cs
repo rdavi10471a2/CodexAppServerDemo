@@ -1,4 +1,5 @@
 using CodexAppServerBlazor.AICodingServices.Workflow.Tasks;
+using CodexAppServerBlazor.Services.Workflow;
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
 using Radzen;
@@ -21,8 +22,22 @@ public partial class TasksTab : ComponentBase, IAsyncDisposable
     [Inject]
     public DialogService DialogService { get; set; } = default!;
 
+    [Inject]
+    public IStagedReviewPageService StagedReviewPageService { get; set; } = default!;
+
     private IReadOnlyList<TaskBoardColumnViewModel> BoardStateOptions =>
         model.Columns.ToArray();
+
+    private TaskBoardTaskViewModel? ActiveTask =>
+        model.Columns
+            .Where(column => !column.IsArchive)
+            .SelectMany(column => column.Tasks)
+            .FirstOrDefault(task => task.StateCode.Equals("Active", StringComparison.Ordinal) && !task.IsArchived);
+
+    private bool HasSelectedTaskMismatch =>
+        model.SelectedTask is not null
+        && ActiveTask is not null
+        && !string.Equals(model.SelectedTask.Id, ActiveTask.Id, StringComparison.Ordinal);
 
     [Parameter]
     public string WorkspaceRoot { get; set; } = string.Empty;
@@ -86,11 +101,22 @@ public partial class TasksTab : ComponentBase, IAsyncDisposable
         await Task.CompletedTask;
     }
 
+    private async Task SelectActiveTask()
+    {
+        if (ActiveTask is null)
+        {
+            return;
+        }
+
+        Load(ActiveTask.Id);
+        await Task.CompletedTask;
+    }
+
     private async Task CreateTask(TaskCreateRequest request)
     {
         Execute(() =>
         {
-            TaskBoardTaskViewModel created = TaskBoardViewService.CreateTask(WorkspaceRoot, request.Name, request.ShortName, string.Empty);
+            TaskBoardTaskViewModel created = TaskBoardViewService.CreateTask(WorkspaceRoot, request.Name, request.ShortName, null, string.Empty);
             Load(created.Id);
         });
         await Task.CompletedTask;
@@ -154,7 +180,7 @@ public partial class TasksTab : ComponentBase, IAsyncDisposable
                 }
             }
 
-            TaskBoardViewService.UpdateTaskDetails(WorkspaceRoot, request.TaskId, request.Name, request.ShortName);
+            TaskBoardViewService.UpdateTaskDetails(WorkspaceRoot, request.TaskId, request.Name, request.ShortName, request.Description);
             TaskBoardViewService.UpdateNotes(WorkspaceRoot, request.TaskId, request.NotesMarkdown);
             Load(request.TaskId);
         });

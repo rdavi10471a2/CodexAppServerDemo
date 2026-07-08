@@ -63,20 +63,20 @@ public sealed class WorkflowTaskBoardViewService : IWorkflowTaskBoardViewService
             selectedTask);
     }
 
-    public TaskBoardTaskViewModel CreateTask(string workspaceRoot, string name, string? shortName, string? notesMarkdown)
+    public TaskBoardTaskViewModel CreateTask(string workspaceRoot, string name, string? shortName, string? description, string? notesMarkdown)
     {
         CodingServicesSettings settings = settingsProvider.GetSettings(workspaceRoot);
         WorkflowTaskBoardRepository repository = CreateRepository(settings);
-        WorkflowTaskRow row = repository.CreateTask(name, shortName, notesMarkdown);
+        WorkflowTaskRow row = repository.CreateTask(name, shortName, description, notesMarkdown);
         WorkflowTaskBoardSnapshot snapshot = repository.LoadSnapshot();
         return ToTaskViewModel(row, snapshot.Files);
     }
 
-    public TaskBoardTaskViewModel UpdateTaskDetails(string workspaceRoot, string taskId, string name, string? shortName)
+    public TaskBoardTaskViewModel UpdateTaskDetails(string workspaceRoot, string taskId, string name, string? shortName, string? description)
     {
         CodingServicesSettings settings = settingsProvider.GetSettings(workspaceRoot);
         WorkflowTaskBoardRepository repository = CreateRepository(settings);
-        WorkflowTaskRow row = repository.UpdateTaskDetails(taskId, name, shortName);
+        WorkflowTaskRow row = repository.UpdateTaskDetails(taskId, name, shortName, description);
         WorkflowTaskBoardSnapshot snapshot = repository.LoadSnapshot();
         return ToTaskViewModel(row, snapshot.Files);
     }
@@ -185,6 +185,7 @@ public sealed class WorkflowTaskBoardViewService : IWorkflowTaskBoardViewService
             task.TaskNumber,
             FormatTaskLabel(task.TaskNumber),
             task.Name,
+            task.Description,
             task.ShortName,
             task.StateCode,
             task.StateName,
@@ -204,6 +205,7 @@ public sealed class WorkflowTaskBoardViewService : IWorkflowTaskBoardViewService
             task.TaskNumber,
             FormatTaskLabel(task.TaskNumber),
             task.Name,
+            task.Description,
             task.ShortName,
             task.StateCode,
             task.StateName,

@@ -35,13 +35,19 @@ public sealed class WorkflowEditService
         EditSessionManifest? previousManifest = LoadManifest(fullWatchedPath);
         string originalHash = FileHash.Compute(fullWatchedPath);
         DateTimeOffset refreshedAtUtc = DateTimeOffset.UtcNow;
+        string refreshedSessionId = CreateEditSessionId();
         string retrievalBackupPath = CreateRetrievalBackup(fullWatchedPath, originalHash, refreshedAtUtc);
         string workingFilePath = paths.GetWorkingFilePath(fullWatchedPath);
         Directory.CreateDirectory(Path.GetDirectoryName(workingFilePath) ?? ".");
         File.Copy(fullWatchedPath, workingFilePath, overwrite: true);
+        RetireActiveRecordsForFile(
+            fullWatchedPath,
+            $"refresh-{refreshedSessionId}",
+            "A fresh governed refresh replaced this pending staged candidate before a new edit turn began.");
 
         EditSessionManifest manifest = new()
         {
+            EditSessionId = refreshedSessionId,
             WatchedFilePath = fullWatchedPath,
             WorkingFilePath = workingFilePath,
             RelativePath = paths.GetRelativeWatchedPath(fullWatchedPath),
@@ -77,6 +83,7 @@ public sealed class WorkflowEditService
 
         EditSessionManifest manifest = new()
         {
+            EditSessionId = CreateEditSessionId(),
             WatchedFilePath = fullWatchedPath,
             WorkingFilePath = workingFilePath,
             RelativePath = paths.GetRelativeWatchedPath(fullWatchedPath),
@@ -116,6 +123,7 @@ public sealed class WorkflowEditService
 
         EditSessionStatus status = new()
         {
+            EditSessionId = manifest?.EditSessionId ?? string.Empty,
             WatchedFilePath = fullWatchedPath,
             WorkingFilePath = workingFilePath,
             RelativePath = paths.GetRelativeWatchedPath(fullWatchedPath),
@@ -457,6 +465,7 @@ public sealed class WorkflowEditService
                 File.Copy(fullWatchedPath, workingFilePath, overwrite: true);
                 manifest = new EditSessionManifest
                 {
+                    EditSessionId = CreateEditSessionId(),
                     WatchedFilePath = fullWatchedPath,
                     WorkingFilePath = workingFilePath,
                     RelativePath = paths.GetRelativeWatchedPath(fullWatchedPath),
@@ -476,6 +485,7 @@ public sealed class WorkflowEditService
 
                 manifest = new EditSessionManifest
                 {
+                    EditSessionId = CreateEditSessionId(),
                     WatchedFilePath = fullWatchedPath,
                     WorkingFilePath = workingFilePath,
                     RelativePath = paths.GetRelativeWatchedPath(fullWatchedPath),
@@ -687,12 +697,15 @@ public sealed class WorkflowEditService
             StagedNormalizedHash = FileHash.ComputeNormalizedFile(stagedFilePath),
             CreatedAtUtc = DateTimeOffset.UtcNow.ToString("O"),
             Status = "staged",
-            Message = "Working candidate was snapshotted for WinMerge review.",
+            Message = "Working candidate was snapshotted for merge review.",
             LastCompareRunId = compare.RunId,
             LastCompareSnapshotPath = compare.ProposedSnapshotPath,
             LastLedgerPath = compare.LedgerPath
         };
-        SupersedeActiveRecordsForFile(fullWatchedPath, stagedRecordId);
+        RetireActiveRecordsForFile(
+            fullWatchedPath,
+            stagedRecordId,
+            "A newer staged candidate for the same watched file superseded this record.");
         SaveStagedRecord(record);
 
         manifest.LastStagedRecordId = stagedRecordId;
@@ -786,6 +799,20 @@ public sealed class WorkflowEditService
         record.PreMergeValidationForceApproved = validation.IsError && forceApproved;
         record.PreMergeValidationDiagnosticCount = validation.DiagnosticCount;
         record.PreMergeValidationAtUtc = DateTimeOffset.UtcNow.ToString("O");
+        SaveStagedRecord(record);
+        return record;
+    }
+
+    public StagedEditRecord ApprovePreMergeValidationFailure(string stagedRecordId)
+    {
+        StagedEditRecord record = GetStagedRecord(stagedRecordId);
+        EnsureRecordNotDecided(record);
+        if (!record.PreMergeValidationIsError)
+        {
+            throw new InvalidOperationException("Cannot override pre-merge validation unless the staged record currently has a failed validation result.");
+        }
+
+        record.PreMergeValidationForceApproved = true;
         SaveStagedRecord(record);
         return record;
     }
@@ -1050,6 +1077,11 @@ public sealed class WorkflowEditService
         return JsonSerializer.Deserialize<EditSessionManifest>(File.ReadAllText(manifestPath), JsonOptions);
     }
 
+    private static string CreateEditSessionId()
+    {
+        return "edit-" + Guid.NewGuid().ToString("N");
+    }
+
     private void SaveManifest(string watchedFilePath, EditSessionManifest manifest)
     {
         string metadataPath = paths.GetMetadataPath(watchedFilePath);
@@ -1108,7 +1140,7 @@ public sealed class WorkflowEditService
             .ToArray();
     }
 
-    private void SupersedeActiveRecordsForFile(string fullWatchedPath, string supersededByStagedRecordId)
+    private void RetireActiveRecordsForFile(string fullWatchedPath, string supersededByStagedRecordId, string message)
     {
         foreach (StagedEditRecord record in ListStagedRecords()
             .Where(record => record.WatchedFilePath.Equals(fullWatchedPath, StringComparison.OrdinalIgnoreCase))
@@ -1120,7 +1152,7 @@ public sealed class WorkflowEditService
             record.Classification = "superseded";
             record.SupersededByStagedRecordId = supersededByStagedRecordId;
             record.SupersededAtUtc = DateTimeOffset.UtcNow.ToString("O");
-            record.Message = "A newer staged candidate for the same watched file superseded this record.";
+            record.Message = message;
             SaveStagedRecord(record);
         }
     }

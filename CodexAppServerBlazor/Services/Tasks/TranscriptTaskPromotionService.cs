@@ -35,6 +35,7 @@ public sealed class TranscriptTaskPromotionService : ITranscriptTaskPromotionSer
             workspaceRoot,
             taskName.Trim(),
             shortName: null,
+            description: null,
             notesMarkdown: transcriptText.Trim());
     }
 }

@@ -44,7 +44,7 @@ public sealed partial class AICodingServicesTools
     }
 
     [McpServerTool]
-    [Description("Return the monitor workflow status, including watched solution, runtime root, Working folder, and configured WinMerge candidates.")]
+    [Description("Return the monitor workflow status, including watched solution, runtime root, Working folder, and configured review-tool candidates.")]
     public AICodingServicesWorkflowStatus GetWorkflowStatus()
     {
         runtimeState.Touch();
@@ -53,8 +53,8 @@ public sealed partial class AICodingServicesTools
             settings.WatchedProjectFolder,
             settings.RuntimeRoot,
             workflowPaths.WorkingRoot,
-            settings.WinMergeCandidatePaths.FirstOrDefault(File.Exists),
-            settings.WinMergeCandidatePaths);
+            settings.ReviewToolCandidatePaths.FirstOrDefault(File.Exists),
+            settings.ReviewToolCandidatePaths);
     }
 
     [McpServerTool]
@@ -77,8 +77,8 @@ public sealed partial class AICodingServicesTools
             workflowPaths.StagedRoot,
             File.Exists(settings.WatchedSolutionPath),
             Directory.Exists(settings.WatchedProjectFolder),
-            settings.WinMergeCandidatePaths.FirstOrDefault(File.Exists),
-            "agents edit monitor-owned Working candidates only; WinMerge review/save remains the watched-source mutation surface",
+            settings.ReviewToolCandidatePaths.FirstOrDefault(File.Exists),
+            "agents edit monitor-owned Working candidates only; merge review/save remains the watched-source mutation surface",
             overallStatus,
             guardrails);
     }

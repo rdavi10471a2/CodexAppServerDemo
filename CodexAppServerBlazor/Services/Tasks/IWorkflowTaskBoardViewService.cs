@@ -6,9 +6,9 @@ public interface IWorkflowTaskBoardViewService
 {
     TaskBoardViewModel GetBoard(string workspaceRoot, string? selectedTaskId);
 
-    TaskBoardTaskViewModel CreateTask(string workspaceRoot, string name, string? shortName, string? notesMarkdown);
+    TaskBoardTaskViewModel CreateTask(string workspaceRoot, string name, string? shortName, string? description, string? notesMarkdown);
 
-    TaskBoardTaskViewModel UpdateTaskDetails(string workspaceRoot, string taskId, string name, string? shortName);
+    TaskBoardTaskViewModel UpdateTaskDetails(string workspaceRoot, string taskId, string name, string? shortName, string? description);
 
     TaskBoardTaskViewModel MoveTask(string workspaceRoot, string taskId, string stateCode);
 

@@ -141,6 +141,7 @@
     overflow: hidden;
 }
 
+.task-title,
 .task-description,
 .task-notes {
     border: 1px solid #d7e1ea;
@@ -157,6 +158,11 @@
     padding: 0.65rem 0.75rem;
     resize: none;
     width: 100%;
+}
+
+.task-title {
+    flex: 0 0 90px;
+    height: 90px;
 }
 
 .task-pane-tabs {

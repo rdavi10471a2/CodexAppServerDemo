@@ -33,7 +33,7 @@ public static class CodingServicesSettingsLoader
                 string watchedSolutionPath = RequireString(codingServices, "WatchedSolutionPath");
                 string runtimeRoot = GetString(codingServices, "RuntimeRoot") ?? "runtime";
                 string settingsDirectory = Path.GetDirectoryName(resolvedSettingsPath) ?? resolvedRepositoryRoot;
-                IReadOnlyList<string> winMergeCandidatePaths = LoadWinMergeCandidatePaths(
+                IReadOnlyList<string> reviewToolCandidatePaths = LoadReviewToolCandidatePaths(
                     codingServices,
                     resolvedRepositoryRoot,
                     settingsDirectory);
@@ -51,7 +51,7 @@ public static class CodingServicesSettingsLoader
                     ResolvePath(watchedSolutionPath, settingsDirectory),
                     ResolvePath(runtimeRoot, resolvedRepositoryRoot),
                     testProjectPaths,
-                    ResolvePaths(winMergeCandidatePaths, settingsDirectory),
+                    ResolvePaths(reviewToolCandidatePaths, settingsDirectory),
                     defaultReviewSurface,
                     browserReviewBaseUrl);
             }
@@ -72,7 +72,7 @@ public static class CodingServicesSettingsLoader
             : runtimeRoot;
 
         Directory.CreateDirectory(Path.GetDirectoryName(resolvedSettingsPath) ?? resolvedRepositoryRoot);
-        IReadOnlyList<string> existingWinMergeCandidatePaths = LoadExistingWinMergeCandidatePaths(
+        IReadOnlyList<string> existingReviewToolCandidatePaths = LoadExistingReviewToolCandidatePaths(
             resolvedSettingsPath,
             resolvedRepositoryRoot);
         IReadOnlyList<string> existingTestProjectPaths = LoadExistingPathList(
@@ -91,7 +91,7 @@ public static class CodingServicesSettingsLoader
                 resolvedWatchedSolutionPath,
                 resolvedRuntimeRoot,
                 existingTestProjectPaths,
-                existingWinMergeCandidatePaths,
+                existingReviewToolCandidatePaths,
                 existingDefaultReviewSurface,
                 existingBrowserReviewBaseUrl));
         File.WriteAllText(resolvedSettingsPath, JsonSerializer.Serialize(file, SerializerOptions) + Environment.NewLine);
@@ -146,26 +146,26 @@ public static class CodingServicesSettingsLoader
         return true;
     }
 
-    private static IReadOnlyList<string> LoadWinMergeCandidatePaths(
+    private static IReadOnlyList<string> LoadReviewToolCandidatePaths(
         JsonElement monitor,
         string resolvedRepositoryRoot,
         string settingsDirectory)
     {
-        if (TryGetStringArray(monitor, "WinMergeCandidatePaths", out IReadOnlyList<string> configuredPaths))
+        if (TryGetStringArray(monitor, "ReviewToolCandidatePaths", out IReadOnlyList<string> configuredPaths))
         {
             return ResolvePaths(configuredPaths, settingsDirectory);
         }
 
-        return LoadTemplateWinMergeCandidatePaths(resolvedRepositoryRoot);
+        return LoadTemplateReviewToolCandidatePaths(resolvedRepositoryRoot);
     }
 
-    private static IReadOnlyList<string> LoadExistingWinMergeCandidatePaths(
+    private static IReadOnlyList<string> LoadExistingReviewToolCandidatePaths(
         string settingsPath,
         string resolvedRepositoryRoot)
     {
         if (!File.Exists(settingsPath))
         {
-            return LoadTemplateWinMergeCandidatePaths(resolvedRepositoryRoot);
+            return LoadTemplateReviewToolCandidatePaths(resolvedRepositoryRoot);
         }
 
         using (FileStream stream = File.OpenRead(settingsPath))
@@ -174,12 +174,12 @@ public static class CodingServicesSettingsLoader
             {
                 if (!document.RootElement.TryGetProperty("CodingServices", out JsonElement codingServices))
                 {
-                    return LoadTemplateWinMergeCandidatePaths(resolvedRepositoryRoot);
+                    return LoadTemplateReviewToolCandidatePaths(resolvedRepositoryRoot);
                 }
 
-                return TryGetStringArray(codingServices, "WinMergeCandidatePaths", out IReadOnlyList<string> existingPaths)
+                return TryGetStringArray(codingServices, "ReviewToolCandidatePaths", out IReadOnlyList<string> existingPaths)
                     ? existingPaths
-                    : LoadTemplateWinMergeCandidatePaths(resolvedRepositoryRoot);
+                    : LoadTemplateReviewToolCandidatePaths(resolvedRepositoryRoot);
             }
         }
     }
@@ -228,7 +228,7 @@ public static class CodingServicesSettingsLoader
         }
     }
 
-    private static IReadOnlyList<string> LoadTemplateWinMergeCandidatePaths(string resolvedRepositoryRoot)
+    private static IReadOnlyList<string> LoadTemplateReviewToolCandidatePaths(string resolvedRepositoryRoot)
     {
         string templatePath = Path.Combine(resolvedRepositoryRoot, "config", "appsettings.template.json");
         if (!File.Exists(templatePath))
@@ -241,7 +241,7 @@ public static class CodingServicesSettingsLoader
             using (JsonDocument document = JsonDocument.Parse(stream))
             {
                 if (!document.RootElement.TryGetProperty("CodingServices", out JsonElement codingServices)
-                    || !TryGetStringArray(codingServices, "WinMergeCandidatePaths", out IReadOnlyList<string> templatePaths))
+                    || !TryGetStringArray(codingServices, "ReviewToolCandidatePaths", out IReadOnlyList<string> templatePaths))
                 {
                     return [];
                 }
@@ -272,7 +272,7 @@ public static class CodingServicesSettingsLoader
         string WatchedSolutionPath,
         string RuntimeRoot,
         IReadOnlyList<string> TestProjectPaths,
-        IReadOnlyList<string> WinMergeCandidatePaths,
+        IReadOnlyList<string> ReviewToolCandidatePaths,
         string DefaultReviewSurface,
         string BrowserReviewBaseUrl);
 }

@@ -61,9 +61,14 @@
                                             Style="width: 100%;" />
                         </label>
                         <label class="description-label">
+                            <span>Title</span>
+                            <textarea class="task-title"
+                                      @bind="taskName"></textarea>
+                        </label>
+                        <label class="description-label">
                             <span>Description</span>
                             <textarea class="task-description"
-                                      @bind="taskName"></textarea>
+                                      @bind="taskDescription"></textarea>
                         </label>
                     </div>
                 </section>

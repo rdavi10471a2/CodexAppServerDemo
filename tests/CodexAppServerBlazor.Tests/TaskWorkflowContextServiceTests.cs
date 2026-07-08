@@ -32,7 +32,9 @@ public sealed class TaskWorkflowContextServiceTests
 
         Assert.True(context.HasPrompt);
         Assert.Equal(initialBoard.SelectedTask.Id, context.ActiveTaskId);
-        Assert.Contains("Active task context supplied by Coding Services:", context.PromptMarkdown, StringComparison.Ordinal);
+        Assert.Contains("Host-authoritative current task supplied by Coding Services:", context.PromptMarkdown, StringComparison.Ordinal);
+        Assert.Contains("authoritative current task for this Work turn", context.PromptMarkdown, StringComparison.Ordinal);
+        Assert.Contains("Do not substitute another task", context.PromptMarkdown, StringComparison.Ordinal);
         Assert.Contains("User note body.", context.PromptMarkdown, StringComparison.Ordinal);
         Assert.Contains("Keep CodexConnectionService orchestration-only.", context.PromptMarkdown, StringComparison.Ordinal);
         Assert.Contains("CodexAppServerBlazor/Services/CodexConnectionService.cs", context.PromptMarkdown, StringComparison.Ordinal);

@@ -210,6 +210,16 @@
     overflow: hidden;
 }
 
+.work-panel ::deep .rz-tabview-panel {
+    display: flex;
+    flex-direction: column;
+}
+
+.work-panel ::deep .rz-tabview-panel > * {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
 .error-banner,
 .inline-error {
     border: 1px solid #e4a0a6;
@@ -375,6 +385,39 @@
     border-top-color: #5b82f1;
     border-radius: 50%;
     animation: screen-busy-spin .8s linear infinite;
+}
+
+.workflow-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: grid;
+    place-items: center;
+    padding: 1vh 1vw;
+    background: rgba(17, 24, 39, 0.38);
+    backdrop-filter: blur(2px);
+}
+
+.workflow-modal-shell {
+    width: min(98vw, 1920px);
+    max-width: 98vw;
+    background: #ffffff;
+    border: 1px solid #c8d5df;
+    border-radius: 12px;
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);
+    overflow: hidden;
+}
+
+.workflow-modal-shell-compact {
+    width: min(960px, 96vw);
+    max-width: 96vw;
+    padding: 18px;
+}
+
+.workflow-modal-shell-review {
+    height: 98vh;
+    max-height: 98vh;
+    padding: 12px;
 }
 
 @keyframes screen-busy-spin {

@@ -12,6 +12,7 @@ public partial class TaskWorkspace : ComponentBase
         .Build();
 
     private string taskName = string.Empty;
+    private string taskDescription = string.Empty;
     private string notesMarkdown = string.Empty;
     private string newFilePath = string.Empty;
     private string newFileIntent = string.Empty;
@@ -54,6 +55,7 @@ public partial class TaskWorkspace : ComponentBase
         {
             loadedTaskId = null;
             taskName = string.Empty;
+            taskDescription = string.Empty;
             notesMarkdown = string.Empty;
             selectedStateCode = string.Empty;
             return;
@@ -66,6 +68,7 @@ public partial class TaskWorkspace : ComponentBase
 
         loadedTaskId = Task.Id;
         taskName = Task.Name;
+        taskDescription = Task.Description;
         notesMarkdown = Task.NotesMarkdown;
         selectedStateCode = Task.IsArchived ? "Archived" : Task.StateCode;
         newFilePath = string.Empty;
@@ -84,7 +87,7 @@ public partial class TaskWorkspace : ComponentBase
         string stateCode = string.IsNullOrWhiteSpace(selectedStateCode)
             ? Task.StateCode
             : selectedStateCode;
-        await OnSaveDetails.InvokeAsync(new TaskDetailsSaveRequest(Task.Id, taskName, null, stateCode, notesMarkdown));
+        await OnSaveDetails.InvokeAsync(new TaskDetailsSaveRequest(Task.Id, taskName, taskDescription, null, stateCode, notesMarkdown));
     }
 
     private async Task SaveNotes()

@@ -3,6 +3,7 @@ using CodexAppServerBlazor.Services;
 using CodexAppServerBlazor.Services.ArchivedDiscussions;
 using CodexAppServerBlazor.Services.Tasks;
 using CodexAppServerBlazor.Services.Workflow;
+using CodexAppServerBlazor.Components.Pages.Home.Tasks;
 using Markdig;
 using Markdig.Extensions.MediaLinks;
 using Microsoft.AspNetCore.Components;
@@ -71,12 +72,24 @@ public partial class Home : IDisposable, IAsyncDisposable
     private bool isRebuildingSourceIndex;
     private bool isConnectionPanelVisible = true;
     private bool isDirectoryBrowserVisible;
+    private string? launchedReviewSessionId;
+    private bool reviewDialogOpen;
+    private bool reviewLaunchCheckInProgress;
+    private bool reviewLaunchProcessing;
+    private PendingReviewLaunchState? pendingReviewLaunch;
+    private StagedReviewPageModel? validationGateModel;
+    private int validationGatePendingCount;
+    private TaskCompletionSource<bool>? validationGateCompletion;
+    private string? reviewDialogSessionId;
+    private TaskCompletionSource<bool>? reviewDialogCompletion;
     private int assistantViewVersion;
     private ElementReference controlGrid;
     private ElementReference connectionPane;
     private ElementReference workPanel;
     private ElementReference mainSplitter;
     private IJSObjectReference? mainResizeModule;
+    private readonly List<CodexOutputEvent> debugEvents = [];
+    private const int MaxDebugEvents = 300;
     private static readonly MarkdownPipeline MarkdownPipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions()
         .DisableHtml()
@@ -87,6 +100,7 @@ public partial class Home : IDisposable, IAsyncDisposable
     private string TranscriptText => BuildTranscriptText();
     private string CurrentTurnHtml => RenderMarkdown(GetCurrentTurnText());
     private string assistantViewKey => $"{repoRoot}:{assistantViewVersion}";
+    private IReadOnlyList<CodexOutputEvent> DebugEvents => debugEvents.ToArray();
 
     [Inject]
     public CodexConnectionService ConnectionService { get; set; } = default!;
@@ -115,14 +129,32 @@ public partial class Home : IDisposable, IAsyncDisposable
     [Inject]
     public WorkspaceSelectionService WorkspaceSelectionService { get; set; } = default!;
 
+    [Inject]
+    public WorkspaceState WorkspaceState { get; set; } = default!;
+
+    [Inject]
+    public IStagedReviewPageService StagedReviewPageService { get; set; } = default!;
+
+    [Inject]
+    public GovernedReviewCoordinatorService GovernedReviewCoordinator { get; set; } = default!;
+
+    [Inject]
+    public NavigationManager NavigationManager { get; set; } = default!;
+
     protected override void OnInitialized()
     {
         ConnectionService.Changed += OnConnectionChanged;
+        GovernedReviewCoordinator.Changed += OnGovernedReviewCoordinatorChanged;
         snapshot = ConnectionService.GetSnapshot();
         mcpUrl = Configuration["Mcp:Url"] ?? McpHostFactory.DefaultLocalMcpUrl;
         instanceLabel = (Configuration["AppInstance:Label"] ?? string.Empty).Trim();
         string configuredCwd = WorkspaceSelectionService.GetStartupWorkspace();
         SetWorkspace(configuredCwd);
+        AddDebugEvent(
+            "HomeInit",
+            "ok",
+            "coding-services",
+            $"Initialized Home for workspace '{repoRoot}' with instance label '{instanceLabel}'.");
     }
 
     private async Task ToggleServer()
@@ -174,13 +206,27 @@ public partial class Home : IDisposable, IAsyncDisposable
             return;
         }
 
+        string effectiveSandbox = turnMode == WorkflowTurnMode.Work
+            ? "read-only"
+            : sandbox;
+        if (!string.Equals(effectiveSandbox, sandbox, StringComparison.Ordinal))
+        {
+            sandbox = effectiveSandbox;
+            AddDebugEvent(
+                "TurnPolicyCoerced",
+                "ok",
+                "home",
+                "Governed Work mode forced sandbox back to read-only before sending the turn.");
+        }
+
         string transcriptContent = BuildUserTranscriptContent(content, attachments);
+        ResetGovernedReviewStateForNewTurn(clearEditSessionId: turnMode == WorkflowTurnMode.Work);
         await RunCommandAsync(() => ConnectionService.SendTurnAsync(
             repoRoot,
             content,
             model,
             approvalPolicy,
-            sandbox,
+            effectiveSandbox,
             turnMode,
             attachments,
             CancellationToken.None));
@@ -195,6 +241,35 @@ public partial class Home : IDisposable, IAsyncDisposable
         AddUserMessage(transcriptContent);
         StartAssistantMessage("_Awaiting assistant response..._", snapshot.IsTurnRunning);
         RenderAssistantSnapshot(snapshot.IsTurnRunning);
+    }
+
+    private void ResetGovernedReviewStateForNewTurn(bool clearEditSessionId)
+    {
+        validationGateCompletion?.TrySetResult(false);
+        validationGateCompletion = null;
+        validationGateModel = null;
+        validationGatePendingCount = 0;
+
+        reviewDialogCompletion?.TrySetResult(true);
+        reviewDialogCompletion = null;
+        reviewDialogSessionId = null;
+
+        pendingReviewLaunch = null;
+        launchedReviewSessionId = null;
+        reviewDialogOpen = false;
+        reviewLaunchCheckInProgress = false;
+        reviewLaunchProcessing = false;
+
+        if (clearEditSessionId)
+        {
+            WorkspaceState.SetCurrentEditSessionId(null);
+        }
+
+        AddDebugEvent(
+            "TurnPrep",
+            "reset-governed-state",
+            "home",
+            $"Reset queued review, validation gate, and dialog state before starting a new {(turnMode == WorkflowTurnMode.Work ? "Work" : "Discuss")} turn. ClearedEditSessionId={clearEditSessionId}.");
     }
 
     private async Task CreateTaskFromTranscript(string taskName)
@@ -464,13 +539,22 @@ public partial class Home : IDisposable, IAsyncDisposable
     {
         directorySnapshot = DirectoryBrowser.GetSnapshot(path);
         repoRoot = directorySnapshot.CurrentPath;
+        WorkspaceState.SetRepoRoot(repoRoot);
+        WorkspaceState.SetCurrentEditSessionId(null);
         WorkspaceSelectionService.SaveWorkspace(repoRoot);
+        launchedReviewSessionId = null;
+        debugEvents.Clear();
         selectedSourcePath = null;
         selectedSourceLine = null;
         selectedTestSourcePath = null;
         selectedTestSourceLine = null;
         RefreshSourceSnapshot();
         RefreshTestSourceSnapshot();
+        AddDebugEvent(
+            "WorkspaceChanged",
+            "ok",
+            "coding-services",
+            $"Workspace set to '{repoRoot}'. Cleared review session and local launch trace state.");
     }
 
     private void RefreshSourceSnapshot()
@@ -890,17 +974,16 @@ public partial class Home : IDisposable, IAsyncDisposable
             ShouldWarnBeforeUnload(),
             "Refreshing or closing this page will reset the current Coding Services session.");
 
-        if (!isConnectionPanelVisible)
+        if (isConnectionPanelVisible)
         {
-            return;
+            await mainResizeModule.InvokeVoidAsync(
+                "attachMainSplitter",
+                controlGrid,
+                connectionPane,
+                workPanel,
+                mainSplitter);
         }
 
-        await mainResizeModule.InvokeVoidAsync(
-            "attachMainSplitter",
-            controlGrid,
-            connectionPane,
-            workPanel,
-            mainSplitter);
     }
 
     private bool ShouldWarnBeforeUnload()
@@ -933,11 +1016,426 @@ public partial class Home : IDisposable, IAsyncDisposable
     {
         snapshot = ConnectionService.GetSnapshot();
         RenderAssistantSnapshot(isStreaming: snapshot.IsTurnRunning);
-        _ = InvokeAsync(() =>
+        _ = InvokeAsync(async () =>
         {
+            CodexOutputEvent? latestStatus = snapshot.StatusEvents.LastOrDefault();
+            AddDebugEvent(
+                "ConnectionChanged",
+                snapshot.IsTurnRunning ? "running" : "idle",
+                "home",
+                $"turnRunning={snapshot.IsTurnRunning}; threadId={snapshot.ThreadId ?? "<none>"}; permissions={snapshot.PermissionRequests.Count}; currentEditSessionId={WorkspaceState.CurrentEditSessionId ?? "<none>"}; launchedReviewSessionId={launchedReviewSessionId ?? "<none>"}; queuedReviewSessionId={pendingReviewLaunch?.SessionId ?? "<none>"}; latestStatus={(latestStatus is null ? "<none>" : latestStatus.Type + "|" + (latestStatus.Status ?? "-") + "|" + latestStatus.Detail)}");
             NotifyLatestPermissionResult();
             StateHasChanged();
         });
+    }
+
+    private void OnGovernedReviewCoordinatorChanged()
+    {
+        _ = InvokeAsync(async () =>
+        {
+            GovernedReviewPendingRequest? pendingRequest = GovernedReviewCoordinator.GetPendingRequest();
+            if (pendingRequest is null)
+            {
+                pendingReviewLaunch = null;
+                StateHasChanged();
+                return;
+            }
+
+            pendingReviewLaunch = new PendingReviewLaunchState(
+                pendingRequest.Request.SessionId,
+                pendingRequest.Request.PendingCount);
+            AddDebugEvent(
+                "ReviewCoordinator",
+                "queued",
+                "home",
+                $"Coordinator queued governed review for edit session '{pendingRequest.Request.SessionId}' with {pendingRequest.Request.PendingCount} pending item(s).");
+            await ProcessQueuedReviewLaunchAsync();
+            StateHasChanged();
+        });
+    }
+
+    private async Task TryLaunchPendingReviewAsync(bool isTurnRunning, CodexOutputEvent? latestStatus)
+    {
+        if (pendingReviewLaunch is not null && !reviewDialogOpen && !reviewLaunchProcessing)
+        {
+            AddDebugEvent(
+                "ReviewLaunchCheck",
+                "queued",
+                "home",
+                $"Launch already queued for edit session '{pendingReviewLaunch.SessionId}'. Waiting for the render cycle to drain it.");
+            return;
+        }
+
+        if (reviewLaunchCheckInProgress)
+        {
+            AddDebugEvent(
+                "ReviewLaunchCheck",
+                "skipped",
+                "home",
+                "Launch suppressed because another review launch check is already in progress.");
+            return;
+        }
+
+        if (reviewDialogOpen)
+        {
+            AddDebugEvent(
+                "ReviewLaunchCheck",
+                "skipped",
+                "home",
+                $"Launch suppressed because the review dialog is already open for session '{launchedReviewSessionId ?? "<none>"}'.");
+            return;
+        }
+
+        reviewLaunchCheckInProgress = true;
+
+        if (string.IsNullOrWhiteSpace(repoRoot) || !Directory.Exists(repoRoot))
+        {
+            pendingReviewLaunch = null;
+            AddDebugEvent(
+                "ReviewLaunchCheck",
+                "skipped",
+                "home",
+                $"Launch suppressed because workspace root is unavailable: '{repoRoot}'.");
+            reviewLaunchCheckInProgress = false;
+            return;
+        }
+
+        string? currentEditSessionId = WorkspaceState.CurrentEditSessionId;
+        if (string.IsNullOrWhiteSpace(currentEditSessionId))
+        {
+            pendingReviewLaunch = null;
+            AddDebugEvent(
+                "ReviewLaunchCheck",
+                "skipped",
+                "home",
+                "Launch suppressed because there is no current edit session id.");
+            reviewLaunchCheckInProgress = false;
+            return;
+        }
+
+        IReadOnlyList<StagedReviewQueueItem> pendingReviews;
+        try
+        {
+            pendingReviews = StagedReviewPageService.ListPending(repoRoot);
+        }
+        catch (Exception ex)
+        {
+            AddDebugEvent(
+                "ReviewLaunchCheck",
+                "error",
+                "home",
+                $"ListPending failed for workspace '{repoRoot}': {ex.Message}");
+            reviewLaunchCheckInProgress = false;
+            return;
+        }
+
+        pendingReviews = pendingReviews
+            .Where(review => review.SessionId.Equals(currentEditSessionId, StringComparison.Ordinal))
+            .ToArray();
+
+        AddDebugEvent(
+            "ReviewLaunchCheck",
+            "inspect",
+            "home",
+            $"currentEditSessionId={currentEditSessionId}; launchedReviewSessionId={launchedReviewSessionId ?? "<none>"}; pendingCount={pendingReviews.Count}; stagedIds={(pendingReviews.Count == 0 ? "<none>" : string.Join(", ", pendingReviews.Select(review => review.StagedRecordId)))}");
+
+        if (pendingReviews.Count == 0)
+        {
+            pendingReviewLaunch = null;
+            AddDebugEvent(
+                "ReviewLaunchCheck",
+                "skipped",
+                "home",
+                $"Launch suppressed because no pending reviews exist for edit session '{currentEditSessionId}'.");
+            reviewLaunchCheckInProgress = false;
+            return;
+        }
+
+        StagedReviewPageModel nextModel;
+        try
+        {
+            nextModel = StagedReviewPageService.LoadNextForSession(repoRoot, currentEditSessionId);
+        }
+        catch (Exception ex)
+        {
+            AddDebugEvent(
+                "ReviewLaunchCheck",
+                "error",
+                "home",
+                $"LoadNextForSession failed for edit session '{currentEditSessionId}': {ex.Message}");
+            reviewLaunchCheckInProgress = false;
+            return;
+        }
+
+        if (nextModel.IsSessionComplete)
+        {
+            pendingReviewLaunch = null;
+            AddDebugEvent(
+                "ReviewLaunchCheck",
+                "skipped",
+                "home",
+                $"Launch suppressed because edit session '{currentEditSessionId}' is already complete.");
+            reviewLaunchCheckInProgress = false;
+            return;
+        }
+
+        pendingReviewLaunch = new PendingReviewLaunchState(currentEditSessionId, pendingReviews.Count);
+        AddDebugEvent(
+            "ReviewLaunch",
+            "queued",
+            "home",
+            $"Queued governed review for edit session '{currentEditSessionId}' with {pendingReviews.Count} pending item(s). ValidationError={nextModel.PreMergeValidationIsError}; ForceApproved={nextModel.PreMergeValidationForceApproved}; RelativePath='{nextModel.RelativePath}'.");
+        reviewLaunchCheckInProgress = false;
+        await InvokeAsync(StateHasChanged);
+        await Task.Yield();
+
+        if (pendingReviewLaunch is not null && !reviewDialogOpen && !reviewLaunchProcessing)
+        {
+            AddDebugEvent(
+                "ReviewLaunch",
+                "fallback-drain",
+                "home",
+                $"Render-cycle drain did not fire for edit session '{currentEditSessionId}'. Invoking queued review launch directly.");
+            await InvokeAsync(ProcessQueuedReviewLaunchAsync);
+        }
+    }
+
+    private bool ShouldSuppressReviewLaunchWhileTurnRunning(CodexOutputEvent? latestStatus)
+    {
+        if (!snapshot.IsTurnRunning)
+        {
+            return false;
+        }
+
+        if (snapshot.PermissionRequests.Count > 0)
+        {
+            return true;
+        }
+
+        return !HasAssistantCompletionSignal(latestStatus);
+    }
+
+    private bool HasAssistantCompletionSignal(CodexOutputEvent? latestStatus)
+    {
+        if (latestStatus is not null
+            && latestStatus.Type.Equals("assistant", StringComparison.OrdinalIgnoreCase)
+            && latestStatus.Detail.StartsWith("Assistant response completed", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        for (int index = snapshot.StatusEvents.Count - 1; index >= 0; index--)
+        {
+            CodexOutputEvent statusEvent = snapshot.StatusEvents[index];
+            if (statusEvent.Type.Equals("assistant", StringComparison.OrdinalIgnoreCase))
+            {
+                return statusEvent.Detail.StartsWith("Assistant response completed", StringComparison.OrdinalIgnoreCase);
+            }
+
+            if (statusEvent.Type.Equals("turn/completed", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (statusEvent.Type.Equals("thread/status/changed", StringComparison.OrdinalIgnoreCase)
+                && statusEvent.Detail.Contains("\"type\":\"idle\"", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private async Task<bool> OpenValidationGateAsync(StagedReviewPageModel model, int pendingCount)
+    {
+        NotificationService.Notify(new NotificationMessage
+        {
+            Severity = NotificationSeverity.Warning,
+            Summary = "Pre-merge validation failed",
+            Detail = $"Review is required for {model.RelativePath} before governed merge can continue.",
+            Duration = 7000
+        });
+
+        validationGateModel = model;
+        validationGatePendingCount = pendingCount;
+        validationGateCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await InvokeAsync(StateHasChanged);
+        return await validationGateCompletion.Task;
+    }
+
+    private async Task ProcessQueuedReviewLaunchAsync()
+    {
+        PendingReviewLaunchState? launch = pendingReviewLaunch;
+        if (launch is null || reviewDialogOpen || reviewLaunchProcessing)
+        {
+            return;
+        }
+
+        AddDebugEvent(
+            "ReviewLaunch",
+            "draining-queue",
+            "home",
+            $"Draining queued governed review for edit session '{launch.SessionId}'.");
+
+        pendingReviewLaunch = null;
+        reviewLaunchProcessing = true;
+
+        try
+        {
+            StagedReviewPageModel model = StagedReviewPageService.LoadNextForSession(repoRoot, launch.SessionId);
+            if (model.IsSessionComplete)
+            {
+                AddDebugEvent(
+                    "ReviewLaunch",
+                    "skipped",
+                    "home",
+                    $"Queued launch for edit session '{launch.SessionId}' was skipped because the session is already complete.");
+                return;
+            }
+
+            if (model.PreMergeValidationIsError && !model.PreMergeValidationForceApproved)
+            {
+                AddDebugEvent(
+                    "ValidationGate",
+                    "opening",
+                    "home",
+                    $"Opening pre-merge validation gate for edit session '{launch.SessionId}' on '{model.RelativePath}'.");
+
+                bool continueToReview = await OpenValidationGateAsync(model, launch.PendingCount);
+                AddDebugEvent(
+                    "ValidationGate",
+                    continueToReview ? "continue" : "dismissed",
+                    "home",
+                    $"Validation gate result for edit session '{launch.SessionId}': continue={continueToReview}.");
+
+                if (!continueToReview)
+                {
+                    GovernedReviewCoordinator.Complete(
+                        launch.SessionId,
+                        new GovernedReviewResolution(
+                            launch.SessionId,
+                            Completed: false,
+                            AcceptedWithOverride: false,
+                            RemainingPendingCount: launch.PendingCount,
+                            Message: $"Governed review for edit session '{launch.SessionId}' was deferred at the pre-merge validation gate. The staged candidate remains pending."));
+                    return;
+                }
+            }
+
+            launchedReviewSessionId = launch.SessionId;
+            reviewDialogOpen = true;
+
+            NotificationService.Notify(new NotificationMessage
+            {
+                Severity = NotificationSeverity.Info,
+                Summary = "Governed review ready",
+                Detail = $"Opening in-app review for {model.RelativePath}.",
+                Duration = 4000
+            });
+
+            AddDebugEvent(
+                "ReviewLaunch",
+                "opening-modal",
+                "home",
+                $"Opening staged review dialog for edit session '{launch.SessionId}' with {launch.PendingCount} pending item(s).");
+            await OpenStagedReviewDialogAsync(launch.SessionId);
+
+            IReadOnlyList<StagedReviewQueueItem> remainingReviews = StagedReviewPageService.ListPending(repoRoot)
+                .Where(review => review.SessionId.Equals(launch.SessionId, StringComparison.Ordinal))
+                .ToArray();
+
+            AddDebugEvent(
+                "ReviewLaunch",
+                remainingReviews.Count == 0 ? "completed" : "closed",
+                "home",
+                $"Review dialog closed for edit session '{launch.SessionId}'. Remaining pending item(s): {remainingReviews.Count}.");
+            GovernedReviewCoordinator.Complete(
+                launch.SessionId,
+                new GovernedReviewResolution(
+                    launch.SessionId,
+                    Completed: remainingReviews.Count == 0,
+                    AcceptedWithOverride: model.PreMergeValidationIsError,
+                    RemainingPendingCount: remainingReviews.Count,
+                    Message: remainingReviews.Count == 0
+                        ? $"Governed review completed for edit session '{launch.SessionId}'."
+                        : $"Governed review dialog closed before edit session '{launch.SessionId}' was fully resolved. {remainingReviews.Count} staged item(s) remain pending."));
+        }
+        catch (Exception ex)
+        {
+            AddDebugEvent(
+                "ReviewLaunch",
+                "error",
+                "home",
+                $"Review dialog failed for edit session '{launch.SessionId}': {ex.Message}");
+            GovernedReviewCoordinator.Complete(
+                launch.SessionId,
+                new GovernedReviewResolution(
+                    launch.SessionId,
+                    Completed: false,
+                    AcceptedWithOverride: false,
+                    RemainingPendingCount: launch.PendingCount,
+                    Message: $"Governed review failed to open for edit session '{launch.SessionId}': {ex.Message}"));
+            NotificationService.Notify(new NotificationMessage
+            {
+                Severity = NotificationSeverity.Error,
+                Summary = "Review launch failed",
+                Detail = ex.Message,
+                Duration = 7000
+            });
+        }
+        finally
+        {
+            launchedReviewSessionId = null;
+            reviewDialogOpen = false;
+            reviewLaunchProcessing = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task HandleValidationGateDecisionAsync(bool allowReview)
+    {
+        TaskCompletionSource<bool>? completion = validationGateCompletion;
+        validationGateModel = null;
+        validationGatePendingCount = 0;
+        validationGateCompletion = null;
+        completion?.TrySetResult(allowReview);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OpenStagedReviewDialogAsync(string sessionId)
+    {
+        reviewDialogSessionId = sessionId;
+        reviewDialogCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await InvokeAsync(StateHasChanged);
+        if (reviewDialogCompletion is not null)
+        {
+            await reviewDialogCompletion.Task;
+        }
+    }
+
+    private async Task HandleStagedReviewDialogClosedAsync()
+    {
+        TaskCompletionSource<bool>? completion = reviewDialogCompletion;
+        reviewDialogSessionId = null;
+        reviewDialogCompletion = null;
+        completion?.TrySetResult(true);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void AddDebugEvent(string type, string? status, string source, string detail)
+    {
+        debugEvents.Add(new CodexOutputEvent(
+            DateTimeOffset.Now,
+            type,
+            status,
+            source,
+            detail,
+            status?.Equals("error", StringComparison.OrdinalIgnoreCase) == true ? "error" : "info"));
+        if (debugEvents.Count > MaxDebugEvents)
+        {
+            debugEvents.RemoveRange(0, debugEvents.Count - MaxDebugEvents);
+        }
     }
 
     private void AddUserMessage(string content)
@@ -1375,9 +1873,12 @@ public partial class Home : IDisposable, IAsyncDisposable
         return Markdown.ToHtml(markdown, MarkdownPipeline);
     }
 
+    private sealed record PendingReviewLaunchState(string SessionId, int PendingCount);
+
     public void Dispose()
     {
         ConnectionService.Changed -= OnConnectionChanged;
+        GovernedReviewCoordinator.Changed -= OnGovernedReviewCoordinatorChanged;
     }
 
     public async ValueTask DisposeAsync()

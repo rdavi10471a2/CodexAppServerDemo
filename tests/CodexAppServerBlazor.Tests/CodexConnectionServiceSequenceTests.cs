@@ -293,6 +293,7 @@ public sealed class CodexConnectionServiceSequenceTests
             new HostingEnvironmentStub(workspaceRoot));
         WorkflowTurnContextComposer workflowTurnContextComposer = new();
         return new CodexConnectionService(
+            configuration,
             workspaceState,
             workspaceWorkflowContextService,
             taskWorkflowContextService,

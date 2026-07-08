@@ -37,6 +37,7 @@ public class Program
         builder.Services.AddSingleton<WorkspaceSelectionService>();
         builder.Services.AddSingleton<CodexConnectionService>();
         builder.Services.AddSingleton<DirectoryBrowserService>();
+        builder.Services.AddSingleton<ExternalBrowserLaunchService>();
         builder.Services.AddSingleton<CodingServicesSettingsProvider>();
         builder.Services.AddSingleton<IArchivedDiscussionService, ArchivedDiscussionService>();
         builder.Services.AddSingleton<SourceWorkspaceService>();
@@ -46,6 +47,8 @@ public class Program
         builder.Services.AddSingleton<IWorkspaceWorkflowContextService, WorkspaceWorkflowContextService>();
         builder.Services.AddSingleton<SessionBootstrapPolicyService>();
         builder.Services.AddSingleton<IWorkflowTurnContextComposer, WorkflowTurnContextComposer>();
+        builder.Services.AddSingleton<IStagedReviewPageService, StagedReviewPageService>();
+        builder.Services.AddSingleton<GovernedReviewCoordinatorService>();
         builder.Services.AddSingleton<HarnessMcpHostedService>();
         builder.Services.AddHostedService(services => services.GetRequiredService<HarnessMcpHostedService>());
         builder.Services.AddHostedService<WorkspaceStartupHostedService>();

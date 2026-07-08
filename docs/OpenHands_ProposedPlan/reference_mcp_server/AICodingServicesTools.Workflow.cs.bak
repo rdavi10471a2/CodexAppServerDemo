@@ -188,7 +188,7 @@ public sealed partial class AICodingServicesTools
     }
 
     [McpServerTool]
-    [Description("Classify a completed WinMerge review for a staged edit. Accepted decisions require the expected staged hash.")]
+    [Description("Classify a completed merge review for a staged edit. Accepted decisions require the expected staged hash.")]
     public ReviewDecisionWithIndexRefreshResult RecordDiffDecision(
         [Description("Staged edit record id returned by stage_candidate_for_review.")] string stagedRecordId,
         [Description("Operator-reported outcome: accepted or rejected.")] string decision,
@@ -481,7 +481,7 @@ public sealed partial class AICodingServicesTools
         builder.AppendLine("- Existing files enter through `refresh_file`; future files enter through `new_file`.");
         builder.AppendLine("- MCP edit sessions start with `start_monitor_session` and a non-empty `filesPlanned` list.");
         builder.AppendLine("- Candidate edits happen in monitor-owned Working files.");
-        builder.AppendLine("- Review uses `stage_candidate_for_review`, `launch_staged_diff`, WinMerge review/save, and `record_diff_decision`.");
+        builder.AppendLine("- Review uses `stage_candidate_for_review`, `launch_staged_diff`, merge review/save, and `record_diff_decision`.");
         builder.AppendLine("- Planned sessions require all planned files to be staged before review launch.");
         builder.AppendLine("- Planned sessions defer the expensive build/index pass until all planned files are accepted/rejected.");
         builder.AppendLine("- Accepted decisions trigger index refresh metadata after the planned session reaches terminal decisions; refresh before editing the same watched file again.");
@@ -501,8 +501,8 @@ public sealed partial class AICodingServicesTools
         builder.AppendLine("4. For existing files, call `refresh_file`. For future watched files, call `new_file`.");
         builder.AppendLine("5. Edit only the monitor-owned Working candidate with `submit_file`, text/span tools, or Roslyn typed edit tools.");
         builder.AppendLine("6. Stage every planned file with `stage_candidate_for_review(path, sessionId)`.");
-        builder.AppendLine("7. Launch review with `launch_staged_diff` for every planned staged record before recording decisions; planned sessions require the full staged file set before WinMerge opens.");
-        builder.AppendLine("8. The operator reviews/saves every planned file in WinMerge. WinMerge is the watched-source mutation surface.");
+        builder.AppendLine("7. Launch review with `launch_staged_diff` for every planned staged record before recording decisions; planned sessions require the full staged file set before the review surface opens.");
+        builder.AppendLine("8. The operator reviews/saves every planned file in the review surface. The review surface is the watched-source mutation surface.");
         builder.AppendLine("9. Record each result with `record_diff_decision`.");
         builder.AppendLine("10. After the last planned file reaches a terminal decision, inspect `indexRefresh` and call `refresh_file` before editing any accepted watched file again.");
         builder.AppendLine();
@@ -510,7 +510,7 @@ public sealed partial class AICodingServicesTools
         builder.AppendLine();
         builder.AppendLine("- `blocked`, `dirty-unexpected`, `superseded`, missing Working files, and stale hashes require recovery before follow-up edits.");
         builder.AppendLine("- Planned-session launch checks staged overlay readiness; the full build/index validation runs at the terminal planned accept, not once per staged file.");
-        builder.AppendLine("- Do not manually copy candidates into watched source outside WinMerge/decision classification.");
+        builder.AppendLine("- Do not manually copy candidates into watched source outside review/decision classification.");
         return builder.ToString();
     }
 }

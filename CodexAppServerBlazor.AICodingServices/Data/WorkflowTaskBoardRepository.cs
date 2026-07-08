@@ -44,7 +44,7 @@ public sealed class WorkflowTaskBoardRepository
         }
     }
 
-    public WorkflowTaskRow CreateTask(string name, string? shortName, string? notesMarkdown)
+    public WorkflowTaskRow CreateTask(string name, string? shortName, string? description, string? notesMarkdown)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -62,7 +62,7 @@ public sealed class WorkflowTaskBoardRepository
             using (SqliteTransaction transaction = connection.BeginTransaction())
             {
                 taskNumber = GetNextTaskNumber(connection, transaction);
-                string stateCode = HasLiveTasks(connection, transaction) ? "Proposed" : "Active";
+                string stateCode = HasAnyActiveTask(connection, transaction) ? "Proposed" : "Active";
                 string? notesPath = null;
                 if (!string.IsNullOrWhiteSpace(notesMarkdown))
                 {
@@ -74,12 +74,13 @@ public sealed class WorkflowTaskBoardRepository
                 {
                     command.Transaction = transaction;
                     command.CommandText = """
-                        insert into workflow_tasks(id, task_number, name, short_name, slug, state_code, notes_markdown_path, created_at, updated_at, activated_at)
-                        values ($id, $taskNumber, $name, $shortName, $slug, $stateCode, $notesMarkdownPath, $createdAt, $updatedAt, $activatedAt);
+                        insert into workflow_tasks(id, task_number, name, description, short_name, slug, state_code, notes_markdown_path, created_at, updated_at, activated_at)
+                        values ($id, $taskNumber, $name, $description, $shortName, $slug, $stateCode, $notesMarkdownPath, $createdAt, $updatedAt, $activatedAt);
                         """;
                     command.Parameters.AddWithValue("$id", taskId);
                     command.Parameters.AddWithValue("$taskNumber", taskNumber);
                     command.Parameters.AddWithValue("$name", name.Trim());
+                    AddNullable(command, "$description", string.IsNullOrWhiteSpace(description) ? null : description.Trim());
                     command.Parameters.AddWithValue("$shortName", normalizedShortName);
                     command.Parameters.AddWithValue("$slug", slug);
                     command.Parameters.AddWithValue("$stateCode", stateCode);
@@ -139,12 +140,13 @@ public sealed class WorkflowTaskBoardRepository
                 {
                     command.Transaction = transaction;
                     command.CommandText = """
-                        insert into workflow_tasks(id, task_number, name, short_name, slug, state_code, notes_markdown_path, created_at, updated_at, activated_at)
-                        values ($id, $taskNumber, $name, $shortName, $slug, 'Active', $notesMarkdownPath, $createdAt, $updatedAt, $activatedAt);
+                        insert into workflow_tasks(id, task_number, name, description, short_name, slug, state_code, notes_markdown_path, created_at, updated_at, activated_at)
+                        values ($id, $taskNumber, $name, $description, $shortName, $slug, 'Active', $notesMarkdownPath, $createdAt, $updatedAt, $activatedAt);
                         """;
                     command.Parameters.AddWithValue("$id", taskId);
                     command.Parameters.AddWithValue("$taskNumber", taskNumber);
                     command.Parameters.AddWithValue("$name", name);
+                    command.Parameters.AddWithValue("$description", "Default placeholder task for initializing workflow behavior in this workspace.");
                     command.Parameters.AddWithValue("$shortName", shortName);
                     command.Parameters.AddWithValue("$slug", slug);
                     command.Parameters.AddWithValue("$notesMarkdownPath", notesPath);
@@ -180,7 +182,7 @@ public sealed class WorkflowTaskBoardRepository
         }
     }
 
-    public WorkflowTaskRow UpdateTaskDetails(string taskId, string name, string? shortName)
+    public WorkflowTaskRow UpdateTaskDetails(string taskId, string name, string? shortName, string? description)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -226,6 +228,7 @@ public sealed class WorkflowTaskBoardRepository
                 command.CommandText = """
                     update workflow_tasks
                     set name = $name,
+                        description = $description,
                         short_name = $shortName,
                         slug = $slug,
                         notes_markdown_path = $notesMarkdownPath,
@@ -235,6 +238,7 @@ public sealed class WorkflowTaskBoardRepository
                     """;
                 command.Parameters.AddWithValue("$id", taskId);
                 command.Parameters.AddWithValue("$name", name.Trim());
+                AddNullable(command, "$description", string.IsNullOrWhiteSpace(description) ? null : description.Trim());
                 command.Parameters.AddWithValue("$shortName", normalizedShortName);
                 command.Parameters.AddWithValue("$slug", slug);
                 AddNullable(command, "$notesMarkdownPath", notesPath);
@@ -273,14 +277,6 @@ public sealed class WorkflowTaskBoardRepository
             if (stateCode.Equals("Active", StringComparison.Ordinal) && HasOtherActiveTask(connection, taskId))
             {
                 throw new InvalidOperationException("Only one task can be Active. Move the current Active task first.");
-            }
-
-            if (existing.StateCode.Equals("Active", StringComparison.Ordinal)
-                && !stateCode.Equals("Active", StringComparison.Ordinal)
-                && HasOtherLiveTasks(connection, taskId)
-                && !HasOtherActiveTask(connection, taskId))
-            {
-                throw new InvalidOperationException("Move another task to Active before moving the current Active task.");
             }
 
             using (SqliteCommand command = connection.CreateCommand())
@@ -721,7 +717,7 @@ public sealed class WorkflowTaskBoardRepository
         using (SqliteCommand command = connection.CreateCommand())
         {
             command.CommandText = """
-                select t.id, t.task_number, t.name, t.state_code, s.name, t.notes_markdown_path,
+                select t.id, t.task_number, t.name, t.description, t.state_code, s.name, t.notes_markdown_path,
                        t.agent_notes_markdown_path, t.short_name, t.slug, t.is_archived,
                        t.created_at, t.updated_at, t.activated_at, t.completed_at, t.archived_at
                 from workflow_tasks t
@@ -745,7 +741,7 @@ public sealed class WorkflowTaskBoardRepository
         using (SqliteCommand command = connection.CreateCommand())
         {
             command.CommandText = """
-                select t.id, t.task_number, t.name, t.state_code, s.name, t.notes_markdown_path,
+                select t.id, t.task_number, t.name, t.description, t.state_code, s.name, t.notes_markdown_path,
                        t.agent_notes_markdown_path, t.short_name, t.slug, t.is_archived,
                        t.created_at, t.updated_at, t.activated_at, t.completed_at, t.archived_at
                 from workflow_tasks t
@@ -771,18 +767,19 @@ public sealed class WorkflowTaskBoardRepository
             reader.GetString(0),
             reader.GetInt32(1),
             reader.GetString(2),
-            NormalizeShortName(reader.IsDBNull(7) ? null : reader.GetString(7), reader.GetString(2), reader.GetString(0)),
-            NormalizeSlug(reader.IsDBNull(8) ? null : reader.GetString(8), reader.IsDBNull(7) ? null : reader.GetString(7), reader.GetString(2), reader.GetString(0)),
-            reader.GetString(3),
+            reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
+            NormalizeShortName(reader.IsDBNull(8) ? null : reader.GetString(8), reader.GetString(2), reader.GetString(0)),
+            NormalizeSlug(reader.IsDBNull(9) ? null : reader.GetString(9), reader.IsDBNull(8) ? null : reader.GetString(8), reader.GetString(2), reader.GetString(0)),
             reader.GetString(4),
-            reader.IsDBNull(5) ? null : reader.GetString(5),
+            reader.GetString(5),
             reader.IsDBNull(6) ? null : reader.GetString(6),
-            reader.GetInt32(9) != 0,
-            reader.GetDateTime(10),
+            reader.IsDBNull(7) ? null : reader.GetString(7),
+            reader.GetInt32(10) != 0,
             reader.GetDateTime(11),
-            reader.IsDBNull(12) ? null : reader.GetDateTime(12),
+            reader.GetDateTime(12),
             reader.IsDBNull(13) ? null : reader.GetDateTime(13),
-            reader.IsDBNull(14) ? null : reader.GetDateTime(14));
+            reader.IsDBNull(14) ? null : reader.GetDateTime(14),
+            reader.IsDBNull(15) ? null : reader.GetDateTime(15));
     }
 
     private static IReadOnlyList<WorkflowTaskFileRow> LoadFiles(SqliteConnection connection)
@@ -917,23 +914,6 @@ public sealed class WorkflowTaskBoardRepository
         }
     }
 
-    private static bool HasOtherLiveTasks(
-        SqliteConnection connection,
-        string excludedTaskId)
-    {
-        using (SqliteCommand command = connection.CreateCommand())
-        {
-            command.CommandText = """
-                select count(*)
-                from workflow_tasks
-                where is_archived = 0
-                  and id <> $id;
-                """;
-            command.Parameters.AddWithValue("$id", excludedTaskId);
-            return Convert.ToInt64(command.ExecuteScalar() ?? 0) > 0;
-        }
-    }
-
     private static int GetNextTaskNumber(SqliteConnection connection, SqliteTransaction transaction)
     {
         int current;
@@ -956,12 +936,12 @@ public sealed class WorkflowTaskBoardRepository
         return next;
     }
 
-    private static bool HasLiveTasks(SqliteConnection connection, SqliteTransaction transaction)
+    private static bool HasAnyActiveTask(SqliteConnection connection, SqliteTransaction transaction)
     {
         using (SqliteCommand command = connection.CreateCommand())
         {
             command.Transaction = transaction;
-            command.CommandText = "select count(*) from workflow_tasks where is_archived = 0;";
+            command.CommandText = "select count(*) from workflow_tasks where state_code = 'Active';";
             return Convert.ToInt64(command.ExecuteScalar() ?? 0) > 0;
         }
     }

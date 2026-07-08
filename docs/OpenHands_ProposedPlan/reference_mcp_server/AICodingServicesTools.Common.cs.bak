@@ -40,10 +40,10 @@ public sealed partial class AICodingServicesTools
             CheckPathOutsideRoot("runtime-outside-watched-source", runtimeRoot, watchedProjectFolder, "Runtime state is outside watched source.", "Runtime state is inside watched source."),
         ];
 
-        string? diffTool = settings.WinMergeCandidatePaths.FirstOrDefault(File.Exists);
+        string? diffTool = settings.ReviewToolCandidatePaths.FirstOrDefault(File.Exists);
         checks.Add(diffTool is null
-            ? new AICodingServicesGuardrailCheck("diff-tool-available", "warning", "No configured WinMerge candidate exists on disk.", string.Join(";", settings.WinMergeCandidatePaths))
-            : new AICodingServicesGuardrailCheck("diff-tool-available", "passed", "Configured WinMerge candidate exists.", diffTool));
+            ? new AICodingServicesGuardrailCheck("diff-tool-available", "warning", "No configured review-tool candidate exists on disk.", string.Join(";", settings.ReviewToolCandidatePaths))
+            : new AICodingServicesGuardrailCheck("diff-tool-available", "passed", "Configured review-tool candidate exists.", diffTool));
 
         return checks.ToArray();
     }

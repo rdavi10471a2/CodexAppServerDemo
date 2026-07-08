@@ -222,6 +222,7 @@
     flex: 1 1 auto;
     flex-direction: column;
     min-height: 0;
+    overflow: hidden;
     background: #fbfdff;
 }
 
@@ -265,8 +266,9 @@
 }
 
 .agent-request-list {
-    display: grid;
-    gap: 8px;
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
     flex: 1 1 auto;
     min-height: 0;
     overflow: auto;
@@ -274,7 +276,9 @@
 }
 
 .agent-request-card {
-    display: grid;
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
     gap: 10px;
     border: 1px solid #efc7cc;
     border-radius: 7px;
@@ -348,6 +352,12 @@
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(215, 225, 234, .85);
+    background: inherit;
 }
 
 .agent-request-scope-note {

@@ -22,8 +22,8 @@ public sealed class CodingServicesSettingsProvider
         string repositoryRoot = fullWorkspaceRoot;
         string runtimeRoot = ResolveConfiguredPath("CodingServices:RuntimeRoot", "runtime", repositoryRoot);
         string watchedSolutionPath = ResolveWatchedSolutionPath(fullWorkspaceRoot);
-        string[]? winMergeCandidatePaths = configuration
-            .GetSection("CodingServices:WinMergeCandidatePaths")
+        string[]? reviewToolCandidatePaths = configuration
+            .GetSection("CodingServices:ReviewToolCandidatePaths")
             .Get<string[]>();
         string[] testProjectPaths = ResolveConfiguredPaths(
             "CodingServices:TestProjectPaths",
@@ -34,7 +34,7 @@ public sealed class CodingServicesSettingsProvider
             watchedSolutionPath,
             runtimeRoot,
             testProjectPaths,
-            winMergeCandidatePaths);
+            reviewToolCandidatePaths);
     }
 
     private string ResolveWatchedSolutionPath(string workspaceRoot)

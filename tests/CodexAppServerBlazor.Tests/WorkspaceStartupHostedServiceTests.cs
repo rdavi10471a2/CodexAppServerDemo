@@ -41,6 +41,7 @@ public sealed class WorkspaceStartupHostedServiceTests
                 new HostingEnvironmentStub(repository.RootPath));
             WorkflowTurnContextComposer workflowTurnContextComposer = new();
             CodexConnectionService connectionService = new(
+                configuration,
                 workspaceState,
                 workspaceWorkflowContextService,
                 taskWorkflowContextService,
@@ -100,6 +101,7 @@ public sealed class WorkspaceStartupHostedServiceTests
             new HostingEnvironmentStub(defaultWorkspace.RootPath));
         WorkflowTurnContextComposer workflowTurnContextComposer = new();
         CodexConnectionService connectionService = new(
+            configuration,
             workspaceState,
             workspaceWorkflowContextService,
             taskWorkflowContextService,

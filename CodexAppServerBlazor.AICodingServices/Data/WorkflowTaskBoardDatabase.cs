@@ -4,7 +4,7 @@ namespace CodexAppServerBlazor.AICodingServices.Data;
 
 public sealed class WorkflowTaskBoardDatabase
 {
-    public const int SchemaVersion = 2;
+    public const int SchemaVersion = 3;
 
     private readonly string databasePath;
 
@@ -109,6 +109,7 @@ public sealed class WorkflowTaskBoardDatabase
                 id text primary key,
                 task_number integer not null default 0,
                 name text not null,
+                description text null,
                 short_name text null,
                 slug text null,
                 state_code text not null references workflow_task_states(code),
@@ -169,9 +170,15 @@ public sealed class WorkflowTaskBoardDatabase
         AddColumnIfMissing(connection, transaction, "workflow_tasks", "short_name", "text null");
         AddColumnIfMissing(connection, transaction, "workflow_tasks", "slug", "text null");
         AddColumnIfMissing(connection, transaction, "workflow_tasks", "task_number", "integer not null default 0");
+        AddColumnIfMissing(connection, transaction, "workflow_tasks", "description", "text null");
         AddColumnIfMissing(connection, transaction, "workflow_tasks", "agent_notes_markdown_path", "text null");
         AddColumnIfMissing(connection, transaction, "workflow_tasks", "is_archived", "integer not null default 0");
         AddColumnIfMissing(connection, transaction, "workflow_tasks", "archived_at", "datetime null");
+        Execute(connection, transaction, """
+            update workflow_tasks
+            set description = name
+            where description is null or trim(description) = '';
+            """);
         SeedTaskSequence(connection, transaction);
         AssignMissingTaskNumbers(connection, transaction);
     }

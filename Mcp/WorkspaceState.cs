@@ -4,6 +4,7 @@ public sealed class WorkspaceState
 {
     private readonly object gate = new();
     private string? repoRoot;
+    private string? currentEditSessionId;
 
     public string? RepoRoot
     {
@@ -12,6 +13,17 @@ public sealed class WorkspaceState
             lock (gate)
             {
                 return repoRoot;
+            }
+        }
+    }
+
+    public string? CurrentEditSessionId
+    {
+        get
+        {
+            lock (gate)
+            {
+                return currentEditSessionId;
             }
         }
     }
@@ -32,6 +44,16 @@ public sealed class WorkspaceState
         lock (gate)
         {
             this.repoRoot = fullPath;
+        }
+    }
+
+    public void SetCurrentEditSessionId(string? sessionId)
+    {
+        lock (gate)
+        {
+            currentEditSessionId = string.IsNullOrWhiteSpace(sessionId)
+                ? null
+                : sessionId.Trim();
         }
     }
 }

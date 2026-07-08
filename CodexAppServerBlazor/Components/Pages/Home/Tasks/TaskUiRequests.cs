@@ -7,6 +7,7 @@ public sealed record TaskMoveRequest(string TaskId, string StateCode);
 public sealed record TaskDetailsSaveRequest(
     string TaskId,
     string Name,
+    string Description,
     string? ShortName,
     string StateCode,
     string NotesMarkdown);

@@ -83,15 +83,24 @@ public sealed class TaskWorkflowContextService : ITaskWorkflowContextService
             .ToArray();
 
         StringBuilder builder = new();
-        builder.AppendLine("Active task context supplied by Coding Services:");
+        builder.AppendLine("Host-authoritative current task supplied by Coding Services:");
         builder.AppendLine($"- Active task: {FormatTaskLabel(activeTask.TaskNumber)} {activeTask.Name}");
         builder.AppendLine($"- Task id: {activeTask.Id}");
         builder.AppendLine($"- Short name: {activeTask.ShortName}");
         builder.AppendLine($"- State: {activeTask.StateName} ({activeTask.StateCode})");
+        if (!string.IsNullOrWhiteSpace(activeTask.Description))
+        {
+            builder.AppendLine("- Description:");
+            builder.AppendLine("```markdown");
+            builder.AppendLine(Compact(activeTask.Description, 1600));
+            builder.AppendLine("```");
+        }
         builder.AppendLine($"- Task database: {repository.DatabasePath}");
         builder.AppendLine($"- Task memory root: {repository.TaskMemoryRoot}");
         builder.AppendLine($"- Watched solution: {settings.WatchedSolutionPath}");
-        builder.AppendLine("- Active task is the current workflow pointer for this turn.");
+        builder.AppendLine("- This Active task is the authoritative current task for this Work turn.");
+        builder.AppendLine("- Do not substitute another task, prior task, inferred task, or selected-file interpretation.");
+        builder.AppendLine("- If the user request appears inconsistent with this task, report the inconsistency and ask for clarification instead of switching tasks.");
         builder.AppendLine("- Durable workflow memory lives in user notes, agent notes, task files, and task events.");
         builder.AppendLine("- Keep solution index context volatile: refresh digest/MCP summaries when code structure matters; do not treat indexed summaries as durable task memory.");
         builder.AppendLine("- At turn completion, ask whether agent notes should be updated if the outcome changes durable workflow memory.");

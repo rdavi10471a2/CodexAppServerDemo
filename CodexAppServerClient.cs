@@ -36,7 +36,10 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         ThreadId = null;
     }
 
-    public async Task StartAsync(string codexExe = "codex", CancellationToken cancellationToken = default)
+    public async Task StartAsync(
+        string codexExe = "codex",
+        string? harnessMcpUrl = null,
+        CancellationToken cancellationToken = default)
     {
         if (IsStarted)
             return;
@@ -53,8 +56,10 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             CreateNoWindow = true
         };
 
-        // Default app-server transport is stdio:// JSONL.
-        psi.ArgumentList.Add("app-server");
+        foreach (string argument in BuildAppServerArguments(harnessMcpUrl))
+        {
+            psi.ArgumentList.Add(argument);
+        }
 
         _process = new Process
         {
@@ -74,6 +79,26 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         LogLine?.Invoke("Started: codex app-server");
 
         await InitializeAsync(cancellationToken);
+    }
+
+    public static IReadOnlyList<string> BuildAppServerArguments(string? harnessMcpUrl)
+    {
+        List<string> arguments = ["app-server"];
+        arguments.Add("-c");
+        arguments.Add("features.js_repl=true");
+        if (!string.IsNullOrWhiteSpace(harnessMcpUrl))
+        {
+            arguments.Add("-c");
+            arguments.Add($"mcp_servers.harness.url={ToTomlString(harnessMcpUrl.Trim())}");
+            arguments.Add("-c");
+            arguments.Add("mcp_servers.harness.default_tools_approval_mode=\"auto\"");
+            arguments.Add("-c");
+            arguments.Add("mcp_servers.harness.tools.accept_staged_review.approval_mode=\"approve\"");
+            arguments.Add("-c");
+            arguments.Add("mcp_servers.harness.tools.reject_staged_review.approval_mode=\"approve\"");
+        }
+
+        return arguments;
     }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -973,5 +998,10 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         process?.Dispose();
         _cts.Dispose();
         await Task.CompletedTask;
+    }
+
+    private static string ToTomlString(string value)
+    {
+        return "\"" + value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
     }
 }

@@ -27,6 +27,7 @@ public sealed class WorkflowTaskBoardViewServiceTests
                 repository.RootPath,
                 "Port task board",
                 null,
+                "Separate task description.",
                 "Initial task notes.");
             TaskBoardViewModel board = service.GetBoard(repository.RootPath, created.Id);
             CodingServicesSettings settings = provider.GetSettings(repository.RootPath);
@@ -41,6 +42,7 @@ public sealed class WorkflowTaskBoardViewServiceTests
             Assert.True(Directory.Exists(board.TaskMemoryRoot));
             Assert.NotNull(board.SelectedTask);
             Assert.Equal("Port task board", board.SelectedTask.Name);
+            Assert.Equal("Separate task description.", board.SelectedTask.Description);
             Assert.Equal(2, board.SelectedTask.TaskNumber);
             Assert.Equal("TASK-0002", board.SelectedTask.TaskLabel);
             Assert.Equal("PortTaskBoard", board.SelectedTask.ShortName);
@@ -63,8 +65,8 @@ public sealed class WorkflowTaskBoardViewServiceTests
             WorkflowTaskBoardViewService service = new(CreateProvider());
 
             TaskBoardViewModel initial = service.GetBoard(repository.RootPath, null);
-            TaskBoardTaskViewModel first = service.CreateTask(repository.RootPath, "First task", null, string.Empty);
-            TaskBoardTaskViewModel second = service.CreateTask(repository.RootPath, "Second task", null, string.Empty);
+            TaskBoardTaskViewModel first = service.CreateTask(repository.RootPath, "First task", null, null, string.Empty);
+            TaskBoardTaskViewModel second = service.CreateTask(repository.RootPath, "Second task", null, null, string.Empty);
             TaskBoardViewModel board = service.GetBoard(repository.RootPath, second.Id);
 
             Assert.NotNull(initial.SelectedTask);
@@ -85,6 +87,29 @@ public sealed class WorkflowTaskBoardViewServiceTests
     }
 
     [Fact]
+    public void CreateTask_becomes_active_when_no_active_task_exists_even_if_other_live_tasks_exist()
+    {
+        using (TemporaryRepository repository = TemporaryRepository.Create())
+        {
+            WorkflowTaskBoardViewService service = new(CreateProvider());
+            TaskBoardViewModel initial = service.GetBoard(repository.RootPath, null);
+            Assert.NotNull(initial.SelectedTask);
+
+            TaskBoardTaskViewModel waiting = service.CreateTask(repository.RootPath, "Waiting task", null, null, string.Empty);
+            service.MoveTask(repository.RootPath, initial.SelectedTask.Id, "Done");
+
+            TaskBoardTaskViewModel created = service.CreateTask(repository.RootPath, "New current task", null, null, string.Empty);
+            TaskBoardViewModel board = service.GetBoard(repository.RootPath, created.Id);
+
+            Assert.Equal("Ready", service.MoveTask(repository.RootPath, waiting.Id, "Ready").StateCode);
+            Assert.Equal("Active", created.StateCode);
+            Assert.NotNull(board.SelectedTask);
+            Assert.Equal(created.Id, board.SelectedTask.Id);
+            Assert.Equal("Active", board.SelectedTask.StateCode);
+        }
+    }
+
+    [Fact]
     public void Board_actions_update_selected_task_detail()
     {
         using (TemporaryRepository repository = TemporaryRepository.Create())
@@ -94,10 +119,10 @@ public sealed class WorkflowTaskBoardViewServiceTests
             Assert.NotNull(initial.SelectedTask);
             service.MoveTask(repository.RootPath, initial.SelectedTask.Id, "Done");
 
-            TaskBoardTaskViewModel created = service.CreateTask(repository.RootPath, "Add task UI", null, string.Empty);
+            TaskBoardTaskViewModel created = service.CreateTask(repository.RootPath, "Add task UI", null, null, string.Empty);
 
             service.MoveTask(repository.RootPath, created.Id, "Active");
-            service.UpdateTaskDetails(repository.RootPath, created.Id, "Add richer task UI", "TaskUi");
+            service.UpdateTaskDetails(repository.RootPath, created.Id, "Add richer task UI", "TaskUi", "Add dedicated description field.");
             service.UpdateNotes(repository.RootPath, created.Id, "Updated notes.");
             service.AddFile(repository.RootPath, created.Id, "CodexAppServerBlazor/Components/Pages/Home/Home.razor", "wire tab", "ui");
             service.AddComment(repository.RootPath, created.Id, "Ready for review.");
@@ -106,6 +131,7 @@ public sealed class WorkflowTaskBoardViewServiceTests
 
             Assert.NotNull(board.SelectedTask);
             Assert.Equal("Add richer task UI", board.SelectedTask.Name);
+            Assert.Equal("Add dedicated description field.", board.SelectedTask.Description);
             Assert.Equal("TaskUi", board.SelectedTask.ShortName);
             Assert.Equal("Active", board.SelectedTask.StateCode);
             Assert.Equal("Updated notes.", board.SelectedTask.NotesMarkdown);
@@ -126,6 +152,7 @@ public sealed class WorkflowTaskBoardViewServiceTests
             TaskBoardTaskViewModel created = service.CreateTask(
                 repository.RootPath,
                 "Summarize task memory",
+                null,
                 null,
                 "User-authored intent.");
             TaskBoardViewModel initial = service.GetBoard(repository.RootPath, created.Id);
@@ -153,8 +180,8 @@ public sealed class WorkflowTaskBoardViewServiceTests
             WorkflowTaskBoardViewService service = new(CreateProvider());
             TaskBoardViewModel initial = service.GetBoard(repository.RootPath, null);
             Assert.NotNull(initial.SelectedTask);
-            TaskBoardTaskViewModel first = service.CreateTask(repository.RootPath, "First task", null, string.Empty);
-            TaskBoardTaskViewModel second = service.CreateTask(repository.RootPath, "Second task", null, string.Empty);
+            TaskBoardTaskViewModel first = service.CreateTask(repository.RootPath, "First task", null, null, string.Empty);
+            TaskBoardTaskViewModel second = service.CreateTask(repository.RootPath, "Second task", null, null, string.Empty);
 
             InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
                 service.MoveTask(repository.RootPath, first.Id, "Active"));
@@ -173,7 +200,7 @@ public sealed class WorkflowTaskBoardViewServiceTests
             TaskBoardViewModel initial = service.GetBoard(repository.RootPath, null);
             Assert.NotNull(initial.SelectedTask);
             Assert.Equal("Active", initial.SelectedTask.StateCode);
-            TaskBoardTaskViewModel created = service.CreateTask(repository.RootPath, "Ready task", null, string.Empty);
+            TaskBoardTaskViewModel created = service.CreateTask(repository.RootPath, "Ready task", null, null, string.Empty);
 
             TaskBoardTaskViewModel moved = service.MoveTask(repository.RootPath, created.Id, "Ready");
             TaskBoardViewModel board = service.GetBoard(repository.RootPath, moved.Id);
@@ -187,22 +214,25 @@ public sealed class WorkflowTaskBoardViewServiceTests
     }
 
     [Fact]
-    public void MoveTask_preserves_existing_active_pointer_when_other_live_tasks_exist()
+    public void MoveTask_allows_current_active_task_to_move_out_of_active_without_replacement()
     {
         using (TemporaryRepository repository = TemporaryRepository.Create())
         {
             WorkflowTaskBoardViewService service = new(CreateProvider());
             TaskBoardViewModel initial = service.GetBoard(repository.RootPath, null);
             Assert.NotNull(initial.SelectedTask);
-            service.CreateTask(repository.RootPath, "Waiting task", null, string.Empty);
+            TaskBoardTaskViewModel waiting = service.CreateTask(repository.RootPath, "Waiting task", null, null, string.Empty);
 
-            InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
-                service.MoveTask(repository.RootPath, initial.SelectedTask.Id, "Ready"));
+            TaskBoardTaskViewModel moved = service.MoveTask(repository.RootPath, initial.SelectedTask.Id, "Ready");
+            TaskBoardViewModel board = service.GetBoard(repository.RootPath, moved.Id);
 
-            Assert.Contains("Move another task to Active", ex.Message, StringComparison.Ordinal);
-            TaskBoardViewModel board = service.GetBoard(repository.RootPath, initial.SelectedTask.Id);
+            Assert.Equal("Ready", moved.StateCode);
             Assert.NotNull(board.SelectedTask);
-            Assert.Equal("Active", board.SelectedTask.StateCode);
+            Assert.Equal(initial.SelectedTask.Id, board.SelectedTask.Id);
+            Assert.Equal("Ready", board.SelectedTask.StateCode);
+            TaskBoardColumnViewModel readyColumn = Assert.Single(board.Columns, column => column.StateCode.Equals("Ready", StringComparison.Ordinal));
+            Assert.Contains(readyColumn.Tasks, task => task.Id.Equals(initial.SelectedTask.Id, StringComparison.Ordinal));
+            Assert.Contains(board.Columns.SelectMany(column => column.Tasks), task => task.Id.Equals(waiting.Id, StringComparison.Ordinal));
         }
     }
 
@@ -216,7 +246,7 @@ public sealed class WorkflowTaskBoardViewServiceTests
             Assert.NotNull(initial.SelectedTask);
             service.MoveTask(repository.RootPath, initial.SelectedTask.Id, "Done");
 
-            TaskBoardTaskViewModel task = service.CreateTask(repository.RootPath, "Ship the thing", null, "done soon");
+            TaskBoardTaskViewModel task = service.CreateTask(repository.RootPath, "Ship the thing", null, null, "done soon");
 
             service.MoveTask(repository.RootPath, task.Id, "Done");
             service.ArchiveTask(repository.RootPath, task.Id);
@@ -242,7 +272,7 @@ public sealed class WorkflowTaskBoardViewServiceTests
         using (TemporaryRepository repository = TemporaryRepository.Create())
         {
             WorkflowTaskBoardViewService service = new(CreateProvider());
-            TaskBoardTaskViewModel task = service.CreateTask(repository.RootPath, "Archive from ready", null, string.Empty);
+            TaskBoardTaskViewModel task = service.CreateTask(repository.RootPath, "Archive from ready", null, null, string.Empty);
             service.MoveTask(repository.RootPath, task.Id, "Ready");
 
             service.ArchiveTask(repository.RootPath, task.Id);
@@ -277,7 +307,7 @@ public sealed class WorkflowTaskBoardViewServiceTests
         using (TemporaryRepository repository = TemporaryRepository.Create())
         {
             WorkflowTaskBoardViewService service = new(CreateProvider());
-            TaskBoardTaskViewModel task = service.CreateTask(repository.RootPath, "Track file refs", null, string.Empty);
+            TaskBoardTaskViewModel task = service.CreateTask(repository.RootPath, "Track file refs", null, null, string.Empty);
 
             Assert.Throws<ArgumentException>(() =>
                 service.AddFile(repository.RootPath, task.Id, "C:/outside.txt", "bad", "input"));
@@ -298,7 +328,7 @@ public sealed class WorkflowTaskBoardViewServiceTests
         using (TemporaryRepository repository = TemporaryRepository.Create())
         {
             WorkflowTaskBoardViewService service = new(CreateProvider());
-            TaskBoardTaskViewModel created = service.CreateTask(repository.RootPath, "Keep this task", null, "durable");
+            TaskBoardTaskViewModel created = service.CreateTask(repository.RootPath, "Keep this task", null, null, "durable");
 
             TaskBoardViewModel firstRead = service.GetBoard(repository.RootPath, created.Id);
             TaskBoardViewModel secondRead = service.GetBoard(repository.RootPath, created.Id);
