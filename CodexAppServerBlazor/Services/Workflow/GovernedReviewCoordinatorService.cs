@@ -1,0 +1,120 @@
+namespace CodexAppServerBlazor.Services.Workflow;
+
+public sealed class GovernedReviewCoordinatorService
+{
+    private readonly object gate = new();
+    private GovernedReviewPendingRequest? pendingRequest;
+
+    public event Action? Changed;
+
+    public GovernedReviewPendingRequest? GetPendingRequest()
+    {
+        lock (gate)
+        {
+            return pendingRequest;
+        }
+    }
+
+    public bool IsSessionPending(string sessionId)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return false;
+        }
+
+        lock (gate)
+        {
+            return pendingRequest is not null
+                && pendingRequest.Request.SessionId.Equals(sessionId, StringComparison.Ordinal);
+        }
+    }
+
+    public Task<GovernedReviewResolution> QueueAndWaitAsync(GovernedReviewRequest request)
+    {
+        if (request is null)
+        {
+            throw new ArgumentNullException(nameof(request));
+        }
+
+        GovernedReviewPendingRequest activeRequest;
+        bool notifyChanged = false;
+        lock (gate)
+        {
+            if (pendingRequest is not null)
+            {
+                if (pendingRequest.Request.SessionId.Equals(request.SessionId, StringComparison.Ordinal))
+                {
+                    return pendingRequest.Completion.Task;
+                }
+
+                throw new InvalidOperationException(
+                    $"Governed review session '{pendingRequest.Request.SessionId}' is already awaiting a host decision.");
+            }
+
+            activeRequest = new GovernedReviewPendingRequest(
+                request,
+                new TaskCompletionSource<GovernedReviewResolution>(TaskCreationOptions.RunContinuationsAsynchronously));
+            pendingRequest = activeRequest;
+            notifyChanged = true;
+        }
+
+        if (notifyChanged)
+        {
+            Changed?.Invoke();
+        }
+
+        return activeRequest.Completion.Task;
+    }
+
+    public void Complete(string sessionId, GovernedReviewResolution resolution)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            throw new ArgumentException("Session id is required.", nameof(sessionId));
+        }
+
+        GovernedReviewPendingRequest? resolvedRequest = null;
+        bool notifyChanged = false;
+        lock (gate)
+        {
+            if (pendingRequest is null)
+            {
+                return;
+            }
+
+            if (!pendingRequest.Request.SessionId.Equals(sessionId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            resolvedRequest = pendingRequest;
+            pendingRequest = null;
+            notifyChanged = true;
+        }
+
+        resolvedRequest?.Completion.TrySetResult(resolution);
+
+        if (notifyChanged)
+        {
+            Changed?.Invoke();
+        }
+    }
+}
+
+public sealed record GovernedReviewRequest(
+    string SessionId,
+    string RelativePath,
+    int PendingCount,
+    bool PreMergeValidationIsError,
+    bool PreMergeValidationForceApproved);
+
+public sealed record GovernedReviewResolution(
+    string SessionId,
+    bool Completed,
+    bool AcceptedWithOverride,
+    int RemainingPendingCount,
+    string Message);
+
+public sealed record GovernedReviewPendingRequest(
+    GovernedReviewRequest Request,
+    TaskCompletionSource<GovernedReviewResolution> Completion);

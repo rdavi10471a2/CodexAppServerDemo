@@ -1,0 +1,16 @@
+Coding Services edit-tool guidance:
+
+- Use Roslyn or symbol-aware edit tools for C# source files when the change targets a class, method, property, field, constructor, nested type, using, or partial modifier.
+- Use text or span replacement tools for non-C# files such as `.razor`, `.css`, `.js`, `.json`, `.md`, and config files, or when a C# change is truly raw text-oriented.
+- Prefer `get_file_outline` before symbol edits when the exact symbol shape or container is unclear.
+- Prefer `get_symbol` before remove or replace operations when the change depends on confirming the exact existing declaration text.
+- If a file kind is unsupported by symbol tools, say so plainly and fall back to text tools instead of forcing a semantic edit path.
+- For `.razor` files, use governed text tools such as `refresh_file`, `replace_text_in_file`, and `replace_span_in_file` for markup or mixed markup/code edits, then use `stage_current_candidate_for_review` so the user can inspect the governed diff before any accept/reject decision.
+- After edits, refresh/build/reindex before trusting index-backed structure again.
+
+Governed workflow tool phases:
+
+- Discovery phase: prefer `get_workspace`, `get_watched_solution_digest`, `get_watched_solution_summary`, and `get_test_project_summary` before broad fallback search.
+- Edit phase: use `refresh_file`, `new_file`, `replace_text_in_file`, `replace_span_in_file`, `get_file_outline`, `get_symbol`, `submit_symbol`, and the typed Roslyn add/remove tools to produce governed staged candidates.
+- Review phase: use `stage_current_candidate_for_review` to bridge a Working candidate into staged review when needed, then use `list_pending_staged_reviews`, `load_staged_review`, or `load_next_session_review` to inspect what is staged for acceptance.
+- Decision phase: if the user explicitly directs you to record the review outcome through MCP, use `accept_staged_review` or `reject_staged_review` to do it. Otherwise, once the review UI has been launched, stop and let the human complete the review there. Do not claim merge/promotion was completed unless one of those review-decision paths actually ran successfully.

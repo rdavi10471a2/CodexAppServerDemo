@@ -1,0 +1,47 @@
+.review-debug-shell {
+    display: grid;
+    gap: 12px;
+    min-height: 0;
+}
+
+.review-debug-summary {
+    border: 1px solid #d7e1ea;
+    border-radius: 8px;
+    background: #f7fafc;
+    padding: 12px 14px;
+}
+
+.review-debug-summary-header {
+    margin-bottom: 10px;
+    color: #526a82;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.review-debug-summary-grid {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+.review-debug-summary-item {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+}
+
+.review-debug-label {
+    color: #6c7d8f;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.review-debug-summary-item strong {
+    color: #16202c;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 13px;
+    overflow-wrap: anywhere;
+}

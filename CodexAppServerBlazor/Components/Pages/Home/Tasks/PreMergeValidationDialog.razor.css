@@ -1,0 +1,55 @@
+.validation-gate-dialog {
+    display: grid;
+    gap: 14px;
+}
+
+.validation-gate-banner {
+    background: #fff4e5;
+    border: 1px solid #f2c37b;
+    border-radius: 10px;
+    color: #8a4b00;
+    display: grid;
+    gap: 6px;
+    padding: 14px 16px;
+}
+
+.validation-gate-summary {
+    background: #f8fbfd;
+    border: 1px solid #d7e1ea;
+    border-radius: 10px;
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    padding: 12px 14px;
+}
+
+.validation-gate-summary span {
+    color: #607893;
+    display: block;
+    font-size: .78rem;
+    font-weight: 700;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+}
+
+.validation-gate-summary strong {
+    color: #172033;
+    overflow-wrap: anywhere;
+}
+
+.validation-gate-copy {
+    color: #39506b;
+    margin: 0;
+}
+
+.validation-gate-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+@media (max-width: 800px) {
+    .validation-gate-summary {
+        grid-template-columns: 1fr;
+    }
+}

@@ -1,0 +1,395 @@
+@using CodexAppServerBlazor.Services.Workflow
+@using DiffPlex
+@using DiffPlex.DiffBuilder
+@using DiffPlex.DiffBuilder.Model
+@inject DialogService DialogService
+@inject IStagedReviewPageService StagedReviewPageService
+
+<div class="staged-review-dialog">
+    <div class="staged-review-dialog-header">
+        <div>
+            <h3>@DialogTitle</h3>
+            <p>@DialogSubtitle</p>
+        </div>
+        <div class="staged-review-dialog-actions">
+            <RadzenButton Icon="refresh"
+                          Text="Refresh"
+                          ButtonStyle="ButtonStyle.Light"
+                          Size="ButtonSize.Small"
+                          Click="@RefreshReview" />
+            @if (CanCloseDialog)
+            {
+                <RadzenButton Icon="close"
+                              Text="Close"
+                              ButtonStyle="ButtonStyle.Secondary"
+                              Size="ButtonSize.Small"
+                              Click="@CloseDialogAsync" />
+            }
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(errorMessage))
+    {
+        <div class="staged-review-error">@errorMessage</div>
+    }
+
+    @if (selectedModel is not null && selectedModel.PreMergeValidationIsError && !selectedModel.PreMergeValidationForceApproved)
+    {
+        <div class="staged-review-warning">
+            <strong>Pre-merge validation failed.</strong>
+            <span>Normal accept is disabled for this staged record. Use <em>Accept With Validation Override</em> only if you want to merge despite that failure.</span>
+        </div>
+    }
+
+    <div class="staged-review-dialog-layout @(UseSessionFlow ? "single-record" : string.Empty)">
+        @if (!UseSessionFlow)
+        {
+            <aside class="staged-review-queue">
+                <div class="staged-review-queue-header">
+                    <strong>Pending</strong>
+                    <span>@pendingItems.Count item(s)</span>
+                </div>
+
+                @if (pendingItems.Count == 0)
+                {
+                    <div class="staged-review-empty">No pending staged edits.</div>
+                }
+                else
+                {
+                    <div class="staged-review-queue-list">
+                        @foreach (StagedReviewQueueItem item in pendingItems)
+                        {
+                            <button class="staged-review-queue-item @(selectedRecordId == item.StagedRecordId ? "active" : string.Empty)"
+                                    type="button"
+                                    @onclick="@(() => SelectRecord(item.StagedRecordId))">
+                                <strong>@item.RelativePath</strong>
+                                <span>@item.CreatedAtUtc</span>
+                                <small>Launch: @NormalizeLabel(item.LaunchStatus) | Validation: @NormalizeLabel(item.PreMergeValidationStatus)</small>
+                            </button>
+                        }
+                    </div>
+                }
+            </aside>
+        }
+
+        <section class="staged-review-detail @(UseSessionFlow ? "staged-review-detail-full" : string.Empty)">
+            @if (selectedModel is null)
+            {
+                <div class="staged-review-empty">Select a staged candidate to inspect it.</div>
+            }
+            else if (selectedModel.IsSessionComplete)
+            {
+                <div class="staged-review-complete">
+                    <strong>Review complete.</strong>
+                    <span>All staged review items for this edit session have been resolved.</span>
+                </div>
+            }
+            else
+            {
+                <div class="staged-review-meta">
+                    <div>
+                        <span class="eyebrow">Record</span>
+                        <strong>@selectedModel.RelativePath</strong>
+                    </div>
+                    <div>
+                        <span class="eyebrow">Status</span>
+                        <strong>@selectedModel.DecisionStatus</strong>
+                    </div>
+                    <div>
+                        <span class="eyebrow">Session</span>
+                        <strong>@(string.IsNullOrWhiteSpace(selectedModel.SessionId) ? "single-file" : selectedModel.SessionId)</strong>
+                    </div>
+                    <div>
+                        <span class="eyebrow">Pending queue</span>
+                        <strong>@pendingItems.Count item(s)</strong>
+                    </div>
+                </div>
+
+                <section class="staged-review-diff-shell" aria-label="Side by side staged review">
+                    <div class="staged-review-diff-header">
+                        <strong>Proposed Candidate</strong>
+                    </div>
+                    <div class="staged-review-diff-header">
+                        <strong>Current Source</strong>
+                    </div>
+
+                    @for (int index = 0; index < LineCount; index++)
+                    {
+                        DiffPiece? proposedLine = GetProposedLine(index);
+                        DiffPiece? currentLine = GetCurrentLine(index);
+
+                        <div class="staged-review-diff-line proposed @GetLineClass(proposedLine)">
+                            <span class="staged-review-line-number">@GetLineNumber(proposedLine)</span>
+                            <code>@GetLineText(proposedLine)</code>
+                        </div>
+                        <div class="staged-review-diff-line current @GetLineClass(currentLine)">
+                            <span class="staged-review-line-number">@GetLineNumber(currentLine)</span>
+                            <code>@GetLineText(currentLine)</code>
+                        </div>
+                    }
+                </section>
+
+                <div class="staged-review-detail-actions">
+                    <RadzenButton Icon="check"
+                                  Text="Accept Proposed"
+                                  ButtonStyle="ButtonStyle.Success"
+                                  Size="ButtonSize.Small"
+                                  Disabled="@selectedModel.IsDecided"
+                                  Click="@AcceptSelectedAsync" />
+                    <RadzenButton Icon="warning"
+                                  Text="Accept With Validation Override"
+                                  ButtonStyle="ButtonStyle.Warning"
+                                  Size="ButtonSize.Small"
+                                  Disabled="@(!CanForceAccept)"
+                                  Click="@AcceptSelectedWithOverrideAsync" />
+                    <RadzenButton Icon="close"
+                                  Text="Reject"
+                                  ButtonStyle="ButtonStyle.Danger"
+                                  Size="ButtonSize.Small"
+                                  Disabled="@selectedModel.IsDecided"
+                                  Click="@RejectSelectedAsync" />
+                </div>
+            }
+        </section>
+    </div>
+</div>
+
+@code {
+    private IReadOnlyList<StagedReviewQueueItem> pendingItems = [];
+    private StagedReviewPageModel? selectedModel;
+    private SideBySideDiffModel? diffModel;
+    private string? selectedRecordId;
+    private string? errorMessage;
+
+    private int LineCount => Math.Max(diffModel?.NewText.Lines.Count ?? 0, diffModel?.OldText.Lines.Count ?? 0);
+    private bool UseSessionFlow => !string.IsNullOrWhiteSpace(SessionId);
+    private string DialogTitle => UseSessionFlow ? "Merge Review" : "Merge Review Queue";
+    private string DialogSubtitle => UseSessionFlow
+        ? "Review this edit session in order. This dialog stays open and advances through each staged file until the session is complete."
+        : "Review staged candidates before they become source truth.";
+    private bool CanForceAccept => selectedModel is not null
+        && !selectedModel.IsDecided
+        && selectedModel.PreMergeValidationIsError
+        && !selectedModel.PreMergeValidationForceApproved;
+    private bool CanCloseDialog => !UseSessionFlow || (selectedModel?.IsSessionComplete ?? false);
+
+    [Parameter]
+    public string WorkspaceRoot { get; set; } = string.Empty;
+
+    [Parameter]
+    public string? SessionId { get; set; }
+
+    [Parameter]
+    public bool AutoCloseWhenComplete { get; set; } = true;
+
+    [Parameter]
+    public EventCallback CloseRequested { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        LoadReview(preserveSelection: false);
+    }
+
+    private Task RefreshReview()
+    {
+        LoadReview(preserveSelection: true);
+        return Task.CompletedTask;
+    }
+
+    private Task CloseDialogAsync()
+    {
+        if (!CanCloseDialog)
+        {
+            errorMessage = "Resolve or reject every staged item in this governed review session before closing the dialog.";
+            return Task.CompletedTask;
+        }
+
+        if (CloseRequested.HasDelegate)
+        {
+            return CloseRequested.InvokeAsync();
+        }
+
+        DialogService.Close();
+        return Task.CompletedTask;
+    }
+
+    private void SelectRecord(string stagedRecordId)
+    {
+        try
+        {
+            selectedModel = StagedReviewPageService.Load(WorkspaceRoot, stagedRecordId);
+            selectedRecordId = stagedRecordId;
+            errorMessage = null;
+            BuildDiff();
+        }
+        catch (Exception ex)
+        {
+            selectedModel = null;
+            selectedRecordId = null;
+            errorMessage = ex.Message;
+            BuildDiff();
+        }
+    }
+
+    private Task AcceptSelectedAsync()
+    {
+        return AcceptSelectedCoreAsync(forceApproveValidation: false);
+    }
+
+    private Task AcceptSelectedWithOverrideAsync()
+    {
+        return AcceptSelectedCoreAsync(forceApproveValidation: true);
+    }
+
+    private async Task AcceptSelectedCoreAsync(bool forceApproveValidation)
+    {
+        if (string.IsNullOrWhiteSpace(selectedRecordId))
+        {
+            return;
+        }
+
+        try
+        {
+            StagedReviewPageActionResult result = StagedReviewPageService.Accept(WorkspaceRoot, selectedRecordId, forceApproveValidation);
+            errorMessage = result.Message;
+            await LoadNextStateAsync();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+
+    private async Task RejectSelectedAsync()
+    {
+        if (string.IsNullOrWhiteSpace(selectedRecordId))
+        {
+            return;
+        }
+
+        try
+        {
+            StagedReviewPageActionResult result = StagedReviewPageService.Reject(WorkspaceRoot, selectedRecordId);
+            errorMessage = result.Message;
+            await LoadNextStateAsync();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+
+    private async Task LoadNextStateAsync()
+    {
+        LoadReview(preserveSelection: false);
+        if (UseSessionFlow && (selectedModel?.IsSessionComplete ?? false) && AutoCloseWhenComplete)
+        {
+            await CloseDialogAsync();
+        }
+    }
+
+    private void LoadReview(bool preserveSelection)
+    {
+        try
+        {
+            pendingItems = StagedReviewPageService.ListPending(WorkspaceRoot);
+            errorMessage = null;
+
+            if (UseSessionFlow)
+            {
+                selectedModel = StagedReviewPageService.LoadNextForSession(WorkspaceRoot, SessionId!);
+                selectedRecordId = selectedModel.IsSessionComplete ? null : selectedModel.StagedRecordId;
+                BuildDiff();
+                return;
+            }
+
+            string? recordIdToLoad = preserveSelection
+                ? pendingItems.FirstOrDefault(item => item.StagedRecordId == selectedRecordId)?.StagedRecordId
+                : null;
+            recordIdToLoad ??= pendingItems.FirstOrDefault()?.StagedRecordId;
+
+            if (string.IsNullOrWhiteSpace(recordIdToLoad))
+            {
+                selectedModel = null;
+                selectedRecordId = null;
+                BuildDiff();
+                return;
+            }
+
+            selectedModel = StagedReviewPageService.Load(WorkspaceRoot, recordIdToLoad);
+            selectedRecordId = recordIdToLoad;
+            BuildDiff();
+        }
+        catch (Exception ex)
+        {
+            pendingItems = [];
+            selectedModel = null;
+            selectedRecordId = null;
+            errorMessage = ex.Message;
+            BuildDiff();
+        }
+    }
+
+    private static string NormalizeLabel(string value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "pending" : value;
+    }
+
+    private void BuildDiff()
+    {
+        SideBySideDiffBuilder builder = new(new Differ());
+        diffModel = builder.BuildDiffModel(selectedModel?.CurrentText ?? string.Empty, selectedModel?.ProposedText ?? string.Empty);
+    }
+
+    private DiffPiece? GetProposedLine(int index)
+    {
+        if (diffModel is null || index >= diffModel.NewText.Lines.Count)
+        {
+            return null;
+        }
+
+        return diffModel.NewText.Lines[index];
+    }
+
+    private DiffPiece? GetCurrentLine(int index)
+    {
+        if (diffModel is null || index >= diffModel.OldText.Lines.Count)
+        {
+            return null;
+        }
+
+        return diffModel.OldText.Lines[index];
+    }
+
+    private static string GetLineNumber(DiffPiece? piece)
+    {
+        if (piece is null || piece.Position is null)
+        {
+            return string.Empty;
+        }
+
+        return piece.Position.Value.ToString();
+    }
+
+    private static string GetLineText(DiffPiece? piece)
+    {
+        return piece?.Text ?? string.Empty;
+    }
+
+    private static string GetLineClass(DiffPiece? piece)
+    {
+        if (piece is null)
+        {
+            return "imaginary";
+        }
+
+        return piece.Type switch
+        {
+            ChangeType.Inserted => "inserted",
+            ChangeType.Deleted => "deleted",
+            ChangeType.Modified => "modified",
+            ChangeType.Imaginary => "imaginary",
+            _ => "unchanged"
+        };
+    }
+}
