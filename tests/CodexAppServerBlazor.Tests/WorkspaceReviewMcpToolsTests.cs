@@ -117,9 +117,9 @@ public sealed class WorkspaceReviewMcpToolsTests
     [Fact]
     public async Task StageCurrentCandidateForReview_raises_elicitation_with_review_context()
     {
-        // The accept path applies through StagedReviewPageService.Accept (a real overlay build), which is
-        // covered by the AcceptStagedReview tool tests. Here we verify the gate raises the elicitation with
-        // the correct review context and honors a decline without touching source.
+        // The elicitation is the block; per-file accept/reject is applied by the host review dialog while the
+        // call is suspended (covered separately by the AcceptStagedReview tool tests). Here we verify the gate
+        // raises the elicitation with the correct session/review context and reports session completion.
         using TemporaryRepository repository = TemporaryRepository.Create();
         CreateProject(repository.RootPath);
         string sourcePath = CreateWatchedFile(repository.RootPath, RazorRelativePath, "<h1>Schema Studio Web</h1>");
@@ -129,21 +129,21 @@ public sealed class WorkspaceReviewMcpToolsTests
         File.WriteAllText(status.WorkingFilePath, "<h1>Schema Studio Web <span style=\"color: red;\">--Coding Services =3</span></h1>");
 
         HarnessWorkspaceReviewService service = CreateReviewService(repository.RootPath);
-        StubReviewElicitor elicitor = new(ReviewDecision.Rejected);
+        StubReviewElicitor elicitor = new(ReviewDecision.Accepted);
 
         StageForReviewResult result = await service.StageCurrentCandidateForReviewAsync(elicitor, sourcePath);
 
         Assert.Equal(1, elicitor.CallCount);
         Assert.NotNull(elicitor.LastRequest);
-        Assert.Contains("MainLayout.razor", elicitor.LastRequest!.RelativePath, StringComparison.Ordinal);
+        Assert.Equal(status.EditSessionId, elicitor.LastRequest!.SessionId);
+        Assert.Contains("MainLayout.razor", elicitor.LastRequest.RelativePath, StringComparison.Ordinal);
         Assert.Contains($"/review/session/{status.EditSessionId}", elicitor.LastRequest.ReviewUrl, StringComparison.Ordinal);
         Assert.False(elicitor.LastRequest.ValidationIsError);
-        Assert.Contains("rejected", result.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal("<h1>Schema Studio Web</h1>", File.ReadAllText(sourcePath));
+        Assert.Contains("completed", result.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task StageCurrentCandidateForReview_reject_decision_leaves_source_unchanged()
+    public async Task StageCurrentCandidateForReview_declined_decision_reports_declined()
     {
         using TemporaryRepository repository = TemporaryRepository.Create();
         CreateProject(repository.RootPath);
@@ -159,7 +159,7 @@ public sealed class WorkspaceReviewMcpToolsTests
         StageForReviewResult result = await service.StageCurrentCandidateForReviewAsync(elicitor, sourcePath);
 
         Assert.Equal(1, elicitor.CallCount);
-        Assert.Contains("rejected", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("declined", result.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Equal("<h1>Schema Studio Web</h1>", File.ReadAllText(sourcePath));
     }
 
@@ -222,9 +222,9 @@ public sealed class WorkspaceReviewMcpToolsTests
         await Task.Delay(150);
         Assert.False(stageTask.IsCompleted, "Stage must block while the elicitation is unanswered.");
 
-        elicitor.Complete(ReviewDecision.Rejected);
+        elicitor.Complete(ReviewDecision.Accepted);
         StageForReviewResult result = await stageTask;
-        Assert.Contains("rejected", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("completed", result.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

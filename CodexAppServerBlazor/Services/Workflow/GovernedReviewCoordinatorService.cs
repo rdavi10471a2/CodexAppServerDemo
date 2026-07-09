@@ -1,10 +1,12 @@
 namespace CodexAppServerBlazor.Services.Workflow;
 
-// DORMANT as of the elicitation-gate change. The governed staged-review accept/reject gate is now driven by
-// MCP elicitation inside HarnessWorkspaceReviewService (see IReviewElicitor); the MCP path no longer queues
-// through this coordinator. It remains registered only so the existing Home.razor.cs dialog scaffolding keeps
-// compiling. Nothing calls QueueAndWaitAsync anymore, so its pending request never becomes non-null and the
-// old dialogs never fire. Safe to delete once the elicitation gate is confirmed and Home.razor.cs is cleaned.
+// Bridges the governed review dialog to the blocking primitive. The blocking primitive is now the MCP
+// elicitation (raised by the MCP tool over the app-server stdio channel), NOT this coordinator. When that
+// elicitation arrives, CodexConnectionService calls QueueAndWaitAsync here to drive the existing Home.razor.cs
+// dialog flow; Home resolves every staged file in the session and calls Complete when the dialog drains or
+// closes; CodexConnectionService then answers the elicitation, unblocking the agent turn. So this coordinator
+// no longer blocks the agent (the elicitation does) -- it only sequences the host dialog and reports the
+// drain/close result back to the elicitation answerer.
 public sealed class GovernedReviewCoordinatorService
 {
     private readonly object gate = new();

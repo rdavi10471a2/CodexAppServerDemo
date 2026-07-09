@@ -17,6 +17,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
     private readonly ITaskWorkflowContextService taskWorkflowContextService;
     private readonly IWorkflowTurnContextComposer workflowTurnContextComposer;
     private readonly SessionBootstrapPolicyService sessionBootstrapPolicyService;
+    private readonly GovernedReviewCoordinatorService? governedReviewCoordinator;
     private readonly PermissionRequestService permissionRequestService = new();
     private CodexAppServerClient? client;
     private string assistantText = string.Empty;
@@ -36,7 +37,8 @@ public sealed class CodexConnectionService : IAsyncDisposable
         ITaskWorkflowContextService taskWorkflowContextService,
         SessionBootstrapPolicyService sessionBootstrapPolicyService,
         IWorkflowTurnContextComposer workflowTurnContextComposer,
-        Func<CodexAppServerClient>? clientFactory = null)
+        Func<CodexAppServerClient>? clientFactory = null,
+        GovernedReviewCoordinatorService? governedReviewCoordinator = null)
     {
         this.configuration = configuration;
         this.clientFactory = clientFactory ?? (() => new CodexAppServerClient());
@@ -45,6 +47,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
         this.taskWorkflowContextService = taskWorkflowContextService;
         this.sessionBootstrapPolicyService = sessionBootstrapPolicyService;
         this.workflowTurnContextComposer = workflowTurnContextComposer;
+        this.governedReviewCoordinator = governedReviewCoordinator;
     }
 
     public event Action? Changed;
@@ -496,6 +499,23 @@ public sealed class CodexConnectionService : IAsyncDisposable
 
     private void OnServerRequest(CodexServerRequestEvent e)
     {
+        // Governed review elicitations are not simple approve/deny prompts: approving them must open the
+        // session review dialog and keep the agent blocked until the whole edit session is reviewed. Route
+        // those into the review coordinator/dialog instead of the generic permission panel.
+        if (governedReviewCoordinator is not null
+            && PermissionRequestService.IsElicitationRequest(e.Method)
+            && ReviewElicitationMarker.TryParse(e.RawJson, out string reviewSessionId))
+        {
+            AddEvent(
+                statusEvents,
+                "GovernedReview",
+                "elicitation",
+                "codex app-server",
+                $"Governed review elicitation #{e.RequestId} for edit session '{reviewSessionId}'. Opening review dialog; agent is blocked until the session is reviewed or the dialog is closed.");
+            _ = BridgeReviewElicitationAsync(e, reviewSessionId);
+            return;
+        }
+
         CodexPermissionRequest request = permissionRequestService.Add(e);
         AddEvent(
             statusEvents,
@@ -503,6 +523,54 @@ public sealed class CodexConnectionService : IAsyncDisposable
             "pending",
             "codex app-server",
             $"{request.Method} #{request.RequestId}: {request.Summary}");
+    }
+
+    private async Task BridgeReviewElicitationAsync(CodexServerRequestEvent e, string sessionId)
+    {
+        CodexAppServerClient? activeClient = client;
+        GovernedReviewCoordinatorService? coordinator = governedReviewCoordinator;
+        if (activeClient is null || coordinator is null)
+        {
+            return;
+        }
+
+        object response;
+        try
+        {
+            // Drives Home.razor.cs (OnGovernedReviewCoordinatorChanged -> ProcessQueuedReviewLaunchAsync),
+            // which opens the session review dialog and resolves each staged file; Complete() is called when
+            // the dialog drains or is closed. This await is the bridge, NOT the agent block -- the agent is
+            // blocked by the outstanding elicitation until we answer it below.
+            GovernedReviewResolution resolution = await coordinator.QueueAndWaitAsync(
+                new GovernedReviewRequest(
+                    sessionId,
+                    RelativePath: string.Empty,
+                    PendingCount: 0,
+                    PreMergeValidationIsError: false,
+                    PreMergeValidationForceApproved: false));
+
+            response = resolution.Completed
+                ? PermissionRequestService.CreateApproveResponse(e.Method, e.RawJson, PermissionApprovalScope.Turn)
+                : PermissionRequestService.CreateDenyResponse(e.Method, cancelTurn: false);
+            AddCurrentTurnNotice(resolution.Completed
+                ? $"Governed review session '{sessionId}' completed; releasing the agent."
+                : $"Governed review session '{sessionId}' closed before completion; releasing the agent (declined).");
+        }
+        catch (Exception ex)
+        {
+            // Never leave the agent blocked on an unanswered elicitation: decline on any failure.
+            response = PermissionRequestService.CreateDenyResponse(e.Method, cancelTurn: false);
+            AddCurrentTurnNotice($"Governed review bridge failed for edit session '{sessionId}': {ex.Message}. Declining the elicitation.");
+        }
+
+        try
+        {
+            await activeClient.RespondToServerRequestAsync(e.RequestId, response);
+        }
+        catch (Exception ex)
+        {
+            AddEvent(statusEvents, "GovernedReview", "error", "coding-services", $"Failed to answer governed review elicitation #{e.RequestId}: {ex.Message}");
+        }
     }
 
     private void OnToolActivity(ToolEvent e)

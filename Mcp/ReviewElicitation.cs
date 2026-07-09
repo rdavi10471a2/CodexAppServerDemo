@@ -14,9 +14,10 @@ public enum ReviewDecision
 }
 
 /// <summary>
-/// Context for a single governed staged-review decision surfaced to the operator.
+/// Context for a governed staged-review decision surfaced to the operator.
 /// </summary>
 public sealed record ReviewElicitationRequest(
+    string SessionId,
     string RelativePath,
     string SessionLabel,
     int PendingCount,
@@ -24,6 +25,47 @@ public sealed record ReviewElicitationRequest(
     string ValidationStatus,
     int ValidationDiagnosticCount,
     string ReviewUrl);
+
+/// <summary>
+/// Correlation marker embedded in the elicitation message so the Blazor host can recognize a governed
+/// review elicitation and route it into the session review dialog instead of the generic approval panel.
+/// The app-server elicitation protocol has no per-session field, so the session id rides in the message.
+/// </summary>
+public static class ReviewElicitationMarker
+{
+    private const string Prefix = "[[aim-review:";
+    private const string Suffix = "]]";
+
+    public static string Build(string sessionId)
+    {
+        return $"{Prefix}{sessionId}{Suffix}";
+    }
+
+    public static bool TryParse(string? text, out string sessionId)
+    {
+        sessionId = string.Empty;
+        if (string.IsNullOrEmpty(text))
+        {
+            return false;
+        }
+
+        int start = text.IndexOf(Prefix, StringComparison.Ordinal);
+        if (start < 0)
+        {
+            return false;
+        }
+
+        start += Prefix.Length;
+        int end = text.IndexOf(Suffix, start, StringComparison.Ordinal);
+        if (end < 0)
+        {
+            return false;
+        }
+
+        sessionId = text[start..end];
+        return !string.IsNullOrWhiteSpace(sessionId);
+    }
+}
 
 /// <summary>
 /// Requests a governed staged-review accept/reject decision from the operator and blocks until it is made.
@@ -54,14 +96,14 @@ public sealed class McpServerReviewElicitor : IReviewElicitor
         CancellationToken cancellationToken)
     {
         string validationLine = request.ValidationIsError
-            ? $"WARNING: pre-merge validation reported {request.ValidationDiagnosticCount} issue(s) (status: {request.ValidationStatus}). Accepting overrides the failed validation."
+            ? $"WARNING: pre-merge validation reported {request.ValidationDiagnosticCount} issue(s) (status: {request.ValidationStatus})."
             : "Pre-merge validation passed.";
         string message =
-            $"Governed review for '{request.RelativePath}' in {request.SessionLabel}."
+            $"Governed review ready for {request.SessionLabel} ('{request.RelativePath}', {request.PendingCount} pending)."
             + $" {validationLine}"
-            + $" Pending in session: {request.PendingCount}."
-            + " Accept applies the staged change to watched source; decline rejects it and leaves source unchanged."
-            + $" Review detail: {request.ReviewUrl}";
+            + " Approve to open the review dialog and resolve every staged file in this edit session;"
+            + " the agent stays blocked until the session is fully reviewed or the dialog is closed."
+            + $" Review detail: {request.ReviewUrl} {ReviewElicitationMarker.Build(request.SessionId)}";
 
         ElicitResult result = await server.ElicitAsync(
             new ElicitRequestParams

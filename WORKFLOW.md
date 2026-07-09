@@ -140,32 +140,45 @@ When running multiple instances, always pin `CodingServices:WatchedSolutionPath`
 
 ## Governed Review Gate (Elicitation)
 
-The staged-review accept/reject gate is driven by MCP elicitation, not by an
-out-of-band UI hold.
+The staged-review gate uses MCP elicitation as the BLOCK, bridged into the existing
+session review dialog which does the per-file work. It is not an out-of-band UI hold.
 
-- `StageCurrentCandidateForReview` (MCP tool) stages the candidate, runs pre-merge
-  validation, then raises an MCP elicitation and BLOCKS the tool call until the
-  operator answers.
-- The elicitation travels the app-server (stdio) `mcpServer/elicitation/request`
-  server-request channel -- the same channel security/sandbox approvals use -- so
-  the agent turn genuinely suspends until the operator answers, and it pops the
-  same yes/no surface as security prompts.
-- Answer mapping: accept -> apply the staged change to watched source;
-  decline -> reject and leave source unchanged; cancel -> leave pending and cancel
-  the call.
-- Requires the granular approval policy to have `mcp_elicitations = true` (see
-  `CodexAppServerClient.CreateApprovalPolicy`). With it false, no elicitation is
-  forwarded and only sandbox/security prompts surface.
-- The elicitor is abstracted behind `IReviewElicitor` (`Mcp/ReviewElicitation.cs`);
-  the real implementation wraps `McpServer.ElicitAsync`. Decision-mapping logic
-  lives in `HarnessWorkspaceReviewService` so it is unit-testable with a stub.
-- `GovernedReviewCoordinatorService` (the older HTTP-hold) is DORMANT -- kept only
-  so existing `Home.razor.cs` dialog scaffolding compiles. Do not route new gates
-  through it.
+Flow:
+1. `StageCurrentCandidateForReview` (MCP tool) stages the candidate, runs pre-merge
+   validation, then raises an MCP elicitation and BLOCKS on it. The elicitation
+   message carries a `[[aim-review:<sessionId>]]` marker.
+2. The elicitation travels the app-server (stdio) `mcpServer/elicitation/request`
+   channel -- the same channel security/sandbox approvals use -- so the agent turn
+   genuinely suspends.
+3. `CodexConnectionService.OnServerRequest` recognizes the marker and, instead of the
+   generic approve/deny panel, calls `GovernedReviewCoordinatorService.QueueAndWaitAsync`.
+   That fires the coordinator's `Changed` event, which `Home.razor.cs`
+   (`OnGovernedReviewCoordinatorChanged` -> `ProcessQueuedReviewLaunchAsync`) turns into
+   the `StagedReviewDialog` for the session.
+4. The operator resolves EVERY staged file in the edit session in that dialog
+   (accept / reject / accept-with-override, auto-advancing). The dialog auto-closes
+   when the session queue drains, or the operator closes it.
+5. On dialog completion `Home` calls `GovernedReviewCoordinator.Complete`, which
+   returns the resolution to `CodexConnectionService.BridgeReviewElicitationAsync`,
+   which then ANSWERS the elicitation (accept if drained, decline if closed early).
+   Answering unblocks the MCP tool -> the agent turn resumes.
 
-UNVERIFIED until a live run with tokens: whether Codex's HTTP MCP client advertises
-the elicitation capability to the harness. Validate with a trivial form elicitation
-before relying on the review gate.
+Key points:
+- The elicitation is the block; the coordinator/dialog do the work. Approving the
+  elicitation OPENS the dialog; it does not by itself accept a file.
+- The block is only released when the whole session is reviewed or the dialog closes.
+- Requires `mcp_elicitations = true` in the granular approval policy
+  (`CodexAppServerClient.CreateApprovalPolicy`).
+- `IReviewElicitor` (`Mcp/ReviewElicitation.cs`) abstracts the SDK call
+  (`McpServer.ElicitAsync`) so `HarnessWorkspaceReviewService` is unit-testable.
+- `GovernedReviewCoordinatorService`, `Home.razor.cs` review flow, and
+  `StagedReviewDialog` are REUSED as-is for the drain; only the block primitive
+  changed (elicitation instead of the old HTTP-hold).
+
+UNVERIFIED until a live run with tokens: (a) whether Codex's HTTP MCP client advertises
+the elicitation capability, and (b) the OnServerRequest-marker -> dialog -> answer
+bridge end to end. If the bridge fails, it declines the elicitation rather than hanging.
+Validate the capability with a trivial form elicitation first, then the full gate.
 
 ## Architecture Guardrails
 

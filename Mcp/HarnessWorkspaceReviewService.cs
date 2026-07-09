@@ -96,8 +96,13 @@ public sealed class HarnessWorkspaceReviewService
         int pendingCount = reviewService.ListPending(workspaceRoot)
             .Count(item => item.SessionId.Equals(record.SessionId, StringComparison.Ordinal));
 
+        // The elicitation is the block. Approving it opens the host review dialog, which resolves every
+        // staged file in the edit session (accept/reject per file) while this call stays suspended. The
+        // decision here reflects whether the operator completed the review session, not a single file:
+        // the per-file accept/reject was applied by the dialog, so we only report the resulting state.
         ReviewDecision decision = await elicitor.RequestDecisionAsync(
             new ReviewElicitationRequest(
+                record.SessionId,
                 record.RelativePath,
                 sessionLabel,
                 pendingCount,
@@ -107,25 +112,16 @@ public sealed class HarnessWorkspaceReviewService
                 reviewUrl),
             cancellationToken);
 
-        string completionMessage;
-        switch (decision)
+        if (decision == ReviewDecision.Cancelled)
         {
-            case ReviewDecision.Accepted:
-                // The operator saw the validation status in the elicitation message; accepting a validation-
-                // failed record is an explicit override, so force-approve in that case.
-                CreateReviewService().Accept(workspaceRoot, record.StagedRecordId, forceApproveValidation: validation.IsError);
-                completionMessage = $"Governed review accepted via elicitation for {sessionLabel}.";
-                break;
-            case ReviewDecision.Rejected:
-                CreateReviewService().Reject(workspaceRoot, record.StagedRecordId);
-                completionMessage = $"Governed review rejected via elicitation for {sessionLabel}. Watched source unchanged.";
-                break;
-            default:
-                throw new OperationCanceledException(
-                    $"Governed review cancelled for {sessionLabel}. Staged record '{record.StagedRecordId}' left pending; watched source unchanged.");
+            throw new OperationCanceledException(
+                $"Governed review cancelled for {sessionLabel}. Staged record '{record.StagedRecordId}' left pending.");
         }
 
         StagedEditRecord refreshedRecord = workflowService.GetStagedRecord(record.StagedRecordId);
+        string completionMessage = decision == ReviewDecision.Accepted
+            ? $"Governed review session completed for {sessionLabel} via the review dialog."
+            : $"Governed review declined for {sessionLabel}; staged items left for the operator.";
         return new StageForReviewResult(
             workflowService.CreateSummary(refreshedRecord),
             validation,
