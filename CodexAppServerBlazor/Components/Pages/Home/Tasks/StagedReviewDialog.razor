@@ -170,13 +170,16 @@
     private bool UseSessionFlow => !string.IsNullOrWhiteSpace(SessionId);
     private string DialogTitle => UseSessionFlow ? "Merge Review" : "Merge Review Queue";
     private string DialogSubtitle => UseSessionFlow
-        ? "Review this edit session in order. This dialog stays open and advances through each staged file until the session is complete."
+        ? "Review this edit session in order. It advances through each staged file; close any time to stop reviewing (unresolved files stay pending and the governed review is declined)."
         : "Review staged candidates before they become source truth.";
     private bool CanForceAccept => selectedModel is not null
         && !selectedModel.IsDecided
         && selectedModel.PreMergeValidationIsError
         && !selectedModel.PreMergeValidationForceApproved;
-    private bool CanCloseDialog => !UseSessionFlow || (selectedModel?.IsSessionComplete ?? false);
+    // The operator can always close/cancel the review. Closing before the queue drains leaves the remaining
+    // staged items pending; the governed review gate treats that as a decline and releases the agent. A
+    // non-closable modal traps the operator when accepts stall, which is exactly the failure this avoids.
+    private bool CanCloseDialog => true;
 
     [Parameter]
     public string WorkspaceRoot { get; set; } = string.Empty;
@@ -204,12 +207,6 @@
 
     private Task CloseDialogAsync()
     {
-        if (!CanCloseDialog)
-        {
-            errorMessage = "Resolve or reject every staged item in this governed review session before closing the dialog.";
-            return Task.CompletedTask;
-        }
-
         if (CloseRequested.HasDelegate)
         {
             return CloseRequested.InvokeAsync();
