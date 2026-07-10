@@ -23,7 +23,7 @@ public sealed class WorkflowEditService
         editValidator = new CandidateEditValidator(settings);
     }
 
-    public EditSessionStatus Refresh(string watchedFilePath)
+    public EditSessionStatus Refresh(string watchedFilePath, string? sessionId = null)
     {
         string fullWatchedPath = Path.GetFullPath(watchedFilePath);
         using IDisposable manifestLock = AcquireManifestLock(fullWatchedPath);
@@ -35,7 +35,9 @@ public sealed class WorkflowEditService
         EditSessionManifest? previousManifest = LoadManifest(fullWatchedPath);
         string originalHash = FileHash.Compute(fullWatchedPath);
         DateTimeOffset refreshedAtUtc = DateTimeOffset.UtcNow;
-        string refreshedSessionId = CreateEditSessionId();
+        string refreshedSessionId = string.IsNullOrWhiteSpace(sessionId)
+            ? CreateEditSessionId()
+            : sessionId.Trim();
         string retrievalBackupPath = CreateRetrievalBackup(fullWatchedPath, originalHash, refreshedAtUtc);
         string workingFilePath = paths.GetWorkingFilePath(fullWatchedPath);
         Directory.CreateDirectory(Path.GetDirectoryName(workingFilePath) ?? ".");
@@ -64,7 +66,7 @@ public sealed class WorkflowEditService
         return GetStatus(fullWatchedPath);
     }
 
-    public EditSessionStatus NewFile(string watchedFilePath)
+    public EditSessionStatus NewFile(string watchedFilePath, string? sessionId = null)
     {
         string fullWatchedPath = Path.GetFullPath(watchedFilePath);
         using IDisposable manifestLock = AcquireManifestLock(fullWatchedPath);
@@ -83,7 +85,9 @@ public sealed class WorkflowEditService
 
         EditSessionManifest manifest = new()
         {
-            EditSessionId = CreateEditSessionId(),
+            EditSessionId = string.IsNullOrWhiteSpace(sessionId)
+                ? CreateEditSessionId()
+                : sessionId.Trim(),
             WatchedFilePath = fullWatchedPath,
             WorkingFilePath = workingFilePath,
             RelativePath = paths.GetRelativeWatchedPath(fullWatchedPath),

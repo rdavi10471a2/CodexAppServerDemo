@@ -2,6 +2,8 @@ using CodexAppServerBlazor.AICodingServices.Core;
 using CodexAppServerBlazor.AICodingServices.Indexing;
 using CodexAppServerBlazor.AICodingServices.Logging;
 using CodexAppServerBlazor.AICodingServices.Workflow;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace CodexAppServerBlazor.Services.Workflow;
 
@@ -21,10 +23,14 @@ public interface IStagedReviewPageService
 public sealed class StagedReviewPageService : IStagedReviewPageService
 {
     private readonly CodingServicesSettingsProvider settingsProvider;
+    private readonly ILogger<StagedReviewPageService> logger;
 
-    public StagedReviewPageService(CodingServicesSettingsProvider settingsProvider)
+    public StagedReviewPageService(
+        CodingServicesSettingsProvider settingsProvider,
+        ILogger<StagedReviewPageService>? logger = null)
     {
         this.settingsProvider = settingsProvider;
+        this.logger = logger ?? NullLogger<StagedReviewPageService>.Instance;
     }
 
     public IReadOnlyList<StagedReviewQueueItem> ListPending(string workspaceRoot)
@@ -71,11 +77,25 @@ public sealed class StagedReviewPageService : IStagedReviewPageService
 
     public StagedReviewPageActionResult Accept(string workspaceRoot, string stagedRecordId, bool forceApproveValidation = false)
     {
+        logger.LogInformation(
+            "Staged review accept started. Workspace={WorkspaceRoot} Record={StagedRecordId} ForceApproveValidation={ForceApproveValidation}",
+            workspaceRoot,
+            stagedRecordId,
+            forceApproveValidation);
         WorkflowEditService workflowService = CreateWorkflowService(workspaceRoot, out CodingServicesSettings settings);
         StagedEditRecord record = workflowService.GetStagedRecord(stagedRecordId);
+        logger.LogInformation(
+            "Staged review accept loaded record. Record={StagedRecordId} Session={SessionId} Path={RelativePath} ValidationStatus={ValidationStatus}",
+            record.StagedRecordId,
+            record.SessionId,
+            record.RelativePath,
+            record.PreMergeValidationStatus);
         WorkflowEditService.EnsureRecordNotDecided(record);
         if (forceApproveValidation && record.PreMergeValidationIsError && !record.PreMergeValidationForceApproved)
         {
+            logger.LogInformation(
+                "Staged review accept applying validation override. Record={StagedRecordId}",
+                record.StagedRecordId);
             record = workflowService.ApprovePreMergeValidationFailure(stagedRecordId);
         }
 
@@ -83,7 +103,16 @@ public sealed class StagedReviewPageService : IStagedReviewPageService
             record,
             GetSessionRecords(workflowService, record),
             "accepted");
+        logger.LogInformation(
+            "Staged review accept decision options built. Record={StagedRecordId} DeferIndexRefresh={DeferIndexRefresh} RefreshFiles={RefreshFileCount} TerminalValidationRecords={TerminalValidationRecordCount}",
+            record.StagedRecordId,
+            decisionOptions.DeferIndexRefresh,
+            decisionOptions.RefreshPlan?.ChangedFilePaths.Count ?? 0,
+            decisionOptions.TerminalValidationRecords.Count);
         EnsureTerminalValidationPassesBeforeCopy(settings, record, decisionOptions);
+        logger.LogInformation(
+            "Staged review accept terminal validation passed. Record={StagedRecordId}",
+            record.StagedRecordId);
 
         if (!File.Exists(record.StagedFilePath))
         {
@@ -96,7 +125,15 @@ public sealed class StagedReviewPageService : IStagedReviewPageService
             Directory.CreateDirectory(watchedDirectory);
         }
 
+        logger.LogInformation(
+            "Staged review accept copying staged file into watched source. Record={StagedRecordId} StagedPath={StagedPath} WatchedPath={WatchedPath}",
+            record.StagedRecordId,
+            record.StagedFilePath,
+            record.WatchedFilePath);
         File.Copy(record.StagedFilePath, record.WatchedFilePath, overwrite: true);
+        logger.LogInformation(
+            "Staged review accept copy completed. Record={StagedRecordId}",
+            record.StagedRecordId);
         ReviewDecisionWithIndexRefreshResult result = RecordDecision(
             settings,
             workflowService,
@@ -104,7 +141,18 @@ public sealed class StagedReviewPageService : IStagedReviewPageService
             "accepted",
             record.StagedHash,
             decisionOptions);
+        logger.LogInformation(
+            "Staged review accept record decision completed. Record={StagedRecordId} NextStep={NextStep} RefreshStatus={RefreshStatus} RefreshMode={RefreshMode}",
+            record.StagedRecordId,
+            result.NextStep,
+            result.IndexRefresh?.Status ?? "<none>",
+            result.IndexRefresh?.RefreshMode ?? "<none>");
         StagedEditRecord decided = workflowService.GetStagedRecord(record.StagedRecordId);
+        logger.LogInformation(
+            "Staged review accept finished. Record={StagedRecordId} Decision={Decision} Classification={Classification}",
+            decided.StagedRecordId,
+            decided.Decision,
+            decided.Classification);
         return new StagedReviewPageActionResult(
             CreateModel(decided),
             decided.PreMergeValidationForceApproved
@@ -114,6 +162,10 @@ public sealed class StagedReviewPageService : IStagedReviewPageService
 
     public StagedReviewPageActionResult Reject(string workspaceRoot, string stagedRecordId)
     {
+        logger.LogInformation(
+            "Staged review reject started. Workspace={WorkspaceRoot} Record={StagedRecordId}",
+            workspaceRoot,
+            stagedRecordId);
         WorkflowEditService workflowService = CreateWorkflowService(workspaceRoot, out CodingServicesSettings settings);
         StagedEditRecord record = workflowService.GetStagedRecord(stagedRecordId);
         WorkflowEditService.EnsureRecordNotDecided(record);
@@ -125,6 +177,10 @@ public sealed class StagedReviewPageService : IStagedReviewPageService
             expectedStagedHash: null,
             decisionOptions: null);
         StagedEditRecord decided = workflowService.GetStagedRecord(record.StagedRecordId);
+        logger.LogInformation(
+            "Staged review reject finished. Record={StagedRecordId} NextStep={NextStep}",
+            decided.StagedRecordId,
+            result.NextStep);
         return new StagedReviewPageActionResult(
             CreateModel(decided),
             $"Rejected proposed candidate. Current source was left unchanged. {result.NextStep}");

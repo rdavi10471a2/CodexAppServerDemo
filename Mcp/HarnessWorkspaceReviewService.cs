@@ -53,7 +53,7 @@ public sealed class HarnessWorkspaceReviewService
     public async Task<StageForReviewResult> StageCurrentCandidateForReviewAsync(
         IReviewElicitor elicitor,
         string watchedFilePath,
-        string? sessionId = null,
+        string sessionId,
         string? ledgerSummary = null,
         CancellationToken cancellationToken = default)
     {
@@ -62,24 +62,30 @@ public sealed class HarnessWorkspaceReviewService
             throw new ArgumentNullException(nameof(elicitor));
         }
 
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            throw new InvalidOperationException(
+                "stage_current_candidate_for_review requires a non-empty sessionId. Call get_edit_session_state or another governed edit MCP first and pass the active edit session id explicitly.");
+        }
+
         string workspaceRoot = GetWorkspaceRoot();
         CodingServicesSettings settings = settingsProvider.GetSettings(workspaceRoot);
         WorkflowEditService workflowService = new(settings);
         IStagedReviewPageService reviewService = CreateReviewService();
         string fullWatchedPath = ResolveWatchedFilePath(workspaceRoot, watchedFilePath);
         EditSessionStatus editSession = workflowService.EnsureEditableSession(fullWatchedPath);
-        string? resolvedSessionId = string.IsNullOrWhiteSpace(sessionId)
-            ? (!string.IsNullOrWhiteSpace(editSession.EditSessionId)
-                ? editSession.EditSessionId
-                : workspaceState.CurrentEditSessionId)
-            : sessionId;
-        if (string.IsNullOrWhiteSpace(resolvedSessionId))
+        if (string.IsNullOrWhiteSpace(editSession.EditSessionId))
         {
             throw new InvalidOperationException(
                 $"No active governed edit session exists for '{editSession.RelativePath}'. Refresh the file through governed edit MCP first, then retry staging.");
         }
+        if (!editSession.EditSessionId.Equals(sessionId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Active governed edit session mismatch for '{editSession.RelativePath}'. Expected sessionId '{sessionId}', but the working candidate is bound to '{editSession.EditSessionId}'. Refresh the file with the intended sessionId before staging.");
+        }
 
-        StagedEditRecord record = workflowService.Stage(fullWatchedPath, ledgerSummary, resolvedSessionId);
+        StagedEditRecord record = workflowService.Stage(fullWatchedPath, ledgerSummary, sessionId);
         workspaceState.SetCurrentEditSessionId(record.SessionId);
         record = workflowService.PrepareReviewFileForLaunch(record.StagedRecordId);
 

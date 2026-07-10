@@ -28,6 +28,10 @@
 - Do not stage partial file work unless the workflow explicitly calls for an intermediate checkpoint.
 - Prefer finishing one file cleanly, then moving to the next required file.
 - If a task truly requires coordinated multi-file work, stage those files deliberately under one review session after each file-level change is complete enough to review.
+- If a task requires coordinated multi-file work, do not silently split it into separate per-file review sessions just because the first file refresh created a file-scoped edit session id.
+- Reuse one governed edit session across the whole coherent change when the MCP/tool surface allows it.
+- If the available governed MCP flow appears to create a different edit session id per file and no explicit join-or-reuse path is exposed, stop and report that tooling gap before staging any file for review.
+- Do not treat "proceed conservatively per file" as permission to bypass the intended single-session governed review shape.
 
 ## Freshness Rules
 
@@ -40,6 +44,12 @@
 
 - The long-term target in this repo is MCP-first workspace discovery and MCP-first governed edits.
 - Prefer exposed workspace MCP tools over generic fallback mechanics when capabilities overlap.
+- For governed non-C# text files such as `.razor`, prefer `refresh_file` followed by `replace_text_in_file` or `replace_span_in_file`.
+- Do not treat the absence of Roslyn symbol tools for Razor as evidence that no governed MCP edit path exists.
+- For coherent multi-file governed work, inspect the session ids returned by the governed edit tools and preserve one shared session when possible.
+- If a second file returns a different session id than the first file for the same intended change, treat that as a workflow mismatch that must be surfaced, not silently worked around.
+- If the target file has already been chosen and no governed file-read MCP is exposed, a narrow `rg`/`grep` or direct file read against that chosen file is an acceptable last-resort discovery aid only.
+- Do not use `apply_patch` or other generic write paths for governed Razor/text edits when the harness exposes `replace_text_in_file` or `replace_span_in_file`.
 - If the required MCP method does not exist yet, say so plainly and use the best available fallback.
 - When a shell or tool action requires runtime approval, prefer the formal approval flow over conversational permission text alone.
 - If a tool or command is denied, cancelled, sandboxed, or fails after approval, treat that as an execution result and continue with the best viable fallback unless the user must choose.

@@ -102,7 +102,6 @@ public partial class Home : IDisposable, IAsyncDisposable
     private string CurrentTurnHtml => RenderMarkdown(GetCurrentTurnText());
     private string assistantViewKey => $"{repoRoot}:{assistantViewVersion}";
     private IReadOnlyList<CodexOutputEvent> DebugEvents => debugEvents.ToArray();
-
     [Inject]
     public CodexConnectionService ConnectionService { get; set; } = default!;
 
@@ -1297,7 +1296,54 @@ public partial class Home : IDisposable, IAsyncDisposable
         validationGatePendingCount = pendingCount;
         validationGateCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         await InvokeAsync(StateHasChanged);
-        return await validationGateCompletion.Task;
+
+        AddDebugEvent(
+            "ValidationGate",
+            "open-dialog",
+            "home",
+            $"Dispatching blocking validation dialog for edit session '{model.SessionId}' on '{model.RelativePath}'. PendingCount={pendingCount}.");
+
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                await DialogService.OpenAsync<PreMergeValidationDialog>(
+                    "Pre-merge validation gate",
+                    new Dictionary<string, object?>
+                    {
+                        [nameof(PreMergeValidationDialog.RelativePath)] = model.RelativePath,
+                        [nameof(PreMergeValidationDialog.ValidationStatus)] = model.PreMergeValidationStatus,
+                        [nameof(PreMergeValidationDialog.PendingCount)] = pendingCount,
+                        [nameof(PreMergeValidationDialog.DecisionMade)] = EventCallback.Factory.Create<bool>(this, HandleValidationGateDecisionAsync)
+                    },
+                    new DialogOptions
+                    {
+                        Width = "88vw",
+                        Height = "88vh",
+                        CloseDialogOnEsc = false,
+                        CloseDialogOnOverlayClick = false,
+                        Resizable = true,
+                        Draggable = true,
+                        ShowClose = false
+                    });
+            }
+            catch (Exception ex)
+            {
+                AddDebugEvent(
+                    "ValidationGate",
+                    "open-error",
+                    "home",
+                    $"Validation dialog open failed for edit session '{model.SessionId}': {ex.Message}");
+                validationGateCompletion?.TrySetResult(false);
+            }
+        });
+
+        bool continueResult = await validationGateCompletion.Task;
+        validationGateModel = null;
+        validationGatePendingCount = 0;
+        validationGateCompletion = null;
+        await InvokeAsync(StateHasChanged);
+        return continueResult;
     }
 
     private async Task ProcessQueuedReviewLaunchAsync()
@@ -1441,22 +1487,100 @@ public partial class Home : IDisposable, IAsyncDisposable
 
     private async Task OpenStagedReviewDialogAsync(string sessionId)
     {
+        AddDebugEvent(
+            "ReviewDialog",
+            "open-requested",
+            "home",
+            $"Opening staged review dialog for session '{sessionId}'.");
         reviewDialogSessionId = sessionId;
         reviewDialogCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         await InvokeAsync(StateHasChanged);
+
+        AddDebugEvent(
+            "ReviewDialog",
+            "open-dialog",
+            "home",
+            $"Dispatching blocking staged review dialog for session '{sessionId}'.");
+
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                await DialogService.OpenAsync<StagedReviewDialog>(
+                    "Merge Review",
+                    new Dictionary<string, object?>
+                    {
+                        [nameof(StagedReviewDialog.WorkspaceRoot)] = repoRoot,
+                        [nameof(StagedReviewDialog.SessionId)] = sessionId,
+                        [nameof(StagedReviewDialog.AutoCloseWhenComplete)] = true,
+                        [nameof(StagedReviewDialog.TraceEventRaised)] = EventCallback.Factory.Create<string>(this, HandleStagedReviewTraceAsync),
+                        [nameof(StagedReviewDialog.CloseRequested)] = EventCallback.Factory.Create(this, HandleStagedReviewDialogClosedAsync)
+                    },
+                    new DialogOptions
+                    {
+                        Width = "88vw",
+                        Height = "88vh",
+                        CloseDialogOnEsc = false,
+                        CloseDialogOnOverlayClick = false,
+                        Resizable = true,
+                        Draggable = true,
+                        ShowClose = false
+                    });
+            }
+            catch (Exception ex)
+            {
+                AddDebugEvent(
+                    "ReviewDialog",
+                    "open-error",
+                    "home",
+                    $"Staged review dialog open failed for session '{sessionId}': {ex.Message}");
+                reviewDialogCompletion?.TrySetResult(true);
+            }
+        });
+
+        AddDebugEvent(
+            "ReviewDialog",
+            "awaiting-close",
+            "home",
+            $"Awaiting staged review dialog completion for session '{sessionId}'.");
         if (reviewDialogCompletion is not null)
         {
             await reviewDialogCompletion.Task;
         }
+
+        AddDebugEvent(
+            "ReviewDialog",
+            "await-complete",
+            "home",
+            $"Staged review dialog completion returned for session '{sessionId}'.");
     }
 
     private async Task HandleStagedReviewDialogClosedAsync()
     {
+        AddDebugEvent(
+            "ReviewDialog",
+            "close-callback",
+            "home",
+            $"Staged review dialog requested close for session '{reviewDialogSessionId ?? "<none>"}'.");
         TaskCompletionSource<bool>? completion = reviewDialogCompletion;
         reviewDialogSessionId = null;
         reviewDialogCompletion = null;
         completion?.TrySetResult(true);
+        DialogService.Close();
         await InvokeAsync(StateHasChanged);
+    }
+
+    private Task HandleStagedReviewTraceAsync(string traceMessage)
+    {
+        string[] parts = traceMessage.Split('|', 2, StringSplitOptions.None);
+        string action = parts.Length > 0 ? parts[0] : "trace";
+        string detail = parts.Length > 1 ? parts[1] : traceMessage;
+        AddDebugEvent(
+            "ReviewDialog",
+            action,
+            "dialog",
+            detail);
+        return Task.CompletedTask;
     }
 
     private void AddDebugEvent(string type, string? status, string source, string detail)

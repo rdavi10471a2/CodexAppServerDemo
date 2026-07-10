@@ -85,12 +85,12 @@ public static class McpHostFactory
                 new
                 {
                     name = "refresh_file",
-                    description = "Creates or refreshes the governed Working candidate for an existing workspace file."
+                    description = "Creates or refreshes the governed Working candidate for an existing workspace file. Pass sessionId to keep multi-file work inside one governed edit session."
                 },
                 new
                 {
                     name = "new_file",
-                    description = "Creates a new-file governed edit session for a file path that does not yet exist inside the selected workspace."
+                    description = "Creates a new-file governed edit session for a file path that does not yet exist inside the selected workspace. Pass sessionId to keep multi-file work inside one governed edit session."
                 },
                 new
                 {
@@ -180,7 +180,7 @@ public static class McpHostFactory
                 new
                 {
                     name = "stage_current_candidate_for_review",
-                    description = "Stages the current governed Working candidate for a workspace file into review and returns the review URL."
+                    description = "Stages the current governed Working candidate for a workspace file into review using an explicit sessionId and returns the review URL."
                 },
                 new
                 {

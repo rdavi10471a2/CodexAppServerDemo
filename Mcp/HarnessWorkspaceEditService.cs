@@ -24,16 +24,24 @@ public sealed class HarnessWorkspaceEditService
         return new WorkflowEditService(context.Settings).GetStatus(context.WatchedFilePath);
     }
 
-    public EditSessionStatus RefreshFile(string watchedFilePath)
+    public EditSessionStatus RefreshFile(string watchedFilePath, string? sessionId = null)
     {
         WorkspaceEditContext context = ResolveContext(watchedFilePath);
-        return new WorkflowEditService(context.Settings).Refresh(context.WatchedFilePath);
+        WorkflowEditService workflowService = new(context.Settings);
+        string? resolvedSessionId = ResolveRefreshSessionId(workflowService, context.WatchedFilePath, sessionId);
+        EditSessionStatus status = workflowService.Refresh(context.WatchedFilePath, resolvedSessionId);
+        workspaceState.SetCurrentEditSessionId(status.EditSessionId);
+        return status;
     }
 
-    public EditSessionStatus NewFile(string watchedFilePath)
+    public EditSessionStatus NewFile(string watchedFilePath, string? sessionId = null)
     {
         WorkspaceEditContext context = ResolveContext(watchedFilePath);
-        return new WorkflowEditService(context.Settings).NewFile(context.WatchedFilePath);
+        WorkflowEditService workflowService = new(context.Settings);
+        string? resolvedSessionId = ResolveRefreshSessionId(workflowService, context.WatchedFilePath, sessionId);
+        EditSessionStatus status = workflowService.NewFile(context.WatchedFilePath, resolvedSessionId);
+        workspaceState.SetCurrentEditSessionId(status.EditSessionId);
+        return status;
     }
 
     public ReplaceTextResult ReplaceTextInFile(
@@ -306,4 +314,39 @@ public sealed class HarnessWorkspaceEditService
         string WorkspaceRoot,
         string WatchedFilePath,
         CodingServicesSettings Settings);
+
+    private string? ResolveRefreshSessionId(
+        WorkflowEditService workflowService,
+        string watchedFilePath,
+        string? requestedSessionId)
+    {
+        if (!string.IsNullOrWhiteSpace(requestedSessionId))
+        {
+            return requestedSessionId.Trim();
+        }
+
+        string? currentSessionId = workspaceState.CurrentEditSessionId;
+        if (string.IsNullOrWhiteSpace(currentSessionId))
+        {
+            return null;
+        }
+
+        EditSessionStatus currentStatus = workflowService.GetStatus(watchedFilePath);
+        if (currentStatus.HasSession
+            && currentStatus.EditSessionId.Equals(currentSessionId, StringComparison.Ordinal))
+        {
+            return currentSessionId;
+        }
+
+        if (currentStatus.HasSession
+            && !string.IsNullOrWhiteSpace(currentStatus.EditSessionId)
+            && !currentStatus.EditSessionId.Equals(currentSessionId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"An active governed edit session '{currentSessionId}' is already selected, but '{currentStatus.RelativePath}' is currently bound to '{currentStatus.EditSessionId}'. Pass the intended sessionId explicitly or retire the stale session before continuing.");
+        }
+
+        throw new InvalidOperationException(
+            $"An active governed edit session '{currentSessionId}' is already selected. Pass that sessionId explicitly when refreshing an additional file for the same coherent task.");
+    }
 }

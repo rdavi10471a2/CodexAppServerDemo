@@ -39,11 +39,11 @@ public sealed class WorkspaceReviewMcpTools
     }
 
     [McpServerTool]
-    [Description("Stages the current governed Working candidate for a workspace file into review, records pre-merge validation, and raises a governed accept/reject elicitation to the operator. This call BLOCKS until the operator answers: accept applies the change to watched source, decline rejects it, cancel leaves it pending. The returned review URL is diagnostic only.")]
+    [Description("Stages the current governed Working candidate for a workspace file into review, records pre-merge validation, and raises a governed accept/reject elicitation to the operator. sessionId is required and must identify the active multi-file governed edit session. This call BLOCKS until the operator answers: accept applies the change to watched source, decline rejects it, cancel leaves it pending. The returned review URL is diagnostic only.")]
     public Task<StageForReviewResult> StageCurrentCandidateForReview(
         McpServer server,
         string watchedFilePath,
-        string? sessionId = null,
+        string sessionId,
         string? ledgerSummary = null,
         CancellationToken cancellationToken = default)
     {

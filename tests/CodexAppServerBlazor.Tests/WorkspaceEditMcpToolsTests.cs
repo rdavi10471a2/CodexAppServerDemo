@@ -33,6 +33,39 @@ public sealed class WorkspaceEditMcpToolsTests
     }
 
     [Fact]
+    public void RefreshFile_with_explicit_session_id_reuses_shared_session_for_second_file()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        WorkspaceEditMcpTools tools = CreateTools(repository.RootPath);
+        string firstPath = Path.Combine("Features", "First.cs");
+        string secondPath = Path.Combine("Features", "Second.cs");
+        CreateWatchedFile(repository.RootPath, firstPath, "public class First { }");
+        CreateWatchedFile(repository.RootPath, secondPath, "public class Second { }");
+
+        EditSessionStatus first = tools.RefreshFile(firstPath);
+        EditSessionStatus second = tools.RefreshFile(secondPath, first.EditSessionId);
+
+        Assert.Equal(first.EditSessionId, second.EditSessionId);
+    }
+
+    [Fact]
+    public void RefreshFile_without_explicit_session_id_fails_closed_when_another_session_is_active()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        WorkspaceEditMcpTools tools = CreateTools(repository.RootPath);
+        string firstPath = Path.Combine("Features", "First.cs");
+        string secondPath = Path.Combine("Features", "Second.cs");
+        CreateWatchedFile(repository.RootPath, firstPath, "public class First { }");
+        CreateWatchedFile(repository.RootPath, secondPath, "public class Second { }");
+
+        EditSessionStatus first = tools.RefreshFile(firstPath);
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() => tools.RefreshFile(secondPath));
+        Assert.Contains(first.EditSessionId, ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Pass that sessionId explicitly", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void GetEditSessionState_returns_no_session_before_refresh()
     {
         using TemporaryRepository repository = TemporaryRepository.Create();

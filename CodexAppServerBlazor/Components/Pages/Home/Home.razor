@@ -232,30 +232,6 @@
     }
 </section>
 
-@if (validationGateModel is not null)
-{
-    <div class="workflow-modal-overlay" role="dialog" aria-modal="true" aria-label="Pre-merge validation gate">
-        <div class="workflow-modal-shell workflow-modal-shell-compact">
-            <PreMergeValidationDialog RelativePath="@validationGateModel.RelativePath"
-                                      ValidationStatus="@validationGateModel.PreMergeValidationStatus"
-                                      PendingCount="@validationGatePendingCount"
-                                      DecisionMade="@HandleValidationGateDecisionAsync" />
-        </div>
-    </div>
-}
-
-@if (!string.IsNullOrWhiteSpace(reviewDialogSessionId))
-{
-    <div class="workflow-modal-overlay" role="dialog" aria-modal="true" aria-label="Governed merge review">
-        <div class="workflow-modal-shell workflow-modal-shell-review">
-            <StagedReviewDialog WorkspaceRoot="@repoRoot"
-                                SessionId="@reviewDialogSessionId"
-                                AutoCloseWhenComplete="true"
-                                CloseRequested="@HandleStagedReviewDialogClosedAsync" />
-        </div>
-    </div>
-}
-
 @if (isRebuildingSourceIndex)
 {
     <div class="screen-busy-overlay" role="status" aria-live="polite" aria-label="Rebuilding workspace index">

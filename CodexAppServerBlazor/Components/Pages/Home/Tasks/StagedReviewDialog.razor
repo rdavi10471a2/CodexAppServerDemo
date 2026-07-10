@@ -191,6 +191,9 @@
     public bool AutoCloseWhenComplete { get; set; } = true;
 
     [Parameter]
+    public EventCallback<string> TraceEventRaised { get; set; }
+
+    [Parameter]
     public EventCallback CloseRequested { get; set; }
 
     protected override void OnParametersSet()
@@ -201,12 +204,18 @@
 
     private Task RefreshReview()
     {
+        _ = TraceAsync(
+            "refresh-click",
+            $"Operator requested refresh. SessionId={SessionId ?? "<none>"}; SelectedRecordId={selectedRecordId ?? "<none>"}.");
         LoadReview(preserveSelection: true);
         return Task.CompletedTask;
     }
 
     private Task CloseDialogAsync()
     {
+        _ = TraceAsync(
+            "close-click",
+            $"Operator requested dialog close. SessionId={SessionId ?? "<none>"}; SelectedRecordId={selectedRecordId ?? "<none>"}; PendingCount={pendingItems.Count}.");
         if (CloseRequested.HasDelegate)
         {
             return CloseRequested.InvokeAsync();
@@ -248,19 +257,40 @@
     {
         if (string.IsNullOrWhiteSpace(selectedRecordId) || actionBusy)
         {
+            await TraceAsync(
+                "accept-skip",
+                $"Accept skipped. SelectedRecordId={selectedRecordId ?? "<none>"}; ActionBusy={actionBusy}; ForceApproveValidation={forceApproveValidation}.");
             return;
         }
 
         actionBusy = true;
         try
         {
-            StagedReviewPageActionResult result = StagedReviewPageService.Accept(WorkspaceRoot, selectedRecordId, forceApproveValidation);
+            await InvokeAsync(StateHasChanged);
+            await Task.Yield();
+            await TraceAsync(
+                "accept-click",
+                $"Accept requested. SessionId={SessionId ?? "<none>"}; SelectedRecordId={selectedRecordId}; ForceApproveValidation={forceApproveValidation}; PendingCount={pendingItems.Count}.");
+            await TraceAsync(
+                "accept-before-service",
+                $"Calling StagedReviewPageService.Accept for {selectedRecordId}.");
+            StagedReviewPageActionResult result = await Task.Run(
+                () => StagedReviewPageService.Accept(WorkspaceRoot, selectedRecordId, forceApproveValidation));
+            await TraceAsync(
+                "accept-after-service",
+                $"StagedReviewPageService.Accept returned for {selectedRecordId}. Message={result.Message}");
             errorMessage = result.Message;
+            await TraceAsync(
+                "accept-result",
+                $"Accept completed. SelectedRecordId={selectedRecordId}; Message={result.Message}");
             await LoadNextStateAsync();
         }
         catch (Exception ex)
         {
             errorMessage = ex.Message;
+            await TraceAsync(
+                "accept-error",
+                $"Accept failed. SelectedRecordId={selectedRecordId ?? "<none>"}; ForceApproveValidation={forceApproveValidation}; Error={ex.Message}");
         }
         finally
         {
@@ -273,19 +303,40 @@
     {
         if (string.IsNullOrWhiteSpace(selectedRecordId) || actionBusy)
         {
+            await TraceAsync(
+                "reject-skip",
+                $"Reject skipped. SelectedRecordId={selectedRecordId ?? "<none>"}; ActionBusy={actionBusy}.");
             return;
         }
 
         actionBusy = true;
         try
         {
-            StagedReviewPageActionResult result = StagedReviewPageService.Reject(WorkspaceRoot, selectedRecordId);
+            await InvokeAsync(StateHasChanged);
+            await Task.Yield();
+            await TraceAsync(
+                "reject-click",
+                $"Reject requested. SessionId={SessionId ?? "<none>"}; SelectedRecordId={selectedRecordId}; PendingCount={pendingItems.Count}.");
+            await TraceAsync(
+                "reject-before-service",
+                $"Calling StagedReviewPageService.Reject for {selectedRecordId}.");
+            StagedReviewPageActionResult result = await Task.Run(
+                () => StagedReviewPageService.Reject(WorkspaceRoot, selectedRecordId));
+            await TraceAsync(
+                "reject-after-service",
+                $"StagedReviewPageService.Reject returned for {selectedRecordId}. Message={result.Message}");
             errorMessage = result.Message;
+            await TraceAsync(
+                "reject-result",
+                $"Reject completed. SelectedRecordId={selectedRecordId}; Message={result.Message}");
             await LoadNextStateAsync();
         }
         catch (Exception ex)
         {
             errorMessage = ex.Message;
+            await TraceAsync(
+                "reject-error",
+                $"Reject failed. SelectedRecordId={selectedRecordId ?? "<none>"}; Error={ex.Message}");
         }
         finally
         {
@@ -298,6 +349,9 @@
     {
         LoadReview(preserveSelection: false);
         bool sessionComplete = UseSessionFlow && (selectedModel?.IsSessionComplete ?? false);
+        await TraceAsync(
+            "load-next-state",
+            $"Reloaded review state. SessionId={SessionId ?? "<none>"}; SelectedRecordId={selectedRecordId ?? "<none>"}; PendingCount={pendingItems.Count}; SessionComplete={sessionComplete}; AutoCloseWhenComplete={AutoCloseWhenComplete}.");
         await InvokeAsync(StateHasChanged);
         if (sessionComplete && AutoCloseWhenComplete)
         {
@@ -307,6 +361,9 @@
 
     private Task ForceCloseDialogAsync()
     {
+        _ = TraceAsync(
+            "force-close",
+            $"Dialog force-close requested. SessionId={SessionId ?? "<none>"}; PendingCount={pendingItems.Count}; AutoCloseWhenComplete={AutoCloseWhenComplete}.");
         if (CloseRequested.HasDelegate)
         {
             return CloseRequested.InvokeAsync();
@@ -385,6 +442,9 @@
             {
                 selectedModel = StagedReviewPageService.LoadNextForSession(WorkspaceRoot, SessionId!);
                 selectedRecordId = selectedModel.IsSessionComplete ? null : selectedModel.StagedRecordId;
+                _ = TraceAsync(
+                    "load-review-session",
+                    $"Loaded session review state. SessionId={SessionId}; PendingCount={pendingItems.Count}; SelectedRecordId={selectedRecordId ?? "<complete>"}; SessionComplete={selectedModel.IsSessionComplete}.");
                 BuildDiff();
                 return;
             }
@@ -404,6 +464,9 @@
 
             selectedModel = StagedReviewPageService.Load(WorkspaceRoot, recordIdToLoad);
             selectedRecordId = recordIdToLoad;
+            _ = TraceAsync(
+                "load-review-record",
+                $"Loaded staged record review. SelectedRecordId={selectedRecordId}; PendingCount={pendingItems.Count}.");
             BuildDiff();
         }
         catch (Exception ex)
@@ -412,8 +475,21 @@
             selectedModel = null;
             selectedRecordId = null;
             errorMessage = ex.Message;
+            _ = TraceAsync(
+                "load-review-error",
+                $"Loading review state failed. SessionId={SessionId ?? "<none>"}; Error={ex.Message}");
             BuildDiff();
         }
+    }
+
+    private Task TraceAsync(string action, string detail)
+    {
+        if (!TraceEventRaised.HasDelegate)
+        {
+            return Task.CompletedTask;
+        }
+
+        return TraceEventRaised.InvokeAsync($"{action}|{detail}");
     }
 
     private static string NormalizeLabel(string value)

@@ -22,17 +22,17 @@ public sealed class WorkspaceEditMcpTools
     }
 
     [McpServerTool]
-    [Description("Creates or refreshes the governed Working candidate for an existing workspace file. Refresh starts a clean governed edit pass for that file: it recreates the Working candidate from watched source and retires older pending staged review records for the same file.")]
-    public EditSessionStatus RefreshFile(string watchedFilePath)
+    [Description("Creates or refreshes the governed Working candidate for an existing workspace file. Refresh starts a clean governed edit pass for that file: it recreates the Working candidate from watched source and retires older pending staged review records for the same file. Pass sessionId to keep multiple files in one governed edit session for a coherent task.")]
+    public EditSessionStatus RefreshFile(string watchedFilePath, string? sessionId = null)
     {
-        return workspaceEditService.RefreshFile(watchedFilePath);
+        return workspaceEditService.RefreshFile(watchedFilePath, sessionId);
     }
 
     [McpServerTool]
-    [Description("Creates a new-file governed edit session for a file path that does not yet exist inside the selected workspace.")]
-    public EditSessionStatus NewFile(string watchedFilePath)
+    [Description("Creates a new-file governed edit session for a file path that does not yet exist inside the selected workspace. Pass sessionId to keep multiple files in one governed edit session for a coherent task.")]
+    public EditSessionStatus NewFile(string watchedFilePath, string? sessionId = null)
     {
-        return workspaceEditService.NewFile(watchedFilePath);
+        return workspaceEditService.NewFile(watchedFilePath, sessionId);
     }
 
     [McpServerTool]

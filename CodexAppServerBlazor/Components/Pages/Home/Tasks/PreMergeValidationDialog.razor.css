@@ -1,4 +1,6 @@
 .validation-gate-dialog {
+    width: 100%;
+    min-width: 0;
     display: grid;
     gap: 14px;
 }

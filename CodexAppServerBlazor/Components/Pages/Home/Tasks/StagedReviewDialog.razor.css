@@ -3,7 +3,9 @@
     grid-template-rows: auto auto minmax(0, 1fr);
     gap: 12px;
     height: 100%;
+    width: 100%;
     min-height: 0;
+    min-width: 0;
 }
 
 .staged-review-dialog-header {

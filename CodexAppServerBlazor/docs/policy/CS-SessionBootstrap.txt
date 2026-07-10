@@ -35,20 +35,35 @@ Coding Services host bootstrap policy:
 - In Work mode, after workspace discovery begins, call `get_current_task` before treating any task as authoritative for the turn.
 - In Work mode, if `get_current_task` reports that no Active task is set, inform the user that there is no current task for the selected workspace and stop rather than guessing, substituting a prior task, or inferring one from filenames.
 - In Work mode, if `get_current_task` is unavailable, report that the governed task-context MCP surface is missing and stop before task-scoped edits.
+- In Work mode, treat `get_current_task` as the authoritative task read for the turn. Do not infer the current task from task numbers, stale transcript text, filenames, or prior run memory when `get_current_task` is available.
+- In Work mode, if you need to restate the task before editing, restate the `get_current_task` result rather than a guessed or remembered task.
 - In Work mode, after `get_edit_session_state` or `refresh_file` establishes a governed working candidate, you must report the edit-session identity back to the user before continuing edits.
 - That report is required, not optional.
 - Include at minimum the `EditSessionId`, `watchedFilePath`, `workingFilePath`, and current `classification`.
+- In Work mode, `stage_current_candidate_for_review` requires an explicit `sessionId`.
+- Do not omit `sessionId` when staging for review.
+- Obtain that `sessionId` from the governed MCP edit path such as `get_edit_session_state`, `refresh_file`, or another governed edit result for the file being worked.
 - In Work mode, once the target file is chosen, begin the governed edit pass with `refresh_file` unless the user explicitly told you to resume the existing Working candidate. A fresh Work turn should not inherit stale pending Working or staged state by default.
 - In Work mode, treat the selected workspace source tree as MCP-governed write-only. Read it for discovery and validation, but do not mutate watched-source files through generic fallback tools.
 - In Work mode, generic direct-write fallbacks such as `apply_patch`, ad hoc shell edits, or other non-MCP write paths must never modify watched-source files in the selected workspace.
 - In Work mode, all watched-source mutations must flow through the Coding Services MCP edit surface, its runtime working artifacts, and an explicit governed review decision.
 - In Work mode, if the file type has no suitable governed symbol-edit tool but does have governed text-edit tools, use the text-edit path and bridge the Working candidate into staged review with `stage_current_candidate_for_review` rather than claiming the workflow is blocked.
+- In Work mode, for Razor, markup, or other non-Roslyn text files, prefer the governed text-edit MCP tools such as `replace_text_in_file` and `replace_span_in_file` after `refresh_file` establishes the Working candidate.
+- In Work mode, do not claim that Razor editing lacks a governed MCP path when `replace_text_in_file` or `replace_span_in_file` is exposed.
+- In Work mode, if a file has already been chosen through task context or MCP discovery and you need to locate exact markup within that file, MCP file reads are preferred. If no governed file-read MCP exists, a narrow shell text search or `grep`/`rg` inside the already-chosen file is an acceptable last-resort read aid for locating the edit target.
+- In Work mode, that last-resort text search permission is for discovery only. It does not authorize generic file writes.
+- In Work mode, for governed text files, `apply_patch` is not a substitute for the harness MCP edit surface when `replace_text_in_file` or `replace_span_in_file` is available.
 - In Work mode, if the file type truly has no suitable governed mutation tool at all, stop and report that tooling gap plainly. Do not silently fall back to direct watched-source edits just to complete the task.
 - In Work mode, determine the file kind before editing and choose the matching governed edit path. If the matching governed path is missing, fail closed rather than bypassing governance.
 - In Work mode, complete the intended change for the current file in the Working candidate before staging that file for review.
 - In Work mode, do not stage partial file work unless the workflow explicitly calls for an intermediate checkpoint.
 - In Work mode, prefer finishing one file cleanly before moving to the next required file.
 - In Work mode, if multiple files truly belong to one coherent change, stage them deliberately under one review session only after each file-level change is complete enough to review.
+- In Work mode, if the current task plainly requires coordinated multi-file work, do not silently convert that task into separate per-file review sessions.
+- In Work mode, when the first governed file edit establishes an edit session id, treat that session id as the intended review session for the coherent change unless the host/tooling explicitly says otherwise.
+- In Work mode, if a later governed file edit returns a different edit session id for the same intended coherent change, stop and report that mismatch before staging any file for review.
+- In Work mode, do not justify separate review sessions with phrases like "conservative per-file path" or "followed the returned file session" when the task required one shared governed review session.
+- In Work mode, if no exposed MCP tool can create, reuse, or join a shared multi-file edit session, say so plainly and stop at the tooling gap instead of staging multiple independent review sessions.
 - In Work mode, once staged review has been launched for a candidate or review session, stop at that human review boundary and wait for the user to act in the review UI.
 - In Work mode, the primary governed review boundary is the host UI's blocking modal review flow, not an external browser page launch.
 - In Work mode, when `stage_current_candidate_for_review` returns a review URL, treat that URL as diagnostic fallback context only unless the host explicitly tells you to use it.
