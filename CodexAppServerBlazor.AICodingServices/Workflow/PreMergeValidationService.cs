@@ -29,8 +29,8 @@ public sealed class PreMergeValidationService
             DiagnosticCount = 0,
             Diagnostics = [],
             Message = overlayRecords.Length <= 1
-                ? "Staged file is ready for WinMerge review. Build/index validation is deferred until accept."
-                : $"Planned staged overlay is ready for WinMerge review with {overlayRecords.Length} staged files. Build/index validation is deferred until the planned files are accepted."
+                ? "Staged file is ready for merge review. Build/index validation is deferred until accept."
+                : $"Planned staged overlay is ready for merge review with {overlayRecords.Length} staged files. Build/index validation is deferred until the planned files are accepted."
         };
     }
 
@@ -65,7 +65,7 @@ public sealed class PreMergeValidationService
         }
 
         string validationWorkspaceRoot = Path.Combine(
-            MonitorWorkspacePaths.GetWatchedSolutionWorkspaceRoot(settings),
+            SystemWorkspacePaths.GetWatchedSolutionWorkspaceRoot(settings),
             "validation",
             $"{DateTimeOffset.UtcNow:yyyyMMddTHHmmssfff}-{Guid.NewGuid():N}"[..42]);
         string sourceRoot = settings.WatchedProjectFolder;

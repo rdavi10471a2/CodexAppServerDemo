@@ -20,6 +20,36 @@ dotnet build .\CodexAppServerWinForms_corrected.slnx
 dotnet run --project .\CodexAppServerBlazor\CodexAppServerBlazor.csproj
 ```
 
+## Dual Instance Launch
+
+Prefer the pinned launch scripts instead of retyping command lines:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\Start-CodingServices-SelfHost.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\Start-CodingServices-Child.ps1
+```
+
+Or start both:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\Start-CodingServices-DualInstance.ps1
+```
+
+The child script accepts overrides when targeting a different watched project:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\Start-CodingServices-Child.ps1 `
+  -WorkspaceRoot C:\SchemaStudioWebViewer1 `
+  -WatchedSolutionPath C:\SchemaStudioWebViewer1\SchemaStudioWebViewer.sln
+```
+
+Important:
+
+- Always pin `CodingServices:WatchedSolutionPath` explicitly for non-self-host runs.
+- Do not rely on fallback solution discovery when running multiple instances.
+- `5205/6278` are reserved for SelfHost.
+- `5215/6289` are reserved for Child by convention in this repo.
+
 The default app and MCP ports are configured in
 `CodexAppServerBlazor/appsettings.json`:
 
@@ -45,16 +75,18 @@ http://localhost:6278/health
 ```
 
 The health response advertises the local MCP discovery surface. It includes the
-endpoint metadata plus tool names and descriptions:
+endpoint metadata plus wire tool names and descriptions. Streamable HTTP MCP
+calls should use `Accept: application/json, text/event-stream`.
 
-- `GetWorkspace`: returns the current workspace CWD selected in the Blazor UI.
-- `GetWatchedSolutionDigest`: returns cheap readiness and change-detection
+- `get_workspace`: returns the current workspace CWD selected in the Blazor UI.
+- `get_watched_solution_digest`: returns cheap readiness and change-detection
   metadata for the watched solution, including counts, summary size, hash, and
   index paths.
-- `GetWatchedSolutionSummary`: returns the full indexed project/file/type/member
-  tree for on-demand discovery. It does not include source file bodies.
-- `GetTestProjectSummary`: returns the indexed project/file/type/member tree for
-  configured test projects only. It does not include source file bodies.
+- `get_watched_solution_summary`: returns the product-source indexed
+  project/file/type/member tree for on-demand discovery. It does not include
+  source file bodies or configured test projects.
+- `get_test_project_summary`: returns the indexed project/file/type/member tree
+  for configured test projects only. It does not include source file bodies.
 
 The Source tab and startup context use the product-source projection by default.
 Configured test projects stay indexed and editable, but are shown separately in
@@ -79,3 +111,6 @@ choose CWD -> discovery -> proposal -> edit/diff -> compile -> reindex
 ```
 
 The UI should stay focused on that order. Avoid rebuilding selected-file assumptions into the prompt path.
+After source edits, treat prior MCP summaries as stale. Build, reindex, then use
+`get_watched_solution_digest` as the freshness gate before reloading summary or
+test-summary context.

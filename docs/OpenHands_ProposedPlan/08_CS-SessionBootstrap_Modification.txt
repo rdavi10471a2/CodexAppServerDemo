@@ -1,0 +1,108 @@
+// =============================================================================
+// CS-SessionBootstrap.txt - MODIFICATIONS
+// Part of: Codehands Proposal.md
+// Location: docs/proposed/
+// Target: CodexAppServerBlazor/docs/policy/CS-SessionBootstrap.txt
+// Description: Add MCP-first workflow policy with tool priority
+// =============================================================================
+
+// APPEND the following sections to the existing CS-SessionBootstrap.txt file:
+
+================================================================================
+APPEND TO EXISTING FILE
+================================================================================
+
+## MCP-First Workflow
+
+This session uses AICodingServices MCP tools exclusively. Codex native tools are restricted.
+
+### Discovery (instead of grep)
+
+Use these MCP tools for workspace exploration:
+
+- `get_watched_solution_digest` - High-level project structure
+- `get_watched_solution_summary` - Detailed project summary  
+- `get_solution_index_tree` - Indexed file tree
+- `find_indexed_symbols` - Search C# symbols by name
+- `find_indexed_references` - Find symbol usages
+- `find_indexed_callers` - Find method callers
+- `query_solution_index` - Scope-based index queries
+- `find_file` - Locate files by pattern
+
+### Edits (instead of ApplyPatch)
+
+**Never use Codex native `ApplyPatch`. It is blocked.**
+
+For C# symbol edits:
+- `submit_symbol` - Replace/change existing symbols
+- `add_field`, `add_property`, `add_method`, `add_constructor` - Add members
+- `add_using`, `remove_using` - Manage usings
+- `remove_symbol` - Remove symbols
+
+For text-based edits:
+- `replace_text_in_file` - Replace exact text
+- `submit_file` - Full file replacement (last resort)
+
+For file management:
+- `refresh_file` - Refresh existing file into working copy
+- `new_file` - Create working copy for new file
+- `get_edit_status` - Check file session state
+
+### Edit Session Workflow
+
+1. Start a thread and select a workspace
+2. For Work mode: an active task is required
+3. In Discovery phase: analyze and propose files to edit
+4. When edit session starts: use tool priority guidance
+5. Make edits only in monitor-owned Working copies
+6. When editing complete: request overlay build
+7. If build succeeds: proceed to human merge
+8. If build fails: fix issues and rebuild
+
+### Tool Priority by File Type
+
+**C# Files (.cs)**
+1. Roslyn semantic tools (`submit_symbol`, `add_*`, `remove_*`)
+2. `replace_text_in_file` for text changes
+3. `submit_file` for full replacement (last resort)
+
+**Solution/Project Files (.sln, .csproj)**
+1. `replace_text_in_file` for text changes
+2. `find_file` for discovery
+3. `submit_file` for full replacement (last resort)
+
+**Razor Files (.razor with @code sections)**
+1. `replace_text_in_file` carefully
+2. `submit_file` for full replacement (last resort)
+
+**Markup Files (.md, .json, .txt, etc.)**
+1. `replace_text_in_file`
+2. `submit_file` for full replacement (last resort)
+
+### Phase Guidance
+
+- **DISCOVERY**: Analyze workspace, propose files
+- **EDITING**: Make edits via MCP tools
+- **OVERLAY BUILD**: Wait for build verification
+- **MERGE PENDING**: Human reviews and merges files
+- **DISCUSSION NEEDED**: File(s) rejected, discuss with user
+- **MERGE COMPLETE**: All accepted, ready for rebuild
+
+### File Capability Analysis
+
+When starting an edit session, use `analyze_file_capabilities` to understand:
+- What tools are allowed for each file
+- Whether a .razor file has @code sections
+- Any warnings for hybrid files
+
+### Freshness Rules
+
+- Treat indexed summaries as stale after source edits
+- Use `get_watched_solution_digest` as freshness gate
+- Refresh MCP summaries after compile/reindex
+
+### Task Memory
+
+- Keep durable workflow memory in task artifacts
+- Update task notes at end of each turn
+- Solution index is volatile, not durable memory

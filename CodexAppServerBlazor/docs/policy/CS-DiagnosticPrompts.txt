@@ -1,0 +1,18 @@
+Coding Services diagnostic prompts
+
+1. Structured effective-context probe
+
+Use this when you want the agent to report the effective Coding Services session context instead of the raw system/developer/user instruction hierarchy.
+
+Report only the effective Coding Services session context for the selected workspace. Do not list system, developer, or user instruction hierarchy. Use exactly these sections in this order: 1. Coding Services host/session policy 2. Selected workspace and workspace-local AGENTS.md policy 3. Coding Services indexed workspace metadata 4. Environment metadata only if relevant 5. Constraints currently blocking action.
+
+2. Freeform context probe
+
+Use this when you want a looser explanation and are less concerned about the exact section structure.
+
+Report your current configuration and context. Explain it first as a Coding Services session for the selected workspace. List the sources of that context in the priority order you are obeying them for this session.
+
+Recommendation
+
+- Prefer prompt 1 for validation and regression checks.
+- Use prompt 2 only when you want to see how the model explains itself without tight output scaffolding.

@@ -1,0 +1,59 @@
+.archive-dialog {
+    display: grid;
+    gap: 16px;
+}
+
+.archive-dialog-message {
+    margin: 0;
+    color: #16202c;
+    font-size: .96rem;
+    line-height: 1.5;
+}
+
+.archive-dialog-field {
+    display: grid;
+    gap: 6px;
+}
+
+.archive-dialog-field span {
+    color: #526a82;
+    font-size: .75rem;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.archive-dialog-summary {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    border: 1px solid #d7e1ea;
+    border-radius: 8px;
+    padding: 12px;
+    background: #f8fbfd;
+}
+
+.archive-dialog-summary div {
+    display: grid;
+    gap: 4px;
+}
+
+.archive-dialog-summary strong {
+    color: #526a82;
+    font-size: .72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.archive-dialog-summary span {
+    color: #16202c;
+    font-size: .9rem;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+}
+
+.archive-dialog-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+}

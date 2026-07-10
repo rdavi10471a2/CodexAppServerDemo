@@ -1,0 +1,422 @@
+@page "/review/queue"
+@page "/review/staged/{StagedRecordId}"
+@page "/review/session/{SessionId}"
+@rendermode InteractiveServer
+@using CodexAppServerBlazor.Services.Workflow
+@using DiffPlex
+@using DiffPlex.DiffBuilder
+@using DiffPlex.DiffBuilder.Model
+@using Microsoft.AspNetCore.Components
+@using Microsoft.JSInterop
+@inject IStagedReviewPageService ReviewService
+@inject WorkspaceSelectionService WorkspaceSelectionService
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JS
+
+<PageTitle>@pageTitle</PageTitle>
+
+<section class="review-page">
+    <header class="review-header">
+        <div>
+            <h1>@pageTitle</h1>
+            <p>@reviewPath</p>
+        </div>
+        <div class="review-actions" aria-label="Review actions">
+            <button class="secondary-action" type="button" @onclick="RefreshReview">Refresh</button>
+            <button class="reject-action" type="button" @onclick="RejectReview" disabled="@reviewActionsDisabled">Reject</button>
+            <button class="primary-action" type="button" @onclick="AcceptReview" disabled="@(!canAcceptNormally)">Accept Proposed</button>
+            <button class="secondary-action" type="button" @onclick="AcceptReviewWithOverride" disabled="@(!canForceAccept)">Accept Anyway</button>
+        </div>
+    </header>
+
+    <section class="review-status" aria-live="polite">
+        <div>
+            <span>Workspace</span>
+            <strong>@resolvedWorkspaceRoot</strong>
+        </div>
+        <div class="review-convention">
+            <span>Mode</span>
+            <strong>@modeLabel</strong>
+        </div>
+        <div>
+            <span>Decision</span>
+            <strong>@decisionStatus</strong>
+        </div>
+        <div>
+            <span>Diff Engine</span>
+            <strong>DiffPlex</strong>
+        </div>
+    </section>
+
+    @if (!string.IsNullOrWhiteSpace(actionMessage))
+    {
+        <p class="review-message">@actionMessage</p>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(loadError))
+    {
+        <p class="review-error">@loadError</p>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(validationWarning))
+    {
+        <p class="review-warning">@validationWarning</p>
+    }
+
+    <p class="merge-note">@reviewNote</p>
+
+    @if (reviewCompleted)
+    {
+        <section class="review-complete" aria-label="Review complete">
+            <strong>Review complete.</strong>
+            <span>All staged review items for this launch have been resolved. This window can be closed.</span>
+            <button class="secondary-action" type="button" @onclick="CloseReviewWindowAsync">Close Window</button>
+        </section>
+    }
+    else if (HasActiveReview)
+    {
+        <section class="diff-shell" aria-label="Side by side staged review">
+            <div class="diff-header proposed-header">
+                <strong>Proposed Candidate</strong>
+            </div>
+            <div class="diff-header current-header">
+                <strong>Current Source</strong>
+            </div>
+
+            @for (int index = 0; index < LineCount; index++)
+            {
+                DiffPiece? proposedLine = GetProposedLine(index);
+                DiffPiece? currentLine = GetCurrentLine(index);
+
+                <div class="diff-line proposed @GetLineClass(proposedLine)">
+                    <span class="line-number">@GetLineNumber(proposedLine)</span>
+                    <code>@GetLineText(proposedLine)</code>
+                </div>
+                <div class="diff-line current @GetLineClass(currentLine)">
+                    <span class="line-number">@GetLineNumber(currentLine)</span>
+                    <code>@GetLineText(currentLine)</code>
+                </div>
+            }
+        </section>
+    }
+    else
+    {
+        <section class="review-main-empty" aria-label="No staged review selected">
+            <strong>No staged review is loaded.</strong>
+            <span>When a candidate is staged for governed review, it will appear here with the current source beside it.</span>
+        </section>
+    }
+</section>
+
+@code {
+    [Parameter]
+    public string? StagedRecordId { get; set; }
+
+    [Parameter]
+    public string? SessionId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "workspace")]
+    public string? WorkspaceRoot { get; set; }
+
+    private IReadOnlyList<StagedReviewQueueItem> pendingItems = [];
+    private SideBySideDiffModel diffModel = default!;
+    private string currentText = string.Empty;
+    private string proposedText = string.Empty;
+    private string reviewPath = "No staged record selected";
+    private string pageTitle = "Merge Review";
+    private string modeLabel = "Queue";
+    private string decisionStatus = "Pending review";
+    private string reviewNote = "Left is the immutable proposed staged candidate. Right is the current watched source.";
+    private string actionMessage = string.Empty;
+    private string loadError = string.Empty;
+    private string validationWarning = string.Empty;
+    private string activeStagedRecordId = string.Empty;
+    private string resolvedWorkspaceRoot = string.Empty;
+    private bool reviewActionsDisabled = true;
+    private bool reviewCompleted;
+    private bool canAcceptNormally;
+    private bool canForceAccept;
+    private IJSObjectReference? reviewWindowModule;
+    private bool HasActiveReview => !string.IsNullOrWhiteSpace(activeStagedRecordId);
+
+    private int LineCount => Math.Max(diffModel.NewText.Lines.Count, diffModel.OldText.Lines.Count);
+
+    protected override void OnParametersSet()
+    {
+        LoadReview();
+    }
+
+    private void LoadReview()
+    {
+        resolvedWorkspaceRoot = ResolveWorkspaceRoot();
+        actionMessage = string.Empty;
+        loadError = string.Empty;
+        validationWarning = string.Empty;
+        reviewCompleted = false;
+
+        try
+        {
+            pendingItems = ReviewService.ListPending(resolvedWorkspaceRoot);
+            StagedReviewPageModel? model = LoadRequestedModel();
+            ApplyModel(model);
+        }
+        catch (Exception ex)
+        {
+            ApplyLoadError(ex.Message);
+        }
+
+        BuildDiff();
+    }
+
+    private StagedReviewPageModel? LoadRequestedModel()
+    {
+        if (!string.IsNullOrWhiteSpace(SessionId))
+        {
+            return ReviewService.LoadNextForSession(resolvedWorkspaceRoot, SessionId!);
+        }
+
+        if (!string.IsNullOrWhiteSpace(StagedRecordId))
+        {
+            return ReviewService.Load(resolvedWorkspaceRoot, StagedRecordId!);
+        }
+
+        string? firstPendingId = pendingItems.FirstOrDefault()?.StagedRecordId;
+        if (string.IsNullOrWhiteSpace(firstPendingId))
+        {
+            return null;
+        }
+
+        return ReviewService.Load(resolvedWorkspaceRoot, firstPendingId);
+    }
+
+    private void ApplyModel(StagedReviewPageModel? model)
+    {
+        if (model is null)
+        {
+            pageTitle = "Merge Review Queue";
+            modeLabel = "Queue";
+            decisionStatus = "No pending staged edits";
+            reviewPath = "No staged record selected";
+            reviewNote = "Stage a candidate first, then open this page to review it.";
+            activeStagedRecordId = string.Empty;
+            currentText = string.Empty;
+            proposedText = string.Empty;
+            reviewActionsDisabled = true;
+            canAcceptNormally = false;
+            canForceAccept = false;
+            return;
+        }
+
+        pageTitle = !string.IsNullOrWhiteSpace(SessionId) ? "Merge Review Session" : "Merge Review";
+        modeLabel = GetModeLabel(model);
+        decisionStatus = model.DecisionStatus;
+        reviewPath = model.RelativePath;
+        reviewNote = model.IsSessionComplete
+            ? "No pending staged records remain in this review session."
+            : "Left is the immutable proposed staged candidate. Right is the current watched source. Accept writes left into right and records the workflow decision.";
+        activeStagedRecordId = model.StagedRecordId;
+        currentText = model.CurrentText;
+        proposedText = model.ProposedText;
+        reviewActionsDisabled = model.IsDecided || model.IsSessionComplete || string.IsNullOrWhiteSpace(model.StagedRecordId);
+        canAcceptNormally = !reviewActionsDisabled && (!model.PreMergeValidationIsError || model.PreMergeValidationForceApproved);
+        canForceAccept = !reviewActionsDisabled && model.PreMergeValidationIsError && !model.PreMergeValidationForceApproved;
+        validationWarning = BuildValidationWarning(model);
+        reviewCompleted = model.IsSessionComplete;
+    }
+
+    private void ApplyLoadError(string message)
+    {
+        pendingItems = [];
+        pageTitle = "Merge Review";
+        modeLabel = "Unavailable";
+        decisionStatus = "Unavailable";
+        reviewPath = "Unable to load staged review";
+        reviewNote = "Left is the proposed candidate. Right is the current watched source.";
+        activeStagedRecordId = string.Empty;
+        currentText = string.Empty;
+        proposedText = string.Empty;
+        reviewActionsDisabled = true;
+        canAcceptNormally = false;
+        canForceAccept = false;
+        reviewCompleted = false;
+        loadError = message;
+    }
+
+    private Task AcceptReview()
+    {
+        return RunActionAsync(() => ReviewService.Accept(resolvedWorkspaceRoot, activeStagedRecordId));
+    }
+
+    private Task AcceptReviewWithOverride()
+    {
+        return RunActionAsync(() => ReviewService.Accept(resolvedWorkspaceRoot, activeStagedRecordId, forceApproveValidation: true));
+    }
+
+    private Task RejectReview()
+    {
+        return RunActionAsync(() => ReviewService.Reject(resolvedWorkspaceRoot, activeStagedRecordId));
+    }
+
+    private void RefreshReview()
+    {
+        LoadReview();
+    }
+
+    private async Task RunActionAsync(Func<StagedReviewPageActionResult> action)
+    {
+        bool shouldCloseWindow = false;
+
+        try
+        {
+            StagedReviewPageActionResult result = action();
+            actionMessage = result.Message;
+            loadError = string.Empty;
+            pendingItems = ReviewService.ListPending(resolvedWorkspaceRoot);
+
+            if (!string.IsNullOrWhiteSpace(SessionId))
+            {
+                ApplyModel(ReviewService.LoadNextForSession(resolvedWorkspaceRoot, SessionId!));
+            }
+            else if (pendingItems.Count > 0)
+            {
+                string nextId = pendingItems.Any(item => item.StagedRecordId == activeStagedRecordId)
+                    ? activeStagedRecordId
+                    : pendingItems[0].StagedRecordId;
+                ApplyModel(ReviewService.Load(resolvedWorkspaceRoot, nextId));
+            }
+            else
+            {
+                ApplyCompletedState();
+                shouldCloseWindow = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            loadError = ex.Message;
+        }
+
+        BuildDiff();
+
+        if (shouldCloseWindow)
+        {
+            await CloseReviewWindowAsync();
+        }
+    }
+
+    private void BuildDiff()
+    {
+        SideBySideDiffBuilder builder = new(new Differ());
+        diffModel = builder.BuildDiffModel(currentText, proposedText);
+    }
+
+    private string ResolveWorkspaceRoot()
+    {
+        if (!string.IsNullOrWhiteSpace(WorkspaceRoot))
+        {
+            return Path.GetFullPath(WorkspaceRoot);
+        }
+
+        return WorkspaceSelectionService.GetStartupWorkspace();
+    }
+
+    private DiffPiece? GetProposedLine(int index)
+    {
+        if (index >= diffModel.NewText.Lines.Count)
+        {
+            return null;
+        }
+
+        return diffModel.NewText.Lines[index];
+    }
+
+    private DiffPiece? GetCurrentLine(int index)
+    {
+        if (index >= diffModel.OldText.Lines.Count)
+        {
+            return null;
+        }
+
+        return diffModel.OldText.Lines[index];
+    }
+
+    private static string GetLineNumber(DiffPiece? piece)
+    {
+        if (piece is null || piece.Position is null)
+        {
+            return string.Empty;
+        }
+
+        return piece.Position.Value.ToString();
+    }
+
+    private static string GetLineText(DiffPiece? piece)
+    {
+        return piece?.Text ?? string.Empty;
+    }
+
+    private static string GetLineClass(DiffPiece? piece)
+    {
+        if (piece is null)
+        {
+            return "imaginary";
+        }
+
+        return piece.Type switch
+        {
+            ChangeType.Inserted => "inserted",
+            ChangeType.Deleted => "deleted",
+            ChangeType.Modified => "modified",
+            ChangeType.Imaginary => "imaginary",
+            _ => "unchanged"
+        };
+    }
+
+    private static string GetModeLabel(StagedReviewPageModel model)
+    {
+        if (model.IsSessionComplete)
+        {
+            return "Session complete";
+        }
+
+        return model.IsNewFile ? "New staged file" : "Staged record";
+    }
+
+    private static string BuildValidationWarning(StagedReviewPageModel model)
+    {
+        if (!model.PreMergeValidationIsError)
+        {
+            return string.Empty;
+        }
+
+        if (model.PreMergeValidationForceApproved)
+        {
+            return "Pre-merge validation reported an issue, but the override has already been approved for this staged record.";
+        }
+
+        return "Pre-merge validation reported an issue for this staged record. Use Accept Anyway only if you want to override that failure explicitly.";
+    }
+
+    private void ApplyCompletedState()
+    {
+        reviewCompleted = true;
+        pageTitle = "Review Complete";
+        modeLabel = "Complete";
+        decisionStatus = "All pending reviews resolved";
+        reviewPath = "No pending staged review remains";
+        reviewNote = "All staged review items for this launch have been resolved.";
+        activeStagedRecordId = string.Empty;
+        currentText = string.Empty;
+        proposedText = string.Empty;
+        reviewActionsDisabled = true;
+        canAcceptNormally = false;
+        canForceAccept = false;
+        validationWarning = string.Empty;
+    }
+
+    private async Task CloseReviewWindowAsync()
+    {
+        reviewWindowModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "/js/reviewWindow.js");
+        await reviewWindowModule.InvokeVoidAsync("tryCloseReviewWindow");
+    }
+
+}

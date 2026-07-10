@@ -1,0 +1,574 @@
+@using CodexAppServerBlazor.Services.Workflow
+@using DiffPlex
+@using DiffPlex.DiffBuilder
+@using DiffPlex.DiffBuilder.Model
+@inject DialogService DialogService
+@inject IStagedReviewPageService StagedReviewPageService
+
+<div class="staged-review-dialog">
+    @if (actionBusy)
+    {
+        <div class="staged-review-busy-overlay" role="status" aria-live="polite" aria-busy="true">
+            <div class="staged-review-busy-card">
+                <div class="staged-review-busy-spinner"></div>
+                <strong>Applying review decision</strong>
+                <span>Updating source, rebuilding review state, and waiting for reindex if needed.</span>
+            </div>
+        </div>
+    }
+
+    <div class="staged-review-dialog-header">
+        <div>
+            <h3>@DialogTitle</h3>
+            <p>@DialogSubtitle</p>
+        </div>
+        <div class="staged-review-dialog-actions">
+            <button class="staged-review-secondary-action"
+                    type="button"
+                    @onclick="RefreshReview">
+                Refresh
+            </button>
+            @if (CanCloseDialog)
+            {
+                <button class="staged-review-secondary-action"
+                        type="button"
+                        @onclick="CloseDialogAsync">
+                    Close
+                </button>
+            }
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(errorMessage))
+    {
+        <div class="staged-review-error">@errorMessage</div>
+    }
+
+    @if (selectedModel is not null && selectedModel.PreMergeValidationIsError && !selectedModel.PreMergeValidationForceApproved)
+    {
+        <div class="staged-review-warning">
+            <strong>Pre-merge validation failed.</strong>
+            <span>Normal accept is disabled for this staged record. Use <em>Accept With Validation Override</em> only if you want to merge despite that failure.</span>
+        </div>
+    }
+
+    <div class="staged-review-dialog-layout @(UseSessionFlow ? "single-record" : string.Empty)">
+        @if (!UseSessionFlow)
+        {
+            <aside class="staged-review-queue">
+                <div class="staged-review-queue-header">
+                    <strong>Pending</strong>
+                    <span>@pendingItems.Count item(s)</span>
+                </div>
+
+                @if (pendingItems.Count == 0)
+                {
+                    <div class="staged-review-empty">No pending staged edits.</div>
+                }
+                else
+                {
+                    <div class="staged-review-queue-list">
+                        @foreach (StagedReviewQueueItem item in pendingItems)
+                        {
+                            <button class="staged-review-queue-item @(selectedRecordId == item.StagedRecordId ? "active" : string.Empty)"
+                                    type="button"
+                                    @onclick="@(() => SelectRecord(item.StagedRecordId))">
+                                <strong>@item.RelativePath</strong>
+                                <span>@item.CreatedAtUtc</span>
+                                <small>Launch: @NormalizeLabel(item.LaunchStatus) | Validation: @NormalizeLabel(item.PreMergeValidationStatus)</small>
+                            </button>
+                        }
+                    </div>
+                }
+            </aside>
+        }
+
+        <section class="staged-review-detail @(UseSessionFlow ? "staged-review-detail-full" : string.Empty)">
+            @if (selectedModel is null)
+            {
+                <div class="staged-review-empty">Select a staged candidate to inspect it.</div>
+            }
+            else if (selectedModel.IsSessionComplete)
+            {
+                <div class="staged-review-complete">
+                    <strong>Review complete.</strong>
+                    <span>All staged review items for this edit session have been resolved.</span>
+                </div>
+            }
+            else
+            {
+                <div class="staged-review-meta">
+                    <div>
+                        <span class="eyebrow">Record</span>
+                        <strong>@selectedModel.RelativePath</strong>
+                    </div>
+                    <div>
+                        <span class="eyebrow">Status</span>
+                        <strong>@selectedModel.DecisionStatus</strong>
+                    </div>
+                    <div>
+                        <span class="eyebrow">Session</span>
+                        <strong>@(string.IsNullOrWhiteSpace(selectedModel.SessionId) ? "single-file" : selectedModel.SessionId)</strong>
+                    </div>
+                    <div>
+                        <span class="eyebrow">Pending queue</span>
+                        <strong>@pendingItems.Count item(s)</strong>
+                    </div>
+                </div>
+
+                <section class="staged-review-diff-shell" aria-label="Side by side staged review">
+                    <div class="staged-review-diff-header">
+                        <strong>Proposed Candidate</strong>
+                    </div>
+                    <div class="staged-review-diff-header">
+                        <strong>Current Source</strong>
+                    </div>
+
+                    @for (int index = 0; index < LineCount; index++)
+                    {
+                        DiffPiece? proposedLine = GetProposedLine(index);
+                        DiffPiece? currentLine = GetCurrentLine(index);
+
+                        <div class="staged-review-diff-line proposed @GetLineClass(proposedLine)">
+                            <span class="staged-review-line-number">@GetLineNumber(proposedLine)</span>
+                            <code>@GetLineText(proposedLine)</code>
+                        </div>
+                        <div class="staged-review-diff-line current @GetLineClass(currentLine)">
+                            <span class="staged-review-line-number">@GetLineNumber(currentLine)</span>
+                            <code>@GetLineText(currentLine)</code>
+                        </div>
+                    }
+                </section>
+
+                <div class="staged-review-detail-actions">
+                    <button class="staged-review-primary-action"
+                            type="button"
+                            disabled="@(selectedModel.IsDecided || actionBusy)"
+                            @onclick="AcceptSelectedAsync">
+                        Accept Proposed
+                    </button>
+                    <button class="staged-review-warning-action"
+                            type="button"
+                            disabled="@(!CanForceAccept || actionBusy)"
+                            @onclick="AcceptSelectedWithOverrideAsync">
+                        Accept With Validation Override
+                    </button>
+                    <button class="staged-review-danger-action"
+                            type="button"
+                            disabled="@(selectedModel.IsDecided || actionBusy)"
+                            @onclick="RejectSelectedAsync">
+                        Reject
+                    </button>
+                </div>
+            }
+        </section>
+    </div>
+</div>
+
+@implements IAsyncDisposable
+
+@code {
+    private IReadOnlyList<StagedReviewQueueItem> pendingItems = [];
+    private StagedReviewPageModel? selectedModel;
+    private SideBySideDiffModel? diffModel;
+    private string? selectedRecordId;
+    private string? errorMessage;
+    private bool actionBusy;
+    private CancellationTokenSource? sessionMonitorCts;
+    private Task? sessionMonitorTask;
+
+    private int LineCount => Math.Max(diffModel?.NewText.Lines.Count ?? 0, diffModel?.OldText.Lines.Count ?? 0);
+    private bool UseSessionFlow => !string.IsNullOrWhiteSpace(SessionId);
+    private string DialogTitle => UseSessionFlow ? "Merge Review" : "Merge Review Queue";
+    private string DialogSubtitle => UseSessionFlow
+        ? "Review this edit session in order. It advances through each staged file; close any time to stop reviewing (unresolved files stay pending and the governed review is declined)."
+        : "Review staged candidates before they become source truth.";
+    private bool CanForceAccept => selectedModel is not null
+        && !selectedModel.IsDecided
+        && selectedModel.PreMergeValidationIsError
+        && !selectedModel.PreMergeValidationForceApproved;
+    // The operator can always close/cancel the review. Closing before the queue drains leaves the remaining
+    // staged items pending; the governed review gate treats that as a decline and releases the agent. A
+    // non-closable modal traps the operator when accepts stall, which is exactly the failure this avoids.
+    private bool CanCloseDialog => true;
+
+    [Parameter]
+    public string WorkspaceRoot { get; set; } = string.Empty;
+
+    [Parameter]
+    public string? SessionId { get; set; }
+
+    [Parameter]
+    public bool AutoCloseWhenComplete { get; set; } = true;
+
+    [Parameter]
+    public EventCallback<string> TraceEventRaised { get; set; }
+
+    [Parameter]
+    public EventCallback CloseRequested { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        LoadReview(preserveSelection: false);
+        EnsureSessionMonitor();
+    }
+
+    private Task RefreshReview()
+    {
+        _ = TraceAsync(
+            "refresh-click",
+            $"Operator requested refresh. SessionId={SessionId ?? "<none>"}; SelectedRecordId={selectedRecordId ?? "<none>"}.");
+        LoadReview(preserveSelection: true);
+        return Task.CompletedTask;
+    }
+
+    private Task CloseDialogAsync()
+    {
+        _ = TraceAsync(
+            "close-click",
+            $"Operator requested dialog close. SessionId={SessionId ?? "<none>"}; SelectedRecordId={selectedRecordId ?? "<none>"}; PendingCount={pendingItems.Count}.");
+        if (CloseRequested.HasDelegate)
+        {
+            return CloseRequested.InvokeAsync();
+        }
+
+        DialogService.Close();
+        return Task.CompletedTask;
+    }
+
+    private void SelectRecord(string stagedRecordId)
+    {
+        try
+        {
+            selectedModel = StagedReviewPageService.Load(WorkspaceRoot, stagedRecordId);
+            selectedRecordId = stagedRecordId;
+            errorMessage = null;
+            BuildDiff();
+        }
+        catch (Exception ex)
+        {
+            selectedModel = null;
+            selectedRecordId = null;
+            errorMessage = ex.Message;
+            BuildDiff();
+        }
+    }
+
+    private Task AcceptSelectedAsync()
+    {
+        return AcceptSelectedCoreAsync(forceApproveValidation: false);
+    }
+
+    private Task AcceptSelectedWithOverrideAsync()
+    {
+        return AcceptSelectedCoreAsync(forceApproveValidation: true);
+    }
+
+    private async Task AcceptSelectedCoreAsync(bool forceApproveValidation)
+    {
+        if (string.IsNullOrWhiteSpace(selectedRecordId) || actionBusy)
+        {
+            await TraceAsync(
+                "accept-skip",
+                $"Accept skipped. SelectedRecordId={selectedRecordId ?? "<none>"}; ActionBusy={actionBusy}; ForceApproveValidation={forceApproveValidation}.");
+            return;
+        }
+
+        actionBusy = true;
+        try
+        {
+            await InvokeAsync(StateHasChanged);
+            await Task.Yield();
+            await TraceAsync(
+                "accept-click",
+                $"Accept requested. SessionId={SessionId ?? "<none>"}; SelectedRecordId={selectedRecordId}; ForceApproveValidation={forceApproveValidation}; PendingCount={pendingItems.Count}.");
+            await TraceAsync(
+                "accept-before-service",
+                $"Calling StagedReviewPageService.Accept for {selectedRecordId}.");
+            StagedReviewPageActionResult result = await Task.Run(
+                () => StagedReviewPageService.Accept(WorkspaceRoot, selectedRecordId, forceApproveValidation));
+            await TraceAsync(
+                "accept-after-service",
+                $"StagedReviewPageService.Accept returned for {selectedRecordId}. Message={result.Message}");
+            errorMessage = result.Message;
+            await TraceAsync(
+                "accept-result",
+                $"Accept completed. SelectedRecordId={selectedRecordId}; Message={result.Message}");
+            await LoadNextStateAsync();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+            await TraceAsync(
+                "accept-error",
+                $"Accept failed. SelectedRecordId={selectedRecordId ?? "<none>"}; ForceApproveValidation={forceApproveValidation}; Error={ex.Message}");
+        }
+        finally
+        {
+            actionBusy = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task RejectSelectedAsync()
+    {
+        if (string.IsNullOrWhiteSpace(selectedRecordId) || actionBusy)
+        {
+            await TraceAsync(
+                "reject-skip",
+                $"Reject skipped. SelectedRecordId={selectedRecordId ?? "<none>"}; ActionBusy={actionBusy}.");
+            return;
+        }
+
+        actionBusy = true;
+        try
+        {
+            await InvokeAsync(StateHasChanged);
+            await Task.Yield();
+            await TraceAsync(
+                "reject-click",
+                $"Reject requested. SessionId={SessionId ?? "<none>"}; SelectedRecordId={selectedRecordId}; PendingCount={pendingItems.Count}.");
+            await TraceAsync(
+                "reject-before-service",
+                $"Calling StagedReviewPageService.Reject for {selectedRecordId}.");
+            StagedReviewPageActionResult result = await Task.Run(
+                () => StagedReviewPageService.Reject(WorkspaceRoot, selectedRecordId));
+            await TraceAsync(
+                "reject-after-service",
+                $"StagedReviewPageService.Reject returned for {selectedRecordId}. Message={result.Message}");
+            errorMessage = result.Message;
+            await TraceAsync(
+                "reject-result",
+                $"Reject completed. SelectedRecordId={selectedRecordId}; Message={result.Message}");
+            await LoadNextStateAsync();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+            await TraceAsync(
+                "reject-error",
+                $"Reject failed. SelectedRecordId={selectedRecordId ?? "<none>"}; Error={ex.Message}");
+        }
+        finally
+        {
+            actionBusy = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task LoadNextStateAsync()
+    {
+        LoadReview(preserveSelection: false);
+        bool sessionComplete = UseSessionFlow && (selectedModel?.IsSessionComplete ?? false);
+        await TraceAsync(
+            "load-next-state",
+            $"Reloaded review state. SessionId={SessionId ?? "<none>"}; SelectedRecordId={selectedRecordId ?? "<none>"}; PendingCount={pendingItems.Count}; SessionComplete={sessionComplete}; AutoCloseWhenComplete={AutoCloseWhenComplete}.");
+        await InvokeAsync(StateHasChanged);
+        if (sessionComplete && AutoCloseWhenComplete)
+        {
+            await ForceCloseDialogAsync();
+        }
+    }
+
+    private Task ForceCloseDialogAsync()
+    {
+        _ = TraceAsync(
+            "force-close",
+            $"Dialog force-close requested. SessionId={SessionId ?? "<none>"}; PendingCount={pendingItems.Count}; AutoCloseWhenComplete={AutoCloseWhenComplete}.");
+        if (CloseRequested.HasDelegate)
+        {
+            return CloseRequested.InvokeAsync();
+        }
+
+        DialogService.Close();
+        return Task.CompletedTask;
+    }
+
+    private void EnsureSessionMonitor()
+    {
+        if (!UseSessionFlow)
+        {
+            StopSessionMonitor();
+            return;
+        }
+
+        if (sessionMonitorTask is not null)
+        {
+            return;
+        }
+
+        sessionMonitorCts = new CancellationTokenSource();
+        sessionMonitorTask = MonitorSessionAsync(sessionMonitorCts.Token);
+    }
+
+    private void StopSessionMonitor()
+    {
+        CancellationTokenSource? cts = sessionMonitorCts;
+        sessionMonitorCts = null;
+        sessionMonitorTask = null;
+        cts?.Cancel();
+        cts?.Dispose();
+    }
+
+    private async Task MonitorSessionAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using PeriodicTimer timer = new(TimeSpan.FromSeconds(1));
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                await InvokeAsync(async () =>
+                {
+                    LoadReview(preserveSelection: true);
+                    await StateHasChangedAsync();
+
+                    if (UseSessionFlow
+                        && AutoCloseWhenComplete
+                        && (selectedModel?.IsSessionComplete ?? false))
+                    {
+                        await ForceCloseDialogAsync();
+                    }
+                });
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private Task StateHasChangedAsync()
+    {
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private void LoadReview(bool preserveSelection)
+    {
+        try
+        {
+            pendingItems = StagedReviewPageService.ListPending(WorkspaceRoot);
+            errorMessage = null;
+
+            if (UseSessionFlow)
+            {
+                selectedModel = StagedReviewPageService.LoadNextForSession(WorkspaceRoot, SessionId!);
+                selectedRecordId = selectedModel.IsSessionComplete ? null : selectedModel.StagedRecordId;
+                _ = TraceAsync(
+                    "load-review-session",
+                    $"Loaded session review state. SessionId={SessionId}; PendingCount={pendingItems.Count}; SelectedRecordId={selectedRecordId ?? "<complete>"}; SessionComplete={selectedModel.IsSessionComplete}.");
+                BuildDiff();
+                return;
+            }
+
+            string? recordIdToLoad = preserveSelection
+                ? pendingItems.FirstOrDefault(item => item.StagedRecordId == selectedRecordId)?.StagedRecordId
+                : null;
+            recordIdToLoad ??= pendingItems.FirstOrDefault()?.StagedRecordId;
+
+            if (string.IsNullOrWhiteSpace(recordIdToLoad))
+            {
+                selectedModel = null;
+                selectedRecordId = null;
+                BuildDiff();
+                return;
+            }
+
+            selectedModel = StagedReviewPageService.Load(WorkspaceRoot, recordIdToLoad);
+            selectedRecordId = recordIdToLoad;
+            _ = TraceAsync(
+                "load-review-record",
+                $"Loaded staged record review. SelectedRecordId={selectedRecordId}; PendingCount={pendingItems.Count}.");
+            BuildDiff();
+        }
+        catch (Exception ex)
+        {
+            pendingItems = [];
+            selectedModel = null;
+            selectedRecordId = null;
+            errorMessage = ex.Message;
+            _ = TraceAsync(
+                "load-review-error",
+                $"Loading review state failed. SessionId={SessionId ?? "<none>"}; Error={ex.Message}");
+            BuildDiff();
+        }
+    }
+
+    private Task TraceAsync(string action, string detail)
+    {
+        if (!TraceEventRaised.HasDelegate)
+        {
+            return Task.CompletedTask;
+        }
+
+        return TraceEventRaised.InvokeAsync($"{action}|{detail}");
+    }
+
+    private static string NormalizeLabel(string value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "pending" : value;
+    }
+
+    private void BuildDiff()
+    {
+        SideBySideDiffBuilder builder = new(new Differ());
+        diffModel = builder.BuildDiffModel(selectedModel?.CurrentText ?? string.Empty, selectedModel?.ProposedText ?? string.Empty);
+    }
+
+    private DiffPiece? GetProposedLine(int index)
+    {
+        if (diffModel is null || index >= diffModel.NewText.Lines.Count)
+        {
+            return null;
+        }
+
+        return diffModel.NewText.Lines[index];
+    }
+
+    private DiffPiece? GetCurrentLine(int index)
+    {
+        if (diffModel is null || index >= diffModel.OldText.Lines.Count)
+        {
+            return null;
+        }
+
+        return diffModel.OldText.Lines[index];
+    }
+
+    private static string GetLineNumber(DiffPiece? piece)
+    {
+        if (piece is null || piece.Position is null)
+        {
+            return string.Empty;
+        }
+
+        return piece.Position.Value.ToString();
+    }
+
+    private static string GetLineText(DiffPiece? piece)
+    {
+        return piece?.Text ?? string.Empty;
+    }
+
+    private static string GetLineClass(DiffPiece? piece)
+    {
+        if (piece is null)
+        {
+            return "imaginary";
+        }
+
+        return piece.Type switch
+        {
+            ChangeType.Inserted => "inserted",
+            ChangeType.Deleted => "deleted",
+            ChangeType.Modified => "modified",
+            ChangeType.Imaginary => "imaginary",
+            _ => "unchanged"
+        };
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        StopSessionMonitor();
+        return ValueTask.CompletedTask;
+    }
+}

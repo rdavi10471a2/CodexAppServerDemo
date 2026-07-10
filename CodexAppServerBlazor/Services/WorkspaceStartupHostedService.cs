@@ -1,24 +1,32 @@
+using CodexAppServerBlazor.Mcp;
+
 namespace CodexAppServerBlazor.Services;
 
 public sealed class WorkspaceStartupHostedService : BackgroundService
 {
     private readonly IConfiguration configuration;
+    private readonly WorkspaceState workspaceState;
+    private readonly WorkspaceSelectionService workspaceSelectionService;
     private readonly SourceWorkspaceService sourceWorkspaceService;
     private readonly CodexConnectionService connectionService;
 
     public WorkspaceStartupHostedService(
         IConfiguration configuration,
+        WorkspaceState workspaceState,
+        WorkspaceSelectionService workspaceSelectionService,
         SourceWorkspaceService sourceWorkspaceService,
         CodexConnectionService connectionService)
     {
         this.configuration = configuration;
+        this.workspaceState = workspaceState;
+        this.workspaceSelectionService = workspaceSelectionService;
         this.sourceWorkspaceService = sourceWorkspaceService;
         this.connectionService = connectionService;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        string cwd = configuration["Workspace:DefaultCwd"] ?? Directory.GetCurrentDirectory();
+        string cwd = workspaceSelectionService.GetStartupWorkspace();
         if (!Directory.Exists(cwd))
         {
             connectionService.ReportStatus(
@@ -31,8 +39,17 @@ public sealed class WorkspaceStartupHostedService : BackgroundService
 
         try
         {
-            await ValidateOrRebuildAsync(cwd, stoppingToken);
-            await AutoStartCodexServerAsync(stoppingToken);
+            bool workspaceIsValid = await ValidateOrRebuildAsync(cwd, stoppingToken);
+            if (workspaceIsValid)
+            {
+                workspaceState.SetRepoRoot(cwd);
+                connectionService.ReportStatus(
+                    "WorkspaceStartup",
+                    "ok",
+                    "coding-services",
+                    $"Selected startup workspace for MCP: {Path.GetFullPath(cwd)}");
+                await AutoStartCodexServerAsync(stoppingToken);
+            }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
@@ -47,10 +64,11 @@ public sealed class WorkspaceStartupHostedService : BackgroundService
         }
     }
 
-    private async Task ValidateOrRebuildAsync(string cwd, CancellationToken cancellationToken)
+    private async Task<bool> ValidateOrRebuildAsync(string cwd, CancellationToken cancellationToken)
     {
         bool forceRebuild = configuration.GetValue("CodingServices:RebuildIndexOnStartup", false);
         bool rebuildWhenMissingOrStale = configuration.GetValue("CodingServices:RebuildIndexWhenMissingOrStaleOnStartup", false);
+        await sourceWorkspaceService.EnsureWorkspaceArtifactsAsync(cwd, rebuildIndexIfMissing: rebuildWhenMissingOrStale || forceRebuild, cancellationToken);
         SourceWorkspaceStructureSnapshot snapshot = sourceWorkspaceService.BuildStructureSnapshot(cwd, filter: null);
         bool indexReady = File.Exists(snapshot.IndexDatabasePath)
             && snapshot.FileCount > 0
@@ -81,7 +99,7 @@ public sealed class WorkspaceStartupHostedService : BackgroundService
                 "error",
                 "coding-services",
                 $"No valid watched solution found for CWD: {cwd}");
-            return;
+            return false;
         }
 
         string status = indexReady ? "ok" : "skipped";
@@ -89,6 +107,7 @@ public sealed class WorkspaceStartupHostedService : BackgroundService
             ? $"Workspace context ready: {snapshot.Tree.Count} projects, {snapshot.FileCount} indexed files."
             : $"Workspace context not ready: {snapshot.Message}";
         connectionService.ReportStatus("WorkspaceStartup", status, "coding-services", detail);
+        return true;
     }
 
     private async Task AutoStartCodexServerAsync(CancellationToken cancellationToken)

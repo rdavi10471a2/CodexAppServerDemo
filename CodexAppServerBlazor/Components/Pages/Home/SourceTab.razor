@@ -7,11 +7,12 @@
             <RadzenTextBox Value="@Filter" Change="@OnFilterChanged" Placeholder="Filter source files" />
             <RadzenButton Icon="search" ButtonStyle="ButtonStyle.Light" Size="ButtonSize.Small" Click="@ApplyFilter" />
             <RadzenButton Icon="refresh"
-                          Text="@(IsRebuildingIndex ? "Indexing" : "Rebuild Index")"
+                          Text="Rebuild Index"
+                          BusyText="Indexing..."
                           ButtonStyle="ButtonStyle.Light"
                           Size="ButtonSize.Small"
                           Click="@RebuildIndex"
-                          Disabled="@IsRebuildingIndex" />
+                          IsBusy="@IsRebuildingIndex" />
         </div>
 
         <div class="source-count">@Snapshot.Files.Count file@(Snapshot.Files.Count == 1 ? string.Empty : "s") indexed</div>

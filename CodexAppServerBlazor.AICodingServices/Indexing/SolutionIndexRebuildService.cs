@@ -12,7 +12,7 @@ public sealed class SolutionIndexRebuildService
         CancellationToken cancellationToken = default,
         Action<string, long, IReadOnlyDictionary<string, string>>? timingSink = null)
     {
-        string databasePath = MonitorDataPaths.GetDefaultIndexDatabasePath(settings);
+        string databasePath = SystemDataPaths.GetDefaultIndexDatabasePath(settings);
         SolutionIndexStore store = new(new SolutionIndexDatabase(databasePath));
         SolutionIndexBuilder builder = new(store);
         SolutionIndexSummary summary = await builder.RebuildAsync(settings, cancellationToken, timingSink);
@@ -27,7 +27,7 @@ public sealed class SolutionIndexRebuildService
         CancellationToken cancellationToken = default,
         Action<string, long, IReadOnlyDictionary<string, string>>? timingSink = null)
     {
-        string databasePath = MonitorDataPaths.GetDefaultIndexDatabasePath(settings);
+        string databasePath = SystemDataPaths.GetDefaultIndexDatabasePath(settings);
         SolutionIndexStore store = new(new SolutionIndexDatabase(databasePath));
         SolutionIndexBuilder builder = new(store);
         return await builder.RefreshProjectFilesAsync(settings, projectPath, filePaths, cancellationToken, timingSink);

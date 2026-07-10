@@ -1,0 +1,118 @@
+// =============================================================================
+// FileCapabilitiesAnalyzer.cs
+// Part of: Codehands Proposal.md
+// Location: docs/proposed/
+// Description: Detects file kind and returns allowed MCP tools per file type
+// References: 01_EditSessionModels.cs
+// =============================================================================
+
+namespace CodexAppServerBlazor.Services.Workflow;
+
+/// <summary>
+/// Analyzes files to determine their kind and allowed MCP tools.
+/// Uses Roslyn parsing for hybrid Razor detection.
+/// </summary>
+public sealed class FileCapabilitiesAnalyzer
+{
+    // Tool sets for different file kinds
+    private static readonly IReadOnlyList<string> PureCodeTools = new[]
+    {
+        "submit_symbol", "add_field", "add_property", "add_method", "add_constructor",
+        "add_nested_type", "remove_symbol", "add_using", "remove_using",
+        "replace_text_in_file", "submit_file"
+    };
+
+    private static readonly IReadOnlyList<string> SolutionFileTools = new[]
+    {
+        "replace_text_in_file", "find_file", "submit_file"
+    };
+
+    private static readonly IReadOnlyList<string> TextOnlyTools = new[]
+    {
+        "replace_text_in_file", "submit_file"
+    };
+
+    private readonly Dictionary<string, FileCapabilities> _cache = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Gets capabilities for a file, with caching.
+    /// </summary>
+    public FileCapabilities GetCapabilities(string filePath)
+    {
+        string fullPath = Path.GetFullPath(filePath);
+        
+        if (_cache.TryGetValue(fullPath, out var cached))
+        {
+            return cached;
+        }
+
+        FileCapabilities capabilities = Analyze(fullPath);
+        _cache[fullPath] = capabilities;
+        return capabilities;
+    }
+
+    /// <summary>
+    /// Clears the capabilities cache.
+    /// </summary>
+    public void ClearCache() => _cache.Clear();
+
+    private FileCapabilities Analyze(string filePath)
+    {
+        string extension = Path.GetExtension(filePath).ToLowerInvariant();
+        
+        // Pure code files - full toolset
+        if (extension == ".cs")
+        {
+            return new FileCapabilities(filePath, FileKind.PureCode, PureCodeTools, []);
+        }
+        
+        // Solution/project files
+        if (extension is ".csproj" or ".sln" or ".slnx")
+        {
+            return new FileCapabilities(filePath, FileKind.SolutionFile, SolutionFileTools, []);
+        }
+        
+        // Hybrid Razor detection
+        if (extension == ".razor" && File.Exists(filePath))
+        {
+            string text = File.ReadAllText(filePath);
+            if (IsHybridRazor(text))
+            {
+                return new FileCapabilities(
+                    filePath, 
+                    FileKind.HybridRazor, 
+                    TextOnlyTools,
+                    ["File contains both markup and @code sections. Use replace_text_in_file carefully."]);
+            }
+        }
+        
+        // Default: markup only
+        return new FileCapabilities(filePath, FileKind.Markup, TextOnlyTools, []);
+    }
+
+    /// <summary>
+    /// Detects if a .razor file contains both markup and C# code sections.
+    /// Uses the same logic as MSBuildWorkspaceLoader.LooksLikeHybridRazor.
+    /// </summary>
+    public static bool IsHybridRazor(string text)
+    {
+        return text.Contains("@code", StringComparison.Ordinal)
+            || text.Contains("@page", StringComparison.Ordinal)
+            || text.Contains("@using", StringComparison.Ordinal)
+            || text.Contains("@inherits", StringComparison.Ordinal)
+            || text.Contains("@inject", StringComparison.Ordinal)
+            || text.Split(["\r\n", "\n"], StringSplitOptions.None)
+                .Any(line => line.TrimStart().StartsWith("<", StringComparison.Ordinal)
+                    && !line.StartsWith("///", StringComparison.Ordinal)
+                    && !line.StartsWith("<!--", StringComparison.Ordinal));
+    }
+}
+
+/// <summary>
+/// File capabilities including kind and allowed tools.
+/// </summary>
+public sealed record FileCapabilities(
+    string FilePath,
+    FileKind Kind,
+    IReadOnlyList<string> AllowedTools,
+    IReadOnlyList<string> Warnings);

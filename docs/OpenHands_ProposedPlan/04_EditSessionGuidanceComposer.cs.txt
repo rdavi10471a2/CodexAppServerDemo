@@ -1,0 +1,176 @@
+// =============================================================================
+// EditSessionGuidanceComposer.cs
+// Part of: Codehands Proposal.md
+// Location: docs/proposed/
+// Description: Generates tool priority guidance for prompts and session bootstrap
+// References: 01_EditSessionModels.cs, 02_FileCapabilitiesAnalyzer.cs
+// =============================================================================
+
+namespace CodexAppServerBlazor.Services.Workflow;
+
+/// <summary>
+/// Composes guidance text for prompts and session bootstrap.
+/// </summary>
+public sealed class EditSessionGuidanceComposer
+{
+    /// <summary>
+    /// Composes the edit session guidance including tool priority by file type.
+    /// </summary>
+    public string ComposeEditSessionGuidance(EditSession editSession)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("## Edit Session Started");
+        builder.AppendLine($"Session ID: {editSession.SessionId}");
+        builder.AppendLine($"Files: {editSession.Files.Count}");
+        builder.AppendLine();
+        
+        // Group files by kind
+        var codeFiles = editSession.Files.Where(f => f.FileKind == FileKind.PureCode).ToList();
+        var razorFiles = editSession.Files.Where(f => f.FileKind == FileKind.HybridRazor).ToList();
+        var markupFiles = editSession.Files.Where(f => f.FileKind == FileKind.Markup).ToList();
+        var solutionFiles = editSession.Files.Where(f => f.FileKind == FileKind.SolutionFile).ToList();
+        
+        // Tool priority guidance
+        builder.AppendLine("### Tool Priority");
+        builder.AppendLine();
+        
+        if (codeFiles.Count > 0)
+        {
+            builder.AppendLine("**C# Files (.cs)**");
+            builder.AppendLine("| Priority | Tool | When to Use |");
+            builder.AppendLine("|----------|------|--------------|");
+            builder.AppendLine("| 1 | `submit_symbol` | Replace/change existing symbols |");
+            builder.AppendLine("| 2 | `add_field`, `add_property`, `add_method`, `add_constructor` | Add new members |");
+            builder.AppendLine("| 3 | `add_using`, `remove_using` | Manage usings |");
+            builder.AppendLine("| 4 | `replace_text_in_file` | Text-based changes |");
+            builder.AppendLine("| 5 | `submit_file` | Full file (last resort) |");
+            builder.AppendLine();
+        }
+        
+        if (solutionFiles.Count > 0)
+        {
+            builder.AppendLine("**Solution/Project Files (.sln, .csproj)**");
+            builder.AppendLine("| Priority | Tool | When to Use |");
+            builder.AppendLine("|----------|------|--------------|");
+            builder.AppendLine("| 1 | `replace_text_in_file` | Text-based changes |");
+            builder.AppendLine("| 2 | `find_file` | Discovery only |");
+            builder.AppendLine("| 3 | `submit_file` | Full file (last resort) |");
+            builder.AppendLine();
+        }
+        
+        if (razorFiles.Count > 0)
+        {
+            builder.AppendLine("**Hybrid Razor Files (.razor with @code)**");
+            builder.AppendLine("| Priority | Tool | When to Use |");
+            builder.AppendLine("|----------|------|--------------|");
+            builder.AppendLine("| 1 | `replace_text_in_file` | Text-based changes (carefully) |");
+            builder.AppendLine("| 2 | `submit_file` | Full file (last resort) |");
+            foreach (var file in razorFiles)
+            {
+                if (file.Warnings.Count > 0)
+                {
+                    builder.AppendLine($"  - *{file.RelativePath}: {string.Join(", ", file.Warnings)}*");
+                }
+            }
+            builder.AppendLine();
+        }
+        
+        if (markupFiles.Count > 0)
+        {
+            builder.AppendLine("**Markup Files (.razor, .md, .json, etc.)**");
+            builder.AppendLine("| Priority | Tool | When to Use |");
+            builder.AppendLine("|----------|------|--------------|");
+            builder.AppendLine("| 1 | `replace_text_in_file` | Text-based changes |");
+            builder.AppendLine("| 2 | `submit_file` | Full file (last resort) |");
+            builder.AppendLine();
+        }
+        
+        // Blocked tools
+        builder.AppendLine("### DO NOT USE");
+        builder.AppendLine("- Codex native `ApplyPatch` - blocked");
+        builder.AppendLine("- `grep` for C# symbol search - use MCP semantic tools instead");
+        builder.AppendLine();
+        
+        // Files list
+        builder.AppendLine("### Files in this session:");
+        foreach (var file in editSession.Files)
+        {
+            var status = file.IsEdited ? "[EDITED]" : "[PENDING]";
+            var kind = file.FileKind.ToString().ToLowerInvariant();
+            builder.AppendLine($"- {file.RelativePath} ({kind}) {status}");
+        }
+        
+        return builder.ToString();
+    }
+    
+    /// <summary>
+    /// Composes the session bootstrap capability manifest.
+    /// </summary>
+    public string ComposeSessionBootstrapCapabilityManifest()
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("## MCP-First Workflow");
+        builder.AppendLine();
+        builder.AppendLine("This session uses AICodingServices MCP tools exclusively.");
+        builder.AppendLine();
+        
+        builder.AppendLine("### Discovery (instead of grep)");
+        builder.AppendLine("- Use `find_indexed_symbols` to search C# symbols");
+        builder.AppendLine("- Use `find_indexed_references` to find symbol usages");
+        builder.AppendLine("- Use `find_indexed_callers` to find method callers");
+        builder.AppendLine("- Use `query_solution_index` for scope-based queries");
+        builder.AppendLine("- Use `find_file` to locate files by pattern");
+        builder.AppendLine("- Use `get_solution_index_tree` for project structure");
+        builder.AppendLine();
+        
+        builder.AppendLine("### Edits (instead of ApplyPatch)");
+        builder.AppendLine("- For C# symbol edits: use `submit_symbol`, `add_*`, `remove_symbol`");
+        builder.AppendLine("- For text edits: use `replace_text_in_file`");
+        builder.AppendLine("- For new files: use `new_file` then edit working copy");
+        builder.AppendLine("- For existing files: use `refresh_file` first, then edit");
+        builder.AppendLine();
+        
+        builder.AppendLine("### File Workflow");
+        builder.AppendLine("- Use `get_file` to read watched source files");
+        builder.AppendLine("- Edits go to monitor-owned Working copies only");
+        builder.AppendLine("- Use `get_edit_status` to check file session state");
+        builder.AppendLine();
+        
+        builder.AppendLine("### Phase Guidance");
+        builder.AppendLine("- **DISCOVERY**: Analyze workspace, propose files");
+        builder.AppendLine("- **EDITING**: Make edits via MCP tools");
+        builder.AppendLine("- **OVERLAY BUILD**: Wait for build verification");
+        builder.AppendLine("- **MERGE PENDING**: Human reviews and merges files");
+        builder.AppendLine("- **DISCUSSION NEEDED**: File(s) rejected, discuss with user");
+        builder.AppendLine("- **MERGE COMPLETE**: All accepted, ready for rebuild");
+        
+        return builder.ToString();
+    }
+    
+    /// <summary>
+    /// Composes phase-specific guidance.
+    /// </summary>
+    public string ComposePhaseGuidance(WorkflowPhase phase, EditSession? editSession)
+    {
+        return phase switch
+        {
+            WorkflowPhase.Discovery => 
+                "Phase: DISCOVERY - Analyze the workspace and propose which files need editing.",
+            WorkflowPhase.Editing => 
+                $"Phase: EDITING - Make edits using MCP tools. {editSession?.Files.Count ?? 0} files in session.",
+            WorkflowPhase.OverlayBuild => 
+                "Phase: OVERLAY BUILD - Building to verify edits. Do not make further changes.",
+            WorkflowPhase.MergePending => 
+                $"Phase: MERGE PENDING - Awaiting human review.",
+            WorkflowPhase.DiscussionPending => 
+                "Phase: DISCUSSION NEEDED - File(s) rejected. Discuss with user.",
+            WorkflowPhase.MergeComplete => 
+                "Phase: MERGE COMPLETE - All files accepted. Ready for rebuild.",
+            WorkflowPhase.Rebooting => 
+                "Phase: REBOOTING - Stopping and restarting application.",
+            WorkflowPhase.SelfEditWarning => 
+                "Phase: SELF-EDIT WARNING - Self-editing detected. Restart from VS.",
+            _ => string.Empty
+        };
+    }
+}

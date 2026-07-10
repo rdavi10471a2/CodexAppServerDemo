@@ -1,0 +1,82 @@
+@inject DialogService DialogService
+
+<div class="validation-gate-dialog">
+    <div class="validation-gate-banner">
+        <strong>Pre-merge validation reported an issue</strong>
+        <span>Review is ready, but this edit session has at least one staged record with a validation failure.</span>
+    </div>
+
+    <div class="validation-gate-summary">
+        <div>
+            <span>File</span>
+            <strong>@RelativePath</strong>
+        </div>
+        <div>
+            <span>Validation</span>
+            <strong>@Normalize(ValidationStatus)</strong>
+        </div>
+        <div>
+            <span>Pending in session</span>
+            <strong>@PendingCount</strong>
+        </div>
+    </div>
+
+    <p class="validation-gate-copy">
+        Continue to review if you want to inspect and decide this session manually. The staged review dialog will still require an explicit
+        <em>Accept With Validation Override</em> action before a failed validation can be overridden.
+    </p>
+
+    <div class="validation-gate-actions">
+        <button class="validation-gate-warning-action"
+                type="button"
+                @onclick="ContinueToReviewAsync">
+            Continue To Review
+        </button>
+        <button class="validation-gate-secondary-action"
+                type="button"
+                @onclick="DismissAsync">
+            Not Now
+        </button>
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public string RelativePath { get; set; } = string.Empty;
+
+    [Parameter]
+    public string ValidationStatus { get; set; } = string.Empty;
+
+    [Parameter]
+    public int PendingCount { get; set; }
+
+    [Parameter]
+    public EventCallback<bool> DecisionMade { get; set; }
+
+    private Task ContinueToReviewAsync()
+    {
+        if (DecisionMade.HasDelegate)
+        {
+            return DecisionMade.InvokeAsync(true);
+        }
+
+        DialogService.Close(true);
+        return Task.CompletedTask;
+    }
+
+    private Task DismissAsync()
+    {
+        if (DecisionMade.HasDelegate)
+        {
+            return DecisionMade.InvokeAsync(false);
+        }
+
+        DialogService.Close(false);
+        return Task.CompletedTask;
+    }
+
+    private static string Normalize(string value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "pending" : value;
+    }
+}

@@ -1,0 +1,57 @@
+using AICodingServices.Core;
+using AICodingServices.Data;
+using AICodingServices.Indexing;
+using AICodingServices.Logging;
+using AICodingServices.Runtime;
+using AICodingServices.Workflow;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using ModelContextProtocol.Server;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+
+namespace AICodingServices.McpServer;
+
+[McpServerToolType]
+public sealed partial class AICodingServicesTools
+{
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        WriteIndented = true
+    };
+
+    private readonly CodingServicesSettings settings;
+    private readonly SolutionIndexQueryService queryService;
+    private readonly WorkflowEditService workflowService;
+    private readonly RoslynEditService roslynEditService;
+    private readonly WorkflowEditPaths workflowPaths;
+    private readonly AICodingServicesMcpRuntimeState runtimeState;
+    private readonly IHostApplicationLifetime applicationLifetime;
+    private readonly IMonitorLogger logger;
+
+    public AICodingServicesTools(
+        CodingServicesSettings settings,
+        SolutionIndexQueryService queryService,
+        WorkflowEditService workflowService,
+        RoslynEditService roslynEditService,
+        WorkflowEditPaths workflowPaths,
+        AICodingServicesMcpRuntimeState runtimeState,
+        IHostApplicationLifetime applicationLifetime,
+        IMonitorLogger logger)
+    {
+        this.settings = settings;
+        this.queryService = queryService;
+        this.workflowService = workflowService;
+        this.roslynEditService = roslynEditService;
+        this.workflowPaths = workflowPaths;
+        this.runtimeState = runtimeState;
+        this.applicationLifetime = applicationLifetime;
+        this.logger = logger;
+    }
+}

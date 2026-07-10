@@ -30,7 +30,7 @@ public sealed class SolutionIndexQueryService
 
     public static SolutionIndexQueryService Create(CodingServicesSettings settings)
     {
-        string databasePath = MonitorDataPaths.GetDefaultIndexDatabasePath(settings);
+        string databasePath = SystemDataPaths.GetDefaultIndexDatabasePath(settings);
         SolutionIndexStore store = new(new SolutionIndexDatabase(databasePath));
         return new SolutionIndexQueryService(settings, store, databasePath);
     }

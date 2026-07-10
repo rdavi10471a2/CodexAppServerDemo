@@ -23,7 +23,7 @@ public sealed class WorkflowEditService
         editValidator = new CandidateEditValidator(settings);
     }
 
-    public EditSessionStatus Refresh(string watchedFilePath)
+    public EditSessionStatus Refresh(string watchedFilePath, string? sessionId = null)
     {
         string fullWatchedPath = Path.GetFullPath(watchedFilePath);
         using IDisposable manifestLock = AcquireManifestLock(fullWatchedPath);
@@ -35,13 +35,21 @@ public sealed class WorkflowEditService
         EditSessionManifest? previousManifest = LoadManifest(fullWatchedPath);
         string originalHash = FileHash.Compute(fullWatchedPath);
         DateTimeOffset refreshedAtUtc = DateTimeOffset.UtcNow;
+        string refreshedSessionId = string.IsNullOrWhiteSpace(sessionId)
+            ? CreateEditSessionId()
+            : sessionId.Trim();
         string retrievalBackupPath = CreateRetrievalBackup(fullWatchedPath, originalHash, refreshedAtUtc);
         string workingFilePath = paths.GetWorkingFilePath(fullWatchedPath);
         Directory.CreateDirectory(Path.GetDirectoryName(workingFilePath) ?? ".");
         File.Copy(fullWatchedPath, workingFilePath, overwrite: true);
+        RetireActiveRecordsForFile(
+            fullWatchedPath,
+            $"refresh-{refreshedSessionId}",
+            "A fresh governed refresh replaced this pending staged candidate before a new edit turn began.");
 
         EditSessionManifest manifest = new()
         {
+            EditSessionId = refreshedSessionId,
             WatchedFilePath = fullWatchedPath,
             WorkingFilePath = workingFilePath,
             RelativePath = paths.GetRelativeWatchedPath(fullWatchedPath),
@@ -55,10 +63,11 @@ public sealed class WorkflowEditService
             LastRetrievalBackupAtUtc = refreshedAtUtc.ToString("O")
         };
         SaveManifest(fullWatchedPath, manifest);
+        EnsureSessionPlanContainsFile(refreshedSessionId, fullWatchedPath);
         return GetStatus(fullWatchedPath);
     }
 
-    public EditSessionStatus NewFile(string watchedFilePath)
+    public EditSessionStatus NewFile(string watchedFilePath, string? sessionId = null)
     {
         string fullWatchedPath = Path.GetFullPath(watchedFilePath);
         using IDisposable manifestLock = AcquireManifestLock(fullWatchedPath);
@@ -77,6 +86,9 @@ public sealed class WorkflowEditService
 
         EditSessionManifest manifest = new()
         {
+            EditSessionId = string.IsNullOrWhiteSpace(sessionId)
+                ? CreateEditSessionId()
+                : sessionId.Trim(),
             WatchedFilePath = fullWatchedPath,
             WorkingFilePath = workingFilePath,
             RelativePath = paths.GetRelativeWatchedPath(fullWatchedPath),
@@ -87,7 +99,69 @@ public sealed class WorkflowEditService
             RefreshedAtUtc = DateTimeOffset.UtcNow.ToString("O")
         };
         SaveManifest(fullWatchedPath, manifest);
+        EnsureSessionPlanContainsFile(manifest.EditSessionId, fullWatchedPath);
         return GetStatus(fullWatchedPath);
+    }
+
+    public EditSessionPlan DeclareSessionFiles(string sessionId, IEnumerable<string> watchedFilePaths)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            throw new InvalidOperationException("A non-empty edit session id is required when declaring governed session files.");
+        }
+
+        List<string> declaredPaths = watchedFilePaths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(Path.GetFullPath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (declaredPaths.Count == 0)
+        {
+            throw new InvalidOperationException("Declare at least one file path for the governed edit session.");
+        }
+
+        DateTimeOffset nowUtc = DateTimeOffset.UtcNow;
+        EditSessionPlan plan = LoadSessionPlan(sessionId.Trim()) ?? new EditSessionPlan
+        {
+            SessionId = sessionId.Trim(),
+            CreatedAtUtc = nowUtc.ToString("O")
+        };
+
+        plan.DeclaredWatchedFilePaths = declaredPaths;
+        plan.DeclaredRelativePaths = declaredPaths
+            .Select(paths.GetRelativeWatchedPath)
+            .ToList();
+        plan.UpdatedAtUtc = nowUtc.ToString("O");
+        SaveSessionPlan(plan);
+        return plan;
+    }
+
+    public EditSessionPlan AddFileToSession(string sessionId, string watchedFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            throw new InvalidOperationException("A non-empty edit session id is required when adding a governed file to an edit session.");
+        }
+
+        if (string.IsNullOrWhiteSpace(watchedFilePath))
+        {
+            throw new InvalidOperationException("A non-empty watched file path is required when adding a governed file to an edit session.");
+        }
+
+        string fullWatchedPath = Path.GetFullPath(watchedFilePath);
+        EnsureSessionPlanContainsFile(sessionId.Trim(), fullWatchedPath);
+        return LoadSessionPlan(sessionId.Trim())
+            ?? throw new InvalidOperationException($"Governed edit session '{sessionId}' could not be loaded after adding '{fullWatchedPath}'.");
+    }
+
+    public EditSessionPlan? GetSessionPlan(string sessionId)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return null;
+        }
+
+        return LoadSessionPlan(sessionId.Trim());
     }
 
     private string CreateRetrievalBackup(string fullWatchedPath, string originalHash, DateTimeOffset capturedAtUtc)
@@ -95,7 +169,7 @@ public sealed class WorkflowEditService
         string backupDirectory = paths.GetRetrievalBackupDirectory(fullWatchedPath);
         Directory.CreateDirectory(backupDirectory);
 
-        string fileNameWithoutExtension = MonitorWorkspacePaths.GetSafePathSegment(
+        string fileNameWithoutExtension = SystemWorkspacePaths.GetSafePathSegment(
             Path.GetFileNameWithoutExtension(fullWatchedPath));
         string extension = Path.GetExtension(fullWatchedPath);
         string timestamp = capturedAtUtc.UtcDateTime.ToString("yyyyMMdd-HHmmssfff'Z'");
@@ -116,6 +190,7 @@ public sealed class WorkflowEditService
 
         EditSessionStatus status = new()
         {
+            EditSessionId = manifest?.EditSessionId ?? string.Empty,
             WatchedFilePath = fullWatchedPath,
             WorkingFilePath = workingFilePath,
             RelativePath = paths.GetRelativeWatchedPath(fullWatchedPath),
@@ -253,6 +328,118 @@ public sealed class WorkflowEditService
         }
 
         return GetStatus(fullWatchedPath);
+    }
+
+    public int AbandonPendingSessionArtifacts(string sessionId, string message)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return 0;
+        }
+
+        int retiredRecords = 0;
+        foreach (StagedEditRecord record in ListStagedRecords(sessionId)
+            .Where(record => !IsTerminalDecision(record.Decision))
+            .Where(record => !IsTerminalDecision(record.Classification))
+            .Where(record => !IsSuperseded(record)))
+        {
+            record.Status = "superseded";
+            record.Classification = "superseded";
+            record.SupersededByStagedRecordId = $"abandoned-{sessionId}";
+            record.SupersededAtUtc = DateTimeOffset.UtcNow.ToString("O");
+            record.Message = message;
+            SaveStagedRecord(record);
+            retiredRecords++;
+        }
+
+        if (!Directory.Exists(paths.MetadataRoot))
+        {
+            return retiredRecords;
+        }
+
+        foreach (string manifestPath in Directory.EnumerateFiles(paths.MetadataRoot, "*.json", SearchOption.AllDirectories))
+        {
+            EditSessionManifest? manifest;
+            try
+            {
+                manifest = DeserializeManifestFile(manifestPath);
+            }
+            catch (JsonException)
+            {
+                continue;
+            }
+
+            if (manifest is null
+                || string.IsNullOrWhiteSpace(manifest.EditSessionId)
+                || !manifest.EditSessionId.Equals(sessionId, StringComparison.Ordinal)
+                || manifest.RequiresRefresh)
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(manifest.WorkingFilePath) && File.Exists(manifest.WorkingFilePath))
+            {
+                File.Delete(manifest.WorkingFilePath);
+            }
+
+            File.Delete(manifestPath);
+        }
+
+        return retiredRecords;
+    }
+
+    public int CleanupResolvedSessionArtifacts(string sessionId)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return 0;
+        }
+
+        if (ListStagedRecords(sessionId)
+            .Where(record => !IsSuperseded(record))
+            .Any(record => !IsTerminalDecision(record.Decision) && !IsTerminalDecision(record.Classification)))
+        {
+            return 0;
+        }
+
+        int cleanedArtifacts = 0;
+        if (!Directory.Exists(paths.MetadataRoot))
+        {
+            DeleteSessionPlan(sessionId);
+            return cleanedArtifacts;
+        }
+
+        foreach (string manifestPath in Directory.EnumerateFiles(paths.MetadataRoot, "*.json", SearchOption.AllDirectories))
+        {
+            EditSessionManifest? manifest;
+            try
+            {
+                manifest = DeserializeManifestFile(manifestPath);
+            }
+            catch (JsonException)
+            {
+                continue;
+            }
+
+            if (manifest is null
+                || string.IsNullOrWhiteSpace(manifest.EditSessionId)
+                || !manifest.EditSessionId.Equals(sessionId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(manifest.WorkingFilePath) && File.Exists(manifest.WorkingFilePath))
+            {
+                File.Delete(manifest.WorkingFilePath);
+                cleanedArtifacts++;
+            }
+
+            File.Delete(manifestPath);
+            cleanedArtifacts++;
+        }
+
+        DeleteSessionPlan(sessionId);
+        return cleanedArtifacts;
     }
 
     public EditSessionStatus WriteWorkingCandidate(
@@ -457,6 +644,7 @@ public sealed class WorkflowEditService
                 File.Copy(fullWatchedPath, workingFilePath, overwrite: true);
                 manifest = new EditSessionManifest
                 {
+                    EditSessionId = CreateEditSessionId(),
                     WatchedFilePath = fullWatchedPath,
                     WorkingFilePath = workingFilePath,
                     RelativePath = paths.GetRelativeWatchedPath(fullWatchedPath),
@@ -476,6 +664,7 @@ public sealed class WorkflowEditService
 
                 manifest = new EditSessionManifest
                 {
+                    EditSessionId = CreateEditSessionId(),
                     WatchedFilePath = fullWatchedPath,
                     WorkingFilePath = workingFilePath,
                     RelativePath = paths.GetRelativeWatchedPath(fullWatchedPath),
@@ -669,10 +858,27 @@ public sealed class WorkflowEditService
             manifest,
             stagedFilePath,
             ledgerSummary);
+        string resolvedSessionId = string.IsNullOrWhiteSpace(sessionId)
+            ? manifest.EditSessionId
+            : sessionId;
+        if (string.IsNullOrWhiteSpace(resolvedSessionId))
+        {
+            throw new InvalidOperationException("An active edit session id is required before staging a governed review candidate.");
+        }
+
+        EditSessionPlan? sessionPlan = LoadSessionPlan(resolvedSessionId);
+        if (sessionPlan is not null
+            && sessionPlan.DeclaredWatchedFilePaths.Count > 1
+            && !sessionPlan.DeclaredWatchedFilePaths.Any(path => path.Equals(fullWatchedPath, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException(
+                $"Governed edit session '{resolvedSessionId}' is declared for {sessionPlan.DeclaredWatchedFilePaths.Count} files, and '{manifest.RelativePath}' is not in that declaration.");
+        }
+
         StagedEditRecord record = new()
         {
             StagedRecordId = stagedRecordId,
-            SessionId = sessionId ?? string.Empty,
+            SessionId = resolvedSessionId,
             WatchedFilePath = fullWatchedPath,
             WorkingFilePath = manifest.WorkingFilePath,
             StagedFilePath = stagedFilePath,
@@ -687,12 +893,15 @@ public sealed class WorkflowEditService
             StagedNormalizedHash = FileHash.ComputeNormalizedFile(stagedFilePath),
             CreatedAtUtc = DateTimeOffset.UtcNow.ToString("O"),
             Status = "staged",
-            Message = "Working candidate was snapshotted for WinMerge review.",
+            Message = "Working candidate was snapshotted for merge review.",
             LastCompareRunId = compare.RunId,
             LastCompareSnapshotPath = compare.ProposedSnapshotPath,
             LastLedgerPath = compare.LedgerPath
         };
-        SupersedeActiveRecordsForFile(fullWatchedPath, stagedRecordId);
+        RetireActiveRecordsForFile(
+            fullWatchedPath,
+            stagedRecordId,
+            "A newer staged candidate for the same watched file superseded this record.");
         SaveStagedRecord(record);
 
         manifest.LastStagedRecordId = stagedRecordId;
@@ -786,6 +995,20 @@ public sealed class WorkflowEditService
         record.PreMergeValidationForceApproved = validation.IsError && forceApproved;
         record.PreMergeValidationDiagnosticCount = validation.DiagnosticCount;
         record.PreMergeValidationAtUtc = DateTimeOffset.UtcNow.ToString("O");
+        SaveStagedRecord(record);
+        return record;
+    }
+
+    public StagedEditRecord ApprovePreMergeValidationFailure(string stagedRecordId)
+    {
+        StagedEditRecord record = GetStagedRecord(stagedRecordId);
+        EnsureRecordNotDecided(record);
+        if (!record.PreMergeValidationIsError)
+        {
+            throw new InvalidOperationException("Cannot override pre-merge validation unless the staged record currently has a failed validation result.");
+        }
+
+        record.PreMergeValidationForceApproved = true;
         SaveStagedRecord(record);
         return record;
     }
@@ -1050,11 +1273,67 @@ public sealed class WorkflowEditService
         return JsonSerializer.Deserialize<EditSessionManifest>(File.ReadAllText(manifestPath), JsonOptions);
     }
 
+    private static string CreateEditSessionId()
+    {
+        return "edit-" + Guid.NewGuid().ToString("N");
+    }
+
     private void SaveManifest(string watchedFilePath, EditSessionManifest manifest)
     {
         string metadataPath = paths.GetMetadataPath(watchedFilePath);
         Directory.CreateDirectory(Path.GetDirectoryName(metadataPath) ?? ".");
         File.WriteAllText(metadataPath, JsonSerializer.Serialize(manifest, JsonOptions));
+    }
+
+    private EditSessionPlan? LoadSessionPlan(string sessionId)
+    {
+        string sessionPlanPath = paths.GetSessionPlanPath(sessionId);
+        if (!File.Exists(sessionPlanPath))
+        {
+            return null;
+        }
+
+        return JsonSerializer.Deserialize<EditSessionPlan>(File.ReadAllText(sessionPlanPath), JsonOptions);
+    }
+
+    private void SaveSessionPlan(EditSessionPlan plan)
+    {
+        string sessionPlanPath = paths.GetSessionPlanPath(plan.SessionId);
+        Directory.CreateDirectory(Path.GetDirectoryName(sessionPlanPath) ?? ".");
+        File.WriteAllText(sessionPlanPath, JsonSerializer.Serialize(plan, JsonOptions));
+    }
+
+    private void DeleteSessionPlan(string sessionId)
+    {
+        string sessionPlanPath = paths.GetSessionPlanPath(sessionId);
+        if (File.Exists(sessionPlanPath))
+        {
+            File.Delete(sessionPlanPath);
+        }
+    }
+
+    private void EnsureSessionPlanContainsFile(string sessionId, string watchedFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return;
+        }
+
+        EditSessionPlan plan = LoadSessionPlan(sessionId) ?? new EditSessionPlan
+        {
+            SessionId = sessionId,
+            CreatedAtUtc = DateTimeOffset.UtcNow.ToString("O")
+        };
+
+        if (plan.DeclaredWatchedFilePaths.Any(path => path.Equals(watchedFilePath, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        plan.DeclaredWatchedFilePaths.Add(watchedFilePath);
+        plan.DeclaredRelativePaths.Add(paths.GetRelativeWatchedPath(watchedFilePath));
+        plan.UpdatedAtUtc = DateTimeOffset.UtcNow.ToString("O");
+        SaveSessionPlan(plan);
     }
 
     private StagedEditRecord? LoadStagedRecord(string stagedRecordId)
@@ -1108,7 +1387,7 @@ public sealed class WorkflowEditService
             .ToArray();
     }
 
-    private void SupersedeActiveRecordsForFile(string fullWatchedPath, string supersededByStagedRecordId)
+    private void RetireActiveRecordsForFile(string fullWatchedPath, string supersededByStagedRecordId, string message)
     {
         foreach (StagedEditRecord record in ListStagedRecords()
             .Where(record => record.WatchedFilePath.Equals(fullWatchedPath, StringComparison.OrdinalIgnoreCase))
@@ -1120,7 +1399,7 @@ public sealed class WorkflowEditService
             record.Classification = "superseded";
             record.SupersededByStagedRecordId = supersededByStagedRecordId;
             record.SupersededAtUtc = DateTimeOffset.UtcNow.ToString("O");
-            record.Message = "A newer staged candidate for the same watched file superseded this record.";
+            record.Message = message;
             SaveStagedRecord(record);
         }
     }

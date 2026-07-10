@@ -17,7 +17,7 @@ public sealed class PostAcceptIndexRefreshService
         PostAcceptIndexRefreshPlan? refreshPlan = null)
     {
         Stopwatch stopwatch = Stopwatch.StartNew();
-        string databasePath = MonitorDataPaths.GetDefaultIndexDatabasePath(settings);
+        string databasePath = SystemDataPaths.GetDefaultIndexDatabasePath(settings);
         string[] projectPaths = GetProjectRefreshPaths(record, refreshPlan);
         string[] filePaths = GetFileRefreshPaths(record, refreshPlan);
         bool useFileRefresh = projectPaths.Length == 1 && filePaths.Length > 0;
