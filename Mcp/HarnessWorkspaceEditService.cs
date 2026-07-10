@@ -44,6 +44,28 @@ public sealed class HarnessWorkspaceEditService
         return status;
     }
 
+    public EditSessionPlan DeclareSessionFiles(string sessionId, IEnumerable<string> watchedFilePaths)
+    {
+        WorkspaceEditContext workspace = ResolveWorkspace();
+        WorkflowEditService workflowService = new(workspace.Settings);
+        List<string> resolvedPaths = watchedFilePaths
+            .Select(ResolveContext)
+            .Select(context => context.WatchedFilePath)
+            .ToList();
+        EditSessionPlan plan = workflowService.DeclareSessionFiles(sessionId, resolvedPaths);
+        workspaceState.SetCurrentEditSessionId(plan.SessionId);
+        return plan;
+    }
+
+    public EditSessionPlan AddFileToSession(string sessionId, string watchedFilePath)
+    {
+        WorkspaceEditContext context = ResolveContext(watchedFilePath);
+        WorkflowEditService workflowService = new(context.Settings);
+        EditSessionPlan plan = workflowService.AddFileToSession(sessionId, context.WatchedFilePath);
+        workspaceState.SetCurrentEditSessionId(plan.SessionId);
+        return plan;
+    }
+
     public ReplaceTextResult ReplaceTextInFile(
         string watchedFilePath,
         string oldText,
@@ -272,18 +294,8 @@ public sealed class HarnessWorkspaceEditService
 
     private WorkspaceEditContext ResolveContext(string watchedFilePath)
     {
-        string? repoRoot = workspaceState.RepoRoot;
-        if (string.IsNullOrWhiteSpace(repoRoot))
-        {
-            throw new InvalidOperationException("No workspace CWD has been selected in the Blazor control surface.");
-        }
-
-        if (!Directory.Exists(repoRoot))
-        {
-            throw new InvalidOperationException($"Workspace CWD no longer exists: {repoRoot}");
-        }
-
-        string fullRepoRoot = Path.GetFullPath(repoRoot);
+        WorkspaceEditContext workspace = ResolveWorkspace();
+        string fullRepoRoot = workspace.WorkspaceRoot;
         string fullPath = Path.IsPathRooted(watchedFilePath)
             ? Path.GetFullPath(watchedFilePath)
             : Path.GetFullPath(Path.Combine(fullRepoRoot, watchedFilePath));
@@ -292,9 +304,7 @@ public sealed class HarnessWorkspaceEditService
         {
             throw new InvalidOperationException($"Watched file path must stay within the selected workspace: {watchedFilePath}");
         }
-
-        CodingServicesSettings settings = settingsProvider.GetSettings(fullRepoRoot);
-        return new WorkspaceEditContext(fullRepoRoot, fullPath, settings);
+        return workspace with { WatchedFilePath = fullPath };
     }
 
     private static bool IsWithinWorkspace(string workspaceRoot, string candidatePath)
@@ -314,6 +324,24 @@ public sealed class HarnessWorkspaceEditService
         string WorkspaceRoot,
         string WatchedFilePath,
         CodingServicesSettings Settings);
+
+    private WorkspaceEditContext ResolveWorkspace()
+    {
+        string? repoRoot = workspaceState.RepoRoot;
+        if (string.IsNullOrWhiteSpace(repoRoot))
+        {
+            throw new InvalidOperationException("No workspace CWD has been selected in the Blazor control surface.");
+        }
+
+        if (!Directory.Exists(repoRoot))
+        {
+            throw new InvalidOperationException($"Workspace CWD no longer exists: {repoRoot}");
+        }
+
+        string fullRepoRoot = Path.GetFullPath(repoRoot);
+        CodingServicesSettings settings = settingsProvider.GetSettings(fullRepoRoot);
+        return new WorkspaceEditContext(fullRepoRoot, string.Empty, settings);
+    }
 
     private string? ResolveRefreshSessionId(
         WorkflowEditService workflowService,

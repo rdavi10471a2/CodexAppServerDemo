@@ -36,6 +36,20 @@ public sealed class WorkspaceEditMcpTools
     }
 
     [McpServerTool]
+    [Description("Declares the full governed file set for an existing edit session before any multi-file staging. Use this when a Work task intentionally spans more than one file.")]
+    public EditSessionPlan DeclareSessionFiles(string sessionId, IEnumerable<string> watchedFilePaths)
+    {
+        return workspaceEditService.DeclareSessionFiles(sessionId, watchedFilePaths);
+    }
+
+    [McpServerTool]
+    [Description("Adds one watched workspace file to an existing governed edit session and returns the updated declared file set. Prefer this after refresh_file/new_file when a coherent task grows from one file to multiple files incrementally.")]
+    public EditSessionPlan AddFileToSession(string sessionId, string watchedFilePath)
+    {
+        return workspaceEditService.AddFileToSession(sessionId, watchedFilePath);
+    }
+
+    [McpServerTool]
     [Description("Replaces text inside the governed Working candidate for a workspace file. Supports expected match counts, working-hash guards, and optional overlay validation.")]
     public ReplaceTextResult ReplaceTextInFile(
         string watchedFilePath,

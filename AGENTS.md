@@ -28,6 +28,9 @@
 - Do not stage partial file work unless the workflow explicitly calls for an intermediate checkpoint.
 - Prefer finishing one file cleanly, then moving to the next required file.
 - If a task truly requires coordinated multi-file work, stage those files deliberately under one review session after each file-level change is complete enough to review.
+- If a task spans multiple files, declare the governed file set up front before staging review.
+- Once a multi-file file set is declared, do not fall back to single-file staging for any file in that session.
+- For declared multi-file work, use session-level review staging after all declared files have been updated in Working candidates.
 - If a task requires coordinated multi-file work, do not silently split it into separate per-file review sessions just because the first file refresh created a file-scoped edit session id.
 - Reuse one governed edit session across the whole coherent change when the MCP/tool surface allows it.
 - If the available governed MCP flow appears to create a different edit session id per file and no explicit join-or-reuse path is exposed, stop and report that tooling gap before staging any file for review.

@@ -91,6 +91,7 @@ public partial class Home : IDisposable, IAsyncDisposable
     private IJSObjectReference? mainResizeModule;
     private readonly List<CodexOutputEvent> debugEvents = [];
     private const int MaxDebugEvents = 300;
+    private string? lastMirroredToolFailureKey;
     private static readonly MarkdownPipeline MarkdownPipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions()
         .DisableHtml()
@@ -266,13 +267,13 @@ public partial class Home : IDisposable, IAsyncDisposable
 
         if (clearEditSessionId)
         {
-            int retiredCount = RetirePendingArtifactsForSession(priorEditSessionId);
+            int cleanedCount = CleanupResolvedArtifactsForSession(priorEditSessionId);
             WorkspaceState.SetCurrentEditSessionId(null);
             AddDebugEvent(
                 "TurnPrep",
-                "retire-session",
+                "sweep-resolved-session",
                 "home",
-                $"Retired {retiredCount} pending staged record(s) for previous edit session '{priorEditSessionId ?? "<none>"}' before starting a new Work turn.");
+                $"Swept {cleanedCount} resolved artifact(s) for previous edit session '{priorEditSessionId ?? "<none>"}' before starting a new Work turn.");
         }
 
         AddDebugEvent(
@@ -282,7 +283,7 @@ public partial class Home : IDisposable, IAsyncDisposable
             $"Reset queued review, validation gate, and dialog state before starting a new {(turnMode == WorkflowTurnMode.Work ? "Work" : "Discuss")} turn. ClearedEditSessionId={clearEditSessionId}.");
     }
 
-    private int RetirePendingArtifactsForSession(string? sessionId)
+    private int CleanupResolvedArtifactsForSession(string? sessionId)
     {
         if (string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(repoRoot) || !Directory.Exists(repoRoot))
         {
@@ -292,17 +293,15 @@ public partial class Home : IDisposable, IAsyncDisposable
         try
         {
             WorkflowEditService workflowService = new(SettingsProvider.GetSettings(repoRoot));
-            return workflowService.AbandonPendingSessionArtifacts(
-                sessionId,
-                "A new governed Work turn started before this pending edit session was resolved.");
+            return workflowService.CleanupResolvedSessionArtifacts(sessionId);
         }
         catch (Exception ex)
         {
             AddDebugEvent(
                 "TurnPrep",
-                "retire-session-error",
+                "sweep-resolved-session-error",
                 "home",
-                $"Failed to retire pending edit-session artifacts for '{sessionId}': {ex.Message}");
+                $"Failed to sweep resolved edit-session artifacts for '{sessionId}': {ex.Message}");
             return 0;
         }
     }
@@ -1053,6 +1052,7 @@ public partial class Home : IDisposable, IAsyncDisposable
         RenderAssistantSnapshot(isStreaming: snapshot.IsTurnRunning);
         _ = InvokeAsync(async () =>
         {
+            MirrorGovernedToolFailuresToDebug(snapshot);
             CodexOutputEvent? latestStatus = snapshot.StatusEvents.LastOrDefault();
             AddDebugEvent(
                 "ConnectionChanged",
@@ -1062,6 +1062,31 @@ public partial class Home : IDisposable, IAsyncDisposable
             NotifyLatestPermissionResult();
             StateHasChanged();
         });
+    }
+
+    private void MirrorGovernedToolFailuresToDebug(CodexConnectionSnapshot currentSnapshot)
+    {
+        CodexOutputEvent? failure = currentSnapshot.ToolEvents
+            .LastOrDefault(item =>
+                item.Source.Equals("declare_session_files", StringComparison.OrdinalIgnoreCase) &&
+                item.Severity.Equals("error", StringComparison.OrdinalIgnoreCase));
+        if (failure is null)
+        {
+            return;
+        }
+
+        string key = $"{failure.Timestamp:O}|{failure.Source}|{failure.Type}|{failure.Status}|{failure.Detail}";
+        if (string.Equals(lastMirroredToolFailureKey, key, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        lastMirroredToolFailureKey = key;
+        AddDebugEvent(
+            "GovernedToolFailure",
+            failure.Status ?? "error",
+            failure.Source,
+            $"Governed tool failure mirrored from Tools tab. type={failure.Type}; detail={failure.Detail}");
     }
 
     private void OnGovernedReviewCoordinatorChanged()
@@ -1432,6 +1457,22 @@ public partial class Home : IDisposable, IAsyncDisposable
                 remainingReviews.Count == 0 ? "completed" : "closed",
                 "home",
                 $"Review dialog closed for edit session '{launch.SessionId}'. Remaining pending item(s): {remainingReviews.Count}.");
+
+            if (remainingReviews.Count == 0)
+            {
+                int cleanedArtifacts = CleanupResolvedArtifactsForSession(launch.SessionId);
+                if (string.Equals(WorkspaceState.CurrentEditSessionId, launch.SessionId, StringComparison.Ordinal))
+                {
+                    WorkspaceState.SetCurrentEditSessionId(null);
+                }
+
+                AddDebugEvent(
+                    "ReviewLaunch",
+                    "cleanup-complete",
+                    "home",
+                    $"Cleaned {cleanedArtifacts} resolved artifact(s) for completed edit session '{launch.SessionId}'.");
+            }
+
             GovernedReviewCoordinator.Complete(
                 launch.SessionId,
                 new GovernedReviewResolution(

@@ -42,6 +42,42 @@
         }
     </section>
 
+    <section class="governed-trace-shell">
+        <header>
+            <div>
+                <span>Governed Tool Trace</span>
+                <strong>@GovernedTraceEvents.Count recent calls</strong>
+            </div>
+            <code>@DisplayValue(CurrentEditSessionId)</code>
+        </header>
+
+        @if (GovernedTraceEvents.Count == 0)
+        {
+            <div class="empty-permissions">No governed tool calls captured yet.</div>
+        }
+        else
+        {
+            <div class="governed-trace-list">
+                @foreach (CodexOutputEvent item in GovernedTraceEvents)
+                {
+                    <article class="governed-trace-item">
+                        <div class="governed-trace-main">
+                            <div class="governed-trace-row">
+                                <strong>@item.Source</strong>
+                                <span>@item.Timestamp.ToLocalTime().ToString("HH:mm:ss")</span>
+                            </div>
+                            <div class="governed-trace-row governed-trace-meta">
+                                <span>@item.Type</span>
+                                <span>@(string.IsNullOrWhiteSpace(item.Status) ? "-" : item.Status)</span>
+                            </div>
+                            <div class="governed-trace-detail">@item.Detail</div>
+                        </div>
+                    </article>
+                }
+            </div>
+        }
+    </section>
+
     <OutputTab Events="@Events" EmptyText="No tool events yet." />
 </div>
 
@@ -51,6 +87,9 @@
 
     [Parameter]
     public IReadOnlyList<CodexOutputEvent> Events { get; set; } = [];
+
+    [Parameter]
+    public string? CurrentEditSessionId { get; set; }
 
     [Parameter]
     public bool Busy { get; set; }
@@ -65,4 +104,49 @@
         PermissionRequests
             .Where(request => request.Status.Equals("pending", StringComparison.OrdinalIgnoreCase))
             .ToArray();
+
+    private IReadOnlyList<CodexOutputEvent> GovernedTraceEvents =>
+        Events
+            .Where(IsGovernedTraceEvent)
+            .OrderBy(item => item.Timestamp)
+            .TakeLast(30)
+            .ToArray();
+
+    private static bool IsGovernedTraceEvent(CodexOutputEvent item)
+    {
+        return item.Source switch
+        {
+            "get_current_task" => true,
+            "get_workspace" => true,
+            "get_watched_solution_digest" => true,
+            "get_edit_session_state" => true,
+            "declare_session_files" => true,
+            "refresh_file" => true,
+            "new_file" => true,
+            "replace_text_in_file" => true,
+            "replace_span_in_file" => true,
+            "submit_symbol" => true,
+            "add_field" => true,
+            "add_property" => true,
+            "add_method" => true,
+            "add_constructor" => true,
+            "add_nested_type" => true,
+            "set_type_partial" => true,
+            "add_using" => true,
+            "remove_using" => true,
+            "remove_symbol" => true,
+            "stage_current_candidate_for_review" => true,
+            "stage_edit_session_for_review" => true,
+            "load_next_session_review" => true,
+            "accept_staged_review" => true,
+            "reject_staged_review" => true,
+            "rebuild_solution_index" => true,
+            _ => false
+        };
+    }
+
+    private static string DisplayValue(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "<no active edit session>" : value;
+    }
 }

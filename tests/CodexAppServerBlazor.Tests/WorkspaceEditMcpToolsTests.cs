@@ -66,6 +66,44 @@ public sealed class WorkspaceEditMcpToolsTests
     }
 
     [Fact]
+    public void DeclareSessionFiles_records_complete_governed_file_set()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        WorkspaceEditMcpTools tools = CreateTools(repository.RootPath);
+        string firstPath = Path.Combine("Features", "First.cs");
+        string secondPath = Path.Combine("Features", "Second.cs");
+        CreateWatchedFile(repository.RootPath, firstPath, "public class First { }");
+        CreateWatchedFile(repository.RootPath, secondPath, "public class Second { }");
+
+        EditSessionStatus first = tools.RefreshFile(firstPath);
+        EditSessionPlan plan = tools.DeclareSessionFiles(first.EditSessionId, [firstPath, secondPath]);
+
+        Assert.Equal(first.EditSessionId, plan.SessionId);
+        Assert.Equal(2, plan.DeclaredWatchedFilePaths.Count);
+        Assert.Contains(Path.GetFullPath(Path.Combine(repository.RootPath, firstPath)), plan.DeclaredWatchedFilePaths, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains(Path.GetFullPath(Path.Combine(repository.RootPath, secondPath)), plan.DeclaredWatchedFilePaths, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void AddFileToSession_appends_one_file_to_existing_governed_session()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        WorkspaceEditMcpTools tools = CreateTools(repository.RootPath);
+        string firstPath = Path.Combine("Features", "First.cs");
+        string secondPath = Path.Combine("Features", "Second.cs");
+        CreateWatchedFile(repository.RootPath, firstPath, "public class First { }");
+        CreateWatchedFile(repository.RootPath, secondPath, "public class Second { }");
+
+        EditSessionStatus first = tools.RefreshFile(firstPath);
+        EditSessionPlan plan = tools.AddFileToSession(first.EditSessionId, secondPath);
+
+        Assert.Equal(first.EditSessionId, plan.SessionId);
+        Assert.Equal(2, plan.DeclaredWatchedFilePaths.Count);
+        Assert.Contains(Path.GetFullPath(Path.Combine(repository.RootPath, firstPath)), plan.DeclaredWatchedFilePaths, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains(Path.GetFullPath(Path.Combine(repository.RootPath, secondPath)), plan.DeclaredWatchedFilePaths, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void GetEditSessionState_returns_no_session_before_refresh()
     {
         using TemporaryRepository repository = TemporaryRepository.Create();

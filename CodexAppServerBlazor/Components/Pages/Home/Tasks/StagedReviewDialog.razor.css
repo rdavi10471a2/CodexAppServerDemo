@@ -6,6 +6,61 @@
     width: 100%;
     min-height: 0;
     min-width: 0;
+    position: relative;
+}
+
+.staged-review-busy-overlay {
+    align-items: center;
+    backdrop-filter: blur(1px);
+    background: rgba(248, 250, 252, 0.82);
+    border-radius: 10px;
+    display: flex;
+    inset: 0;
+    justify-content: center;
+    position: absolute;
+    z-index: 30;
+}
+
+.staged-review-busy-card {
+    align-items: center;
+    background: #ffffff;
+    border: 1px solid #d7e1ea;
+    border-radius: 12px;
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
+    display: grid;
+    gap: 8px;
+    justify-items: center;
+    max-width: 24rem;
+    padding: 1.1rem 1.25rem;
+    text-align: center;
+}
+
+.staged-review-busy-card strong {
+    color: #172033;
+}
+
+.staged-review-busy-card span {
+    color: #52657a;
+    font-size: 0.92rem;
+}
+
+.staged-review-busy-spinner {
+    animation: staged-review-spin 0.85s linear infinite;
+    border: 3px solid #dbe7f3;
+    border-top-color: #0f766e;
+    border-radius: 999px;
+    height: 2rem;
+    width: 2rem;
+}
+
+@keyframes staged-review-spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 .staged-review-dialog-header {

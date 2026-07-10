@@ -139,6 +139,55 @@ public sealed class WorkspaceReviewMcpToolsTests
     }
 
     [Fact]
+    public async Task StageCurrentCandidateForReview_rejects_declared_multi_file_session()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        string projectPath = CreateProject(repository.RootPath);
+        string firstPath = CreateWatchedFile(repository.RootPath, "Components/Layout/MainLayout.razor", "<h1>One</h1>");
+        string secondPath = CreateWatchedFile(repository.RootPath, "Components/Pages/Home.razor", "<p>Two</p>");
+
+        WorkflowEditService workflowService = CreateWorkflowService(repository.RootPath, projectPath);
+        EditSessionStatus first = workflowService.Refresh(firstPath);
+        workflowService.DeclareSessionFiles(first.EditSessionId, [firstPath, secondPath]);
+        workflowService.Refresh(secondPath, first.EditSessionId);
+        File.WriteAllText(first.WorkingFilePath, "<h1>Changed</h1>");
+
+        HarnessWorkspaceReviewService service = CreateReviewService(repository.RootPath);
+        StubReviewElicitor elicitor = new(ReviewDecision.Accepted);
+
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.StageCurrentCandidateForReviewAsync(elicitor, firstPath, first.EditSessionId));
+
+        Assert.Contains("stage_edit_session_for_review", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task StageEditSessionForReview_stages_declared_files_under_one_review_session()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        string projectPath = CreateProject(repository.RootPath);
+        string firstPath = CreateWatchedFile(repository.RootPath, "Components/Layout/MainLayout.razor", "<h1>One</h1>");
+        string secondPath = CreateWatchedFile(repository.RootPath, "Components/Pages/Home.razor", "<p>Two</p>");
+
+        WorkflowEditService workflowService = CreateWorkflowService(repository.RootPath, projectPath);
+        EditSessionStatus first = workflowService.Refresh(firstPath);
+        EditSessionStatus second = workflowService.Refresh(secondPath, first.EditSessionId);
+        workflowService.DeclareSessionFiles(first.EditSessionId, [firstPath, secondPath]);
+        File.WriteAllText(first.WorkingFilePath, "<h1>Changed One</h1>");
+        File.WriteAllText(second.WorkingFilePath, "<p>Changed Two</p>");
+
+        HarnessWorkspaceReviewService service = CreateReviewService(repository.RootPath);
+        StubReviewElicitor elicitor = new(ReviewDecision.Accepted);
+
+        StageForReviewResult result = await service.StageEditSessionForReviewAsync(elicitor, first.EditSessionId);
+        IReadOnlyList<StagedReviewQueueItem> pending = service.ListPending();
+
+        Assert.Equal(1, elicitor.CallCount);
+        Assert.Equal(2, pending.Count(item => item.SessionId.Equals(first.EditSessionId, StringComparison.Ordinal)));
+        Assert.Contains($"/review/session/{first.EditSessionId}", result.ReviewUrl, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AcceptStagedReview_defers_index_refresh_until_last_file_in_session()
     {
         using TemporaryRepository repository = TemporaryRepository.Create();

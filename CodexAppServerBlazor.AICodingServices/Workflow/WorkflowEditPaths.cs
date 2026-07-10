@@ -36,6 +36,8 @@ public sealed class WorkflowEditPaths
 
     public string StagedRecordsRoot => Path.Combine(StagedRoot, "records");
 
+    public string SessionPlansRoot => Path.Combine(MetadataRoot, "sessions");
+
     public string GetRelativeWatchedPath(string watchedFilePath)
     {
         string fullFilePath = Path.GetFullPath(watchedFilePath);
@@ -73,5 +75,10 @@ public sealed class WorkflowEditPaths
     public string GetStagedRecordPath(string stagedRecordId)
     {
         return Path.Combine(StagedRecordsRoot, $"{stagedRecordId}.json");
+    }
+
+    public string GetSessionPlanPath(string sessionId)
+    {
+        return Path.Combine(SessionPlansRoot, $"{sessionId}.json");
     }
 }

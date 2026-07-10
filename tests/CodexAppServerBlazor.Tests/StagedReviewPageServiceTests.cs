@@ -147,6 +147,33 @@ public sealed class StagedReviewPageServiceTests
     }
 
     [Fact]
+    public void CleanupResolvedSessionArtifacts_removes_manifest_working_file_and_session_plan_after_accept()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        string projectPath = CreateProject(repository.RootPath);
+        string sourcePath = CreateWatchedFile(repository.RootPath, "Example.cs", "namespace Example; public sealed class Example { }");
+        CodingServicesSettings settings = CreateSettings(repository.RootPath, projectPath);
+        WorkflowEditService workflowService = new(settings);
+        EditSessionStatus status = workflowService.Refresh(sourcePath);
+        string sessionId = status.EditSessionId;
+        File.WriteAllText(status.WorkingFilePath, "namespace Example; public sealed class Example { public int Value => 2; }");
+        workflowService.DeclareSessionFiles(sessionId, [sourcePath]);
+        StagedEditRecord record = workflowService.Stage(sourcePath, sessionId: sessionId);
+        RecordReviewReady(workflowService, record.StagedRecordId);
+
+        StagedReviewPageService service = CreateService(repository.RootPath, projectPath);
+        service.Accept(repository.RootPath, record.StagedRecordId);
+
+        int cleaned = workflowService.CleanupResolvedSessionArtifacts(sessionId);
+        EditSessionStatus postStatus = workflowService.GetStatus(sourcePath);
+
+        Assert.True(cleaned > 0);
+        Assert.False(File.Exists(status.WorkingFilePath));
+        Assert.False(postStatus.HasSession);
+        Assert.Null(workflowService.GetSessionPlan(sessionId));
+    }
+
+    [Fact]
     public void Accept_defers_index_refresh_until_terminal_session_record()
     {
         using TemporaryRepository repository = TemporaryRepository.Create();

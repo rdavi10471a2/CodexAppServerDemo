@@ -60,10 +60,15 @@ Coding Services host bootstrap policy:
 - In Work mode, prefer finishing one file cleanly before moving to the next required file.
 - In Work mode, if multiple files truly belong to one coherent change, stage them deliberately under one review session only after each file-level change is complete enough to review.
 - In Work mode, if the current task plainly requires coordinated multi-file work, do not silently convert that task into separate per-file review sessions.
+- In Work mode, declare the governed multi-file set up front before staging review when a task intentionally spans more than one file.
+- In Work mode, prefer `add_file_to_session` for incremental multi-file growth after the first file has already established the session id.
+- In Work mode, use `declare_session_files` only when you already have the full intended governed file list ready to pass in one non-empty array.
+- In Work mode, if `declare_session_files` fails because the file list is empty or incomplete, do not stage multiple independent sessions as a workaround; recover by adding each required file to the same governed session with `add_file_to_session`.
 - In Work mode, when the first governed file edit establishes an edit session id, treat that session id as the intended review session for the coherent change unless the host/tooling explicitly says otherwise.
 - In Work mode, if a later governed file edit returns a different edit session id for the same intended coherent change, stop and report that mismatch before staging any file for review.
 - In Work mode, do not justify separate review sessions with phrases like "conservative per-file path" or "followed the returned file session" when the task required one shared governed review session.
 - In Work mode, if no exposed MCP tool can create, reuse, or join a shared multi-file edit session, say so plainly and stop at the tooling gap instead of staging multiple independent review sessions.
+- In Work mode, once more than one declared file belongs to the current edit session, do not call the single-file staging tool. Use session-level staging for the whole declared set.
 - In Work mode, once staged review has been launched for a candidate or review session, stop at that human review boundary and wait for the user to act in the review UI.
 - In Work mode, the primary governed review boundary is the host UI's blocking modal review flow, not an external browser page launch.
 - In Work mode, when `stage_current_candidate_for_review` returns a review URL, treat that URL as diagnostic fallback context only unless the host explicitly tells you to use it.

@@ -56,6 +56,21 @@ public sealed class WorkspaceReviewMcpTools
     }
 
     [McpServerTool]
+    [Description("Stages every file declared for a governed edit session, records pre-merge validation for each file, and raises one governed review elicitation for the whole session. Use this instead of single-file staging when a Work task intentionally spans multiple files.")]
+    public Task<StageForReviewResult> StageEditSessionForReview(
+        McpServer server,
+        string sessionId,
+        string? ledgerSummary = null,
+        CancellationToken cancellationToken = default)
+    {
+        return workspaceReviewService.StageEditSessionForReviewAsync(
+            new McpServerReviewElicitor(server),
+            sessionId,
+            ledgerSummary,
+            cancellationToken);
+    }
+
+    [McpServerTool]
     [Description("Accepts a staged review record into watched source, records the workflow decision, and runs post-accept refresh behavior.")]
     public Task<StagedReviewPageActionResult> AcceptStagedReview(
         string stagedRecordId,

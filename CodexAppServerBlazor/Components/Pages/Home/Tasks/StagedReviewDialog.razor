@@ -6,6 +6,17 @@
 @inject IStagedReviewPageService StagedReviewPageService
 
 <div class="staged-review-dialog">
+    @if (actionBusy)
+    {
+        <div class="staged-review-busy-overlay" role="status" aria-live="polite" aria-busy="true">
+            <div class="staged-review-busy-card">
+                <div class="staged-review-busy-spinner"></div>
+                <strong>Applying review decision</strong>
+                <span>Updating source, rebuilding review state, and waiting for reindex if needed.</span>
+            </div>
+        </div>
+    }
+
     <div class="staged-review-dialog-header">
         <div>
             <h3>@DialogTitle</h3>

@@ -219,7 +219,12 @@
                     </RadzenTabsItem>
 
                     <RadzenTabsItem Text="Tools">
-                        <OutputTab Events="@snapshot.ToolEvents" EmptyText="No tool events yet." />
+                        <ToolsTab PermissionRequests="@snapshot.PermissionRequests"
+                                  Events="@snapshot.ToolEvents"
+                                  CurrentEditSessionId="@WorkspaceState.CurrentEditSessionId"
+                                  Busy="@busy"
+                                  DenyPermission="@DenyPermissionRequest"
+                                  CancelPermission="@CancelPermissionRequest" />
                     </RadzenTabsItem>
                 </Tabs>
             </RadzenTabs>

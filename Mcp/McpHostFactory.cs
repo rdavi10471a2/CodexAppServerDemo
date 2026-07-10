@@ -94,6 +94,16 @@ public static class McpHostFactory
                 },
                 new
                 {
+                    name = "declare_session_files",
+                    description = "Declares the complete governed file set for an edit session before multi-file staging."
+                },
+                new
+                {
+                    name = "add_file_to_session",
+                    description = "Adds one watched workspace file to an existing governed edit session and returns the updated declared file set."
+                },
+                new
+                {
                     name = "replace_text_in_file",
                     description = "Replaces text inside the governed Working candidate for a workspace file."
                 },
@@ -180,7 +190,12 @@ public static class McpHostFactory
                 new
                 {
                     name = "stage_current_candidate_for_review",
-                    description = "Stages the current governed Working candidate for a workspace file into review using an explicit sessionId and returns the review URL."
+                    description = "Stages the current governed Working candidate for a single workspace file into review using an explicit sessionId and returns the review URL. Do not use this for multi-file sessions."
+                },
+                new
+                {
+                    name = "stage_edit_session_for_review",
+                    description = "Stages every declared file in a governed edit session, then raises one review for the whole session."
                 },
                 new
                 {
