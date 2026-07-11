@@ -1,7 +1,7 @@
 namespace CodexAppServerBlazor.AICodingServices.Data;
 
 public sealed record SolutionIndexQueryResult(
-    MonitorStatusResult Status,
+    SolutionIndexStatusResult Status,
     IReadOnlyList<IndexedDocumentRow> Files,
     IReadOnlyList<IndexedSymbolRow> Symbols,
     string Scope,

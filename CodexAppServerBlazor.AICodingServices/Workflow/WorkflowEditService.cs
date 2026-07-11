@@ -267,7 +267,7 @@ public sealed class WorkflowEditService
             status.Classification = string.IsNullOrWhiteSpace(status.StagedHash)
                 ? "new-file-empty-working"
                 : "new-file-pending";
-            status.Message = "New-file candidate exists only in the monitor-owned Working folder.";
+            status.Message = "New-file candidate exists only in the governed Working folder.";
             return status;
         }
 

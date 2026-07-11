@@ -1,6 +1,6 @@
 namespace CodexAppServerBlazor.AICodingServices.Data;
 
-public sealed class MonitorStatusResult
+public sealed class SolutionIndexStatusResult
 {
     public string WatchedSolutionPath { get; set; } = string.Empty;
 

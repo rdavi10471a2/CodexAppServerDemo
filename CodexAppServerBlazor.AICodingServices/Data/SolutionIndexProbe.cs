@@ -2,7 +2,7 @@ using Microsoft.Data.Sqlite;
 
 namespace CodexAppServerBlazor.AICodingServices.Data;
 
-// Read-only SQLite verification probe over the monitor-owned solution index.
+// Read-only SQLite verification probe over the watched-solution index.
 //
 // These queries are deliberately product-grade, not test-only: they are (1) the authoritative cross-project
 // dependency lookup the scoped-refresh path needs (the inbound-reference closure), and (2) the assertion surface

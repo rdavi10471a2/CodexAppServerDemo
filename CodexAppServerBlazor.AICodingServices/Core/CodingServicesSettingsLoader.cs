@@ -147,11 +147,11 @@ public static class CodingServicesSettingsLoader
     }
 
     private static IReadOnlyList<string> LoadReviewToolCandidatePaths(
-        JsonElement monitor,
+        JsonElement codingServices,
         string resolvedRepositoryRoot,
         string settingsDirectory)
     {
-        if (TryGetStringArray(monitor, "ReviewToolCandidatePaths", out IReadOnlyList<string> configuredPaths))
+        if (TryGetStringArray(codingServices, "ReviewToolCandidatePaths", out IReadOnlyList<string> configuredPaths))
         {
             return ResolvePaths(configuredPaths, settingsDirectory);
         }

@@ -39,24 +39,7 @@ public sealed class WorkspaceReviewMcpTools
     }
 
     [McpServerTool]
-    [Description("Stages the current governed Working candidate for a workspace file into review, records pre-merge validation, and raises a governed accept/reject elicitation to the operator. sessionId is required and must identify the active multi-file governed edit session. This call BLOCKS until the operator answers: accept applies the change to watched source, decline rejects it, cancel leaves it pending. The returned review URL is diagnostic only.")]
-    public Task<StageForReviewResult> StageCurrentCandidateForReview(
-        McpServer server,
-        string watchedFilePath,
-        string sessionId,
-        string? ledgerSummary = null,
-        CancellationToken cancellationToken = default)
-    {
-        return workspaceReviewService.StageCurrentCandidateForReviewAsync(
-            new McpServerReviewElicitor(server),
-            watchedFilePath,
-            sessionId,
-            ledgerSummary,
-            cancellationToken);
-    }
-
-    [McpServerTool]
-    [Description("Stages every file declared for a governed edit session, records pre-merge validation for each file, and raises one governed review elicitation for the whole session. Use this instead of single-file staging when a Work task intentionally spans multiple files.")]
+    [Description("Stages every file declared for a governed edit session, records pre-merge validation for each file, and raises one governed review elicitation for the whole session. This is the only governed staging path, including queue-of-one single-file sessions.")]
     public Task<StageForReviewResult> StageEditSessionForReview(
         McpServer server,
         string sessionId,

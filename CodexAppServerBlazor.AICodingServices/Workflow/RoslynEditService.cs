@@ -40,7 +40,8 @@ public sealed class RoslynEditService
             ? namespaceName ?? path
             : namespaceName;
         string[] files = ResolveSourceMapFiles(path, effectiveScope, requestedNamespace).ToArray();
-        RoslynSourceMapFile[] mappedFiles = files.Select(MapFile).Select(file => ShapeSourceMapFile(file, effectiveMode)).ToArray();
+        DiRegistrationIndex diRegistrations = BuildDiRegistrationIndex(EnumerateSourceFiles(paths.Settings.WatchedProjectFolder));
+        RoslynSourceMapFile[] mappedFiles = files.Select(file => MapFile(file, diRegistrations)).Select(file => ShapeSourceMapFile(file, effectiveMode)).ToArray();
         string watchedProjectAlias = new DirectoryInfo(paths.Settings.WatchedProjectFolder).Name;
         string? watchedProjectFolder = effectiveMode.Equals("full", StringComparison.OrdinalIgnoreCase)
             ? paths.Settings.WatchedProjectFolder
@@ -286,14 +287,14 @@ public sealed class RoslynEditService
         throw new FileNotFoundException("Source map target file or folder was not found.", targetPath);
     }
 
-    private RoslynSourceMapFile MapFile(string filePath)
+    private RoslynSourceMapFile MapFile(string filePath, DiRegistrationIndex diRegistrations)
     {
         string relativePath = paths.GetRelativeWatchedPath(filePath);
         SyntaxTree tree = CSharpSyntaxTree.ParseText(File.ReadAllText(filePath), path: filePath);
         CompilationUnitSyntax root = tree.GetCompilationUnitRoot();
         Diagnostic[] diagnostics = root.GetDiagnostics().Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).ToArray();
         RoslynSourceMapSymbol[] symbols = diagnostics.Length == 0
-            ? root.DescendantNodes().OfType<MemberDeclarationSyntax>().Where(IsOutlineMember).Select(member => MapSymbol(tree, relativePath, member)).ToArray()
+            ? root.DescendantNodes().OfType<MemberDeclarationSyntax>().Where(IsOutlineMember).Select(member => MapSymbol(tree, relativePath, member, diRegistrations)).ToArray()
             : [];
         return new RoslynSourceMapFile(
             filePath,
@@ -308,17 +309,24 @@ public sealed class RoslynEditService
             diagnostics.Select(MapDiagnostic).Take(10).ToArray());
     }
 
-    private static RoslynSourceMapSymbol MapSymbol(SyntaxTree tree, string relativePath, MemberDeclarationSyntax member)
+    private static RoslynSourceMapSymbol MapSymbol(SyntaxTree tree, string relativePath, MemberDeclarationSyntax member, DiRegistrationIndex diRegistrations)
     {
         FileLinePositionSpan span = tree.GetLineSpan(member.Span);
         string? elisionReason = GetElisionReason(relativePath, member);
+        string symbolKind = SymbolKind(member);
+        string symbolName = SymbolName(member);
+        string? containingType = BuildContainingType(member);
+        string symbolIdentity = BuildDiSymbolIdentity(member);
+        RoslynSourceMapDiRegistration[]? matchedDiRegistrations = IsDiTrackableSymbolKind(symbolKind)
+            ? diRegistrations.Find(symbolIdentity, symbolKind, symbolName, containingType)
+            : null;
         return new RoslynSourceMapSymbol(
-            SymbolKind(member),
-            SymbolName(member),
+            symbolKind,
+            symbolName,
             BuildStableSymbolKey(relativePath, member),
             BuildSignature(member),
             BuildNamespace(member),
-            BuildContainingType(member),
+            containingType,
             span.StartLinePosition.Line + 1,
             span.EndLinePosition.Line + 1,
             ComputeHash(member.ToFullString()),
@@ -337,6 +345,8 @@ public sealed class RoslynEditService
             HasModifier(member, SyntaxKind.OverrideKeyword),
             HasModifier(member, SyntaxKind.VirtualKeyword),
             HasModifier(member, SyntaxKind.PartialKeyword),
+            matchedDiRegistrations is { Length: > 0 } ? true : null,
+            matchedDiRegistrations,
             elisionReason is not null ? true : null,
             elisionReason);
     }
@@ -430,7 +440,9 @@ public sealed class RoslynEditService
                 IsAsync = null,
                 IsOverride = null,
                 IsVirtual = null,
-                IsPartial = null
+                IsPartial = null,
+                IsDiRegistered = null,
+                DiRegistrations = null
             };
         }
 
@@ -443,7 +455,8 @@ public sealed class RoslynEditService
                 Modifiers = NullIfEmpty(symbol.Modifiers),
                 ParameterTypes = NullIfEmpty(symbol.ParameterTypes),
                 ParameterNames = NullIfEmpty(symbol.ParameterNames),
-                IsPartial = symbol.IsPartial == true ? true : null
+                IsPartial = symbol.IsPartial == true ? true : null,
+                DiRegistrations = null
             };
         }
 
@@ -456,7 +469,8 @@ public sealed class RoslynEditService
                 Modifiers = NullIfEmpty(symbol.Modifiers),
                 ParameterTypes = NullIfEmpty(symbol.ParameterTypes),
                 ParameterNames = NullIfEmpty(symbol.ParameterNames),
-                IsPartial = symbol.IsPartial == true ? true : null
+                IsPartial = symbol.IsPartial == true ? true : null,
+                DiRegistrations = NullIfEmpty(symbol.DiRegistrations)
             };
         }
 
@@ -478,7 +492,8 @@ public sealed class RoslynEditService
             IsAsync = null,
             IsOverride = null,
             IsVirtual = null,
-            IsPartial = symbol.IsPartial == true ? true : null
+            IsPartial = symbol.IsPartial == true ? true : null,
+            DiRegistrations = null
         };
     }
 
@@ -490,6 +505,300 @@ public sealed class RoslynEditService
     private static IReadOnlyList<T>? NullIfEmpty<T>(IReadOnlyList<T>? values)
     {
         return values is null || values.Count == 0 ? null : values;
+    }
+
+    private DiRegistrationIndex BuildDiRegistrationIndex(IEnumerable<string> filePaths)
+    {
+        Dictionary<string, List<RoslynSourceMapDiRegistration>> registrations = new(StringComparer.Ordinal);
+        foreach (string filePath in filePaths)
+        {
+            string relativePath = paths.GetRelativeWatchedPath(filePath);
+            SyntaxTree tree = CSharpSyntaxTree.ParseText(File.ReadAllText(filePath), path: filePath);
+            CompilationUnitSyntax root = tree.GetCompilationUnitRoot();
+            foreach (InvocationExpressionSyntax invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
+            {
+                foreach (DiRegistrationCandidate candidate in ExtractDiRegistrationCandidates(invocation, tree, relativePath))
+                {
+                    AddDiRegistration(registrations, candidate.ServiceIdentity, candidate.ToRegistration("service"));
+                    if (!string.Equals(candidate.ImplementationIdentity, candidate.ServiceIdentity, StringComparison.Ordinal))
+                    {
+                        AddDiRegistration(registrations, candidate.ImplementationIdentity, candidate.ToRegistration("implementation"));
+                    }
+                }
+            }
+        }
+
+        return new DiRegistrationIndex(registrations.ToDictionary(
+            pair => pair.Key,
+            pair => (IReadOnlyList<RoslynSourceMapDiRegistration>)pair.Value
+                .OrderBy(item => item.RegistrationFile, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(item => item.RegistrationLine ?? int.MaxValue)
+                .ThenBy(item => item.RegistrationMethod, StringComparer.Ordinal)
+                .ToArray(),
+            StringComparer.Ordinal));
+    }
+
+    private static void AddDiRegistration(
+        IDictionary<string, List<RoslynSourceMapDiRegistration>> registrations,
+        string? identity,
+        RoslynSourceMapDiRegistration registration)
+    {
+        if (string.IsNullOrWhiteSpace(identity))
+        {
+            return;
+        }
+
+        if (!registrations.TryGetValue(identity, out List<RoslynSourceMapDiRegistration>? items))
+        {
+            items = [];
+            registrations[identity] = items;
+        }
+
+        if (!items.Contains(registration))
+        {
+            items.Add(registration);
+        }
+    }
+
+    private static IEnumerable<DiRegistrationCandidate> ExtractDiRegistrationCandidates(
+        InvocationExpressionSyntax invocation,
+        SyntaxTree tree,
+        string relativePath)
+    {
+        if (IsNestedDescriptorRegistration(invocation))
+        {
+            yield break;
+        }
+
+        if (!TryGetInvocationName(invocation.Expression, out string methodName))
+        {
+            yield break;
+        }
+
+        FileLinePositionSpan span = tree.GetLineSpan(invocation.Span);
+        string registrationMethod = methodName;
+        if (string.Equals(methodName, "Add", StringComparison.Ordinal) || string.Equals(methodName, "TryAdd", StringComparison.Ordinal))
+        {
+            if (!TryExtractDescriptorCandidate(invocation.ArgumentList.Arguments, registrationMethod, relativePath, span.StartLinePosition.Line + 1, out DiRegistrationCandidate? descriptorCandidate)
+                || descriptorCandidate is null)
+            {
+                yield break;
+            }
+
+            yield return descriptorCandidate;
+            yield break;
+        }
+
+        if (!TryGetLifetime(methodName, out string lifetime))
+        {
+            yield break;
+        }
+
+        string[] genericArguments = GetInvocationGenericArguments(invocation.Expression);
+        bool isKeyed = methodName.Contains("Keyed", StringComparison.Ordinal);
+
+        string? serviceIdentity = null;
+        string? implementationIdentity = null;
+        if (genericArguments.Length >= 2)
+        {
+            serviceIdentity = NormalizeTypeIdentity(genericArguments[0]);
+            implementationIdentity = NormalizeTypeIdentity(genericArguments[1]);
+        }
+        else if (genericArguments.Length == 1)
+        {
+            serviceIdentity = NormalizeTypeIdentity(genericArguments[0]);
+            implementationIdentity = serviceIdentity;
+        }
+
+        ArgumentSyntax[] args = invocation.ArgumentList.Arguments.ToArray();
+        int typeArgStart = isKeyed ? 1 : 0;
+        if (serviceIdentity is null && args.Length > typeArgStart)
+        {
+            serviceIdentity = TryExtractTypeOfIdentity(args[typeArgStart].Expression);
+        }
+
+        if (implementationIdentity is null)
+        {
+            int implementationIndex = isKeyed ? 2 : 1;
+            if (args.Length > implementationIndex)
+            {
+                implementationIdentity = TryExtractTypeOfIdentity(args[implementationIndex].Expression);
+            }
+        }
+
+        if (serviceIdentity is null && implementationIdentity is null)
+        {
+            yield break;
+        }
+
+        serviceIdentity ??= implementationIdentity;
+        implementationIdentity ??= serviceIdentity;
+        if (serviceIdentity is null || implementationIdentity is null)
+        {
+            yield break;
+        }
+
+        yield return new DiRegistrationCandidate(
+            serviceIdentity,
+            implementationIdentity,
+            lifetime,
+            registrationMethod,
+            isKeyed,
+            relativePath,
+            span.StartLinePosition.Line + 1);
+    }
+
+    private static bool TryExtractDescriptorCandidate(
+        SeparatedSyntaxList<ArgumentSyntax> arguments,
+        string outerMethodName,
+        string relativePath,
+        int lineNumber,
+        out DiRegistrationCandidate? candidate)
+    {
+        candidate = null;
+        if (arguments.Count == 0 || arguments[0].Expression is not InvocationExpressionSyntax descriptorInvocation)
+        {
+            return false;
+        }
+
+        if (!TryGetInvocationName(descriptorInvocation.Expression, out string descriptorMethodName) || !TryGetLifetime(descriptorMethodName, out string lifetime))
+        {
+            return false;
+        }
+
+        string[] genericArguments = GetInvocationGenericArguments(descriptorInvocation.Expression);
+        bool isKeyed = descriptorMethodName.Contains("Keyed", StringComparison.Ordinal);
+        string registrationMethod = $"{outerMethodName}:{descriptorMethodName}";
+        string? serviceIdentity = null;
+        string? implementationIdentity = null;
+
+        if (genericArguments.Length >= 2)
+        {
+            serviceIdentity = NormalizeTypeIdentity(genericArguments[0]);
+            implementationIdentity = NormalizeTypeIdentity(genericArguments[1]);
+        }
+        else if (genericArguments.Length == 1)
+        {
+            serviceIdentity = NormalizeTypeIdentity(genericArguments[0]);
+            implementationIdentity = serviceIdentity;
+        }
+
+        ArgumentSyntax[] descriptorArgs = descriptorInvocation.ArgumentList.Arguments.ToArray();
+        int typeArgStart = isKeyed ? 1 : 0;
+        if (serviceIdentity is null && descriptorArgs.Length > typeArgStart)
+        {
+            serviceIdentity = TryExtractTypeOfIdentity(descriptorArgs[typeArgStart].Expression);
+        }
+
+        if (implementationIdentity is null)
+        {
+            int implementationIndex = isKeyed ? 2 : 1;
+            if (descriptorArgs.Length > implementationIndex)
+            {
+                implementationIdentity = TryExtractTypeOfIdentity(descriptorArgs[implementationIndex].Expression);
+            }
+        }
+
+        serviceIdentity ??= implementationIdentity;
+        implementationIdentity ??= serviceIdentity;
+        if (serviceIdentity is null || implementationIdentity is null)
+        {
+            return false;
+        }
+
+        candidate = new DiRegistrationCandidate(
+            serviceIdentity,
+            implementationIdentity,
+            lifetime,
+            registrationMethod,
+            isKeyed,
+            relativePath,
+            lineNumber);
+        return true;
+    }
+
+    private static bool IsNestedDescriptorRegistration(InvocationExpressionSyntax invocation)
+    {
+        return invocation.Parent is ArgumentSyntax
+            && invocation.Parent.Parent is BaseArgumentListSyntax
+            && invocation.Parent.Parent.Parent is InvocationExpressionSyntax parentInvocation
+            && TryGetInvocationName(parentInvocation.Expression, out string parentMethodName)
+            && (string.Equals(parentMethodName, "Add", StringComparison.Ordinal)
+                || string.Equals(parentMethodName, "TryAdd", StringComparison.Ordinal));
+    }
+
+    private static bool TryGetInvocationName(ExpressionSyntax expression, out string methodName)
+    {
+        methodName = expression switch
+        {
+            MemberAccessExpressionSyntax memberAccess => memberAccess.Name.Identifier.ValueText,
+            MemberBindingExpressionSyntax memberBinding => memberBinding.Name.Identifier.ValueText,
+            IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
+            GenericNameSyntax generic => generic.Identifier.ValueText,
+            _ => string.Empty
+        };
+        return !string.IsNullOrWhiteSpace(methodName);
+    }
+
+    private static string[] GetInvocationGenericArguments(ExpressionSyntax expression)
+    {
+        TypeArgumentListSyntax? typeArgumentList = expression switch
+        {
+            MemberAccessExpressionSyntax { Name: GenericNameSyntax genericName } => genericName.TypeArgumentList,
+            MemberBindingExpressionSyntax { Name: GenericNameSyntax genericName } => genericName.TypeArgumentList,
+            GenericNameSyntax genericName => genericName.TypeArgumentList,
+            _ => null
+        };
+
+        return typeArgumentList?.Arguments.Select(argument => NormalizeTypeIdentity(argument.ToString())).ToArray() ?? [];
+    }
+
+    private static bool TryGetLifetime(string methodName, out string lifetime)
+    {
+        lifetime = methodName switch
+        {
+            var name when name.Contains("Scoped", StringComparison.Ordinal) => "scoped",
+            var name when name.Contains("Singleton", StringComparison.Ordinal) => "singleton",
+            var name when name.Contains("Transient", StringComparison.Ordinal) => "transient",
+            _ => string.Empty
+        };
+        return lifetime.Length > 0;
+    }
+
+    private static string? TryExtractTypeOfIdentity(ExpressionSyntax expression)
+    {
+        return expression switch
+        {
+            TypeOfExpressionSyntax typeOfExpression => NormalizeTypeIdentity(typeOfExpression.Type.ToString()),
+            ObjectCreationExpressionSyntax objectCreation when objectCreation.Type is not null => NormalizeTypeIdentity(objectCreation.Type.ToString()),
+            ImplicitObjectCreationExpressionSyntax => null,
+            _ => null
+        };
+    }
+
+    private static bool IsDiTrackableSymbolKind(string symbolKind)
+    {
+        return symbolKind is "class" or "interface" or "record" or "struct";
+    }
+
+    private static string BuildDiSymbolIdentity(MemberDeclarationSyntax member)
+    {
+        string symbolName = SymbolName(member);
+        string? containingType = BuildContainingType(member);
+        string qualifiedTypeName = string.IsNullOrWhiteSpace(containingType)
+            ? symbolName
+            : $"{containingType}.{symbolName}";
+        string namespaceName = BuildNamespace(member);
+        return string.IsNullOrWhiteSpace(namespaceName)
+            ? NormalizeTypeIdentity(qualifiedTypeName)
+            : NormalizeTypeIdentity($"{namespaceName}.{qualifiedTypeName}");
+    }
+
+    private static string NormalizeTypeIdentity(string value)
+    {
+        string normalized = value.Replace("global::", string.Empty, StringComparison.Ordinal).Trim();
+        int genericTickIndex = normalized.IndexOf('<', StringComparison.Ordinal);
+        return genericTickIndex >= 0 ? normalized[..genericTickIndex] : normalized;
     }
 
     private EditSessionStatus EnsureSession(string watchedFilePath)
@@ -513,7 +822,7 @@ public sealed class RoslynEditService
             updatedStatus.WorkingFilePath,
             updatedStatus.RelativePath,
             "updated",
-            $"{operation} updated the monitor-owned Working candidate.",
+            $"{operation} updated the governed Working candidate.",
             FileHash.Compute(updatedStatus.WorkingFilePath),
             updatedStatus.OperationCount,
             string.IsNullOrWhiteSpace(updatedStatus.ManifestJson) ? null : updatedStatus.ManifestJson,
@@ -731,7 +1040,7 @@ public sealed class RoslynEditService
         string extension = Path.GetExtension(path);
         if (extension.Equals(".razor", StringComparison.OrdinalIgnoreCase))
         {
-            return $"{toolName} uses the C# Roslyn workflow surface and cannot read or edit Razor markup directly. Use a .razor.cs code-behind file for Roslyn symbol tools, or use get_file/submit_file/replace_text_in_file/replace_span_in_file against the monitor-owned Working candidate for markup edits.";
+            return $"{toolName} uses the C# Roslyn workflow surface and cannot read or edit Razor markup directly. Use a .razor.cs code-behind file for Roslyn symbol tools, or use get_file/submit_file/replace_text_in_file/replace_span_in_file against the governed Working candidate for markup edits.";
         }
 
         return $"{toolName} currently supports C# source files only. Use a .cs file for Roslyn symbol tools, or use the text/file workflow tools for {extension} files.";
@@ -1246,5 +1555,70 @@ public sealed class RoslynEditService
     private static string ComputeHash(string text)
     {
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
+    }
+
+    private sealed record DiRegistrationCandidate(
+        string ServiceIdentity,
+        string ImplementationIdentity,
+        string Lifetime,
+        string RegistrationMethod,
+        bool IsKeyed,
+        string RelativePath,
+        int LineNumber)
+    {
+        public RoslynSourceMapDiRegistration ToRegistration(string matchRole)
+        {
+            return new RoslynSourceMapDiRegistration(
+                matchRole,
+                Lifetime,
+                RegistrationMethod,
+                ServiceIdentity,
+                ImplementationIdentity,
+                IsKeyed ? true : null,
+                RelativePath,
+                LineNumber);
+        }
+    }
+
+    private sealed class DiRegistrationIndex
+    {
+        private readonly IReadOnlyDictionary<string, IReadOnlyList<RoslynSourceMapDiRegistration>> registrationsByIdentity;
+
+        public DiRegistrationIndex(IReadOnlyDictionary<string, IReadOnlyList<RoslynSourceMapDiRegistration>> registrationsByIdentity)
+        {
+            this.registrationsByIdentity = registrationsByIdentity;
+        }
+
+        public RoslynSourceMapDiRegistration[]? Find(string identity, string symbolKind, string symbolName, string? containingType)
+        {
+            List<RoslynSourceMapDiRegistration> matches = [];
+            AddMatches(matches, identity);
+
+            if (symbolKind.Equals("interface", StringComparison.OrdinalIgnoreCase))
+            {
+                AddMatches(matches, symbolName);
+            }
+
+            if (!string.IsNullOrWhiteSpace(containingType))
+            {
+                AddMatches(matches, NormalizeTypeIdentity($"{containingType}.{symbolName}"));
+            }
+
+            AddMatches(matches, symbolName);
+            return matches.Count == 0 ? null : matches.Distinct().ToArray();
+        }
+
+        private void AddMatches(List<RoslynSourceMapDiRegistration> target, string? identity)
+        {
+            if (string.IsNullOrWhiteSpace(identity))
+            {
+                return;
+            }
+
+            if (registrationsByIdentity.TryGetValue(identity, out IReadOnlyList<RoslynSourceMapDiRegistration>? registrations))
+            {
+                target.AddRange(registrations);
+            }
+        }
     }
 }

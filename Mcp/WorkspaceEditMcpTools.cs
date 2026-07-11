@@ -109,6 +109,13 @@ public sealed class WorkspaceEditMcpTools
     }
 
     [McpServerTool]
+    [Description("Returns a Roslyn source map for C# files in the selected workspace. Source-map symbols now include dependency-injection registration hints when the workspace registers them through IServiceCollection patterns such as AddScoped, AddSingleton, AddTransient, TryAdd, keyed registrations, or ServiceDescriptor factories.")]
+    public RoslynSourceMapResult GetSourceMap(string? path, string scope = "auto", string mode = "auto", string? namespaceName = null)
+    {
+        return workspaceEditService.GetSourceMap(path, scope, mode, namespaceName);
+    }
+
+    [McpServerTool]
     [Description("Reads a single symbol body from a C# source file in the governed Working candidate using a Roslyn symbol selector JSON payload.")]
     public RoslynSymbolReadResult GetSymbol(string watchedFilePath, string symbolSelectorJson)
     {

@@ -35,7 +35,7 @@ public sealed class SolutionIndexQueryService
         return new SolutionIndexQueryService(settings, store, databasePath);
     }
 
-    public MonitorStatusResult GetMonitorStatus()
+    public SolutionIndexStatusResult GetIndexStatus()
     {
         bool databaseExists = File.Exists(DatabasePath);
         SolutionIndexSummary summary = databaseExists
@@ -48,7 +48,7 @@ public sealed class SolutionIndexQueryService
         IReadOnlyList<IndexedRelationshipRow> relationships = databaseExists ? store.ListRelationships() : [];
         bool rebuildRequired = databaseExists && new SolutionIndexDatabase(DatabasePath).IsFullRebuildRequired();
 
-        return new MonitorStatusResult
+        return new SolutionIndexStatusResult
         {
             WatchedSolutionPath = settings.WatchedSolutionPath,
             RuntimeRoot = settings.RuntimeRoot,
@@ -114,7 +114,7 @@ public sealed class SolutionIndexQueryService
         (int clampedSymbolLimit, bool symbolsClamped) = ClampLimit(maxSymbols, MaxSymbolLimit);
 
         return new SolutionIndexQueryResult(
-            GetMonitorStatus(),
+            GetIndexStatus(),
             scopedDocuments.Take(clampedFileLimit).ToArray(),
             scopedSymbols.Take(clampedSymbolLimit).ToArray(),
             normalizedScope,

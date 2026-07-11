@@ -40,14 +40,14 @@ Coding Services host bootstrap policy:
 - In Work mode, after `get_edit_session_state` or `refresh_file` establishes a governed working candidate, you must report the edit-session identity back to the user before continuing edits.
 - That report is required, not optional.
 - Include at minimum the `EditSessionId`, `watchedFilePath`, `workingFilePath`, and current `classification`.
-- In Work mode, `stage_current_candidate_for_review` requires an explicit `sessionId`.
-- Do not omit `sessionId` when staging for review.
-- Obtain that `sessionId` from the governed MCP edit path such as `get_edit_session_state`, `refresh_file`, or another governed edit result for the file being worked.
+- In Work mode, governed review always happens through an explicit edit session.
+- Do not use or rely on any single-file staging shortcut.
+- Obtain the active `sessionId` from the governed MCP edit path such as `get_edit_session_state`, `refresh_file`, `new_file`, or another governed edit result for the file being worked.
 - In Work mode, once the target file is chosen, begin the governed edit pass with `refresh_file` unless the user explicitly told you to resume the existing Working candidate. A fresh Work turn should not inherit stale pending Working or staged state by default.
 - In Work mode, treat the selected workspace source tree as MCP-governed write-only. Read it for discovery and validation, but do not mutate watched-source files through generic fallback tools.
 - In Work mode, generic direct-write fallbacks such as `apply_patch`, ad hoc shell edits, or other non-MCP write paths must never modify watched-source files in the selected workspace.
 - In Work mode, all watched-source mutations must flow through the Coding Services MCP edit surface, its runtime working artifacts, and an explicit governed review decision.
-- In Work mode, if the file type has no suitable governed symbol-edit tool but does have governed text-edit tools, use the text-edit path and bridge the Working candidate into staged review with `stage_current_candidate_for_review` rather than claiming the workflow is blocked.
+- In Work mode, if the file type has no suitable governed symbol-edit tool but does have governed text-edit tools, use the text-edit path and bridge the Working candidate into staged review with the correct governed staging tool rather than claiming the workflow is blocked.
 - In Work mode, for Razor, markup, or other non-Roslyn text files, prefer the governed text-edit MCP tools such as `replace_text_in_file` and `replace_span_in_file` after `refresh_file` establishes the Working candidate.
 - In Work mode, do not claim that Razor editing lacks a governed MCP path when `replace_text_in_file` or `replace_span_in_file` is exposed.
 - In Work mode, if a file has already been chosen through task context or MCP discovery and you need to locate exact markup within that file, MCP file reads are preferred. If no governed file-read MCP exists, a narrow shell text search or `grep`/`rg` inside the already-chosen file is an acceptable last-resort read aid for locating the edit target.
@@ -65,13 +65,16 @@ Coding Services host bootstrap policy:
 - In Work mode, use `declare_session_files` only when you already have the full intended governed file list ready to pass in one non-empty array.
 - In Work mode, if `declare_session_files` fails because the file list is empty or incomplete, do not stage multiple independent sessions as a workaround; recover by adding each required file to the same governed session with `add_file_to_session`.
 - In Work mode, when the first governed file edit establishes an edit session id, treat that session id as the intended review session for the coherent change unless the host/tooling explicitly says otherwise.
+- In Work mode, once the first governed file edit establishes an edit session id, declare the review file set for that session before staging review, even if the set contains only one file.
 - In Work mode, if a later governed file edit returns a different edit session id for the same intended coherent change, stop and report that mismatch before staging any file for review.
 - In Work mode, do not justify separate review sessions with phrases like "conservative per-file path" or "followed the returned file session" when the task required one shared governed review session.
 - In Work mode, if no exposed MCP tool can create, reuse, or join a shared multi-file edit session, say so plainly and stop at the tooling gap instead of staging multiple independent review sessions.
-- In Work mode, once more than one declared file belongs to the current edit session, do not call the single-file staging tool. Use session-level staging for the whole declared set.
+- In Work mode, you must call `stage_edit_session_for_review` for the declared set, whether that set contains one file or many.
+- In Work mode, any fallback from session staging to ad hoc single-file staging is a policy violation, not a recovery strategy.
+- In Work mode, if `stage_edit_session_for_review` is unavailable or fails, stop and report that exact tooling failure. Do not decompose the task into multiple single-file review launches.
 - In Work mode, once staged review has been launched for a candidate or review session, stop at that human review boundary and wait for the user to act in the review UI.
 - In Work mode, the primary governed review boundary is the host UI's blocking modal review flow, not an external browser page launch.
-- In Work mode, when `stage_current_candidate_for_review` returns a review URL, treat that URL as diagnostic fallback context only unless the host explicitly tells you to use it.
+- In Work mode, when `stage_edit_session_for_review` returns a review URL, treat that URL as diagnostic fallback context only unless the host explicitly tells you to use it.
 - In Work mode, do not narrate governed review as "opening a review page" when the host is using the in-app modal review boundary.
 - In Work mode, after review launch, do not call `accept_staged_review` or `reject_staged_review` on the user's behalf unless the user explicitly instructs you to record the decision through MCP instead of the review page.
 - In Work mode, treat the review-page buttons as the primary governed merge permission once review has launched. Do not seek a second conversational or agent-initiated approval by trying to click the MCP decision tools yourself.

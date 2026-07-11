@@ -57,90 +57,9 @@ public sealed class HarnessWorkspaceReviewService
         string? ledgerSummary = null,
         CancellationToken cancellationToken = default)
     {
-        if (elicitor is null)
-        {
-            throw new ArgumentNullException(nameof(elicitor));
-        }
-
-        if (string.IsNullOrWhiteSpace(sessionId))
-        {
-            throw new InvalidOperationException(
-                "stage_current_candidate_for_review requires a non-empty sessionId. Call get_edit_session_state or another governed edit MCP first and pass the active edit session id explicitly.");
-        }
-
-        string workspaceRoot = GetWorkspaceRoot();
-        CodingServicesSettings settings = settingsProvider.GetSettings(workspaceRoot);
-        WorkflowEditService workflowService = new(settings);
-        IStagedReviewPageService reviewService = CreateReviewService();
-        string fullWatchedPath = ResolveWatchedFilePath(workspaceRoot, watchedFilePath);
-        EditSessionPlan? sessionPlan = workflowService.GetSessionPlan(sessionId);
-        if (sessionPlan is not null
-            && sessionPlan.DeclaredWatchedFilePaths.Count > 1)
-        {
-            throw new InvalidOperationException(
-                $"Governed edit session '{sessionId}' declares {sessionPlan.DeclaredWatchedFilePaths.Count} files. Use stage_edit_session_for_review so the whole multi-file queue is staged before review.");
-        }
-
-        EditSessionStatus editSession = workflowService.EnsureEditableSession(fullWatchedPath);
-        if (string.IsNullOrWhiteSpace(editSession.EditSessionId))
-        {
-            throw new InvalidOperationException(
-                $"No active governed edit session exists for '{editSession.RelativePath}'. Refresh the file through governed edit MCP first, then retry staging.");
-        }
-        if (!editSession.EditSessionId.Equals(sessionId, StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(
-                $"Active governed edit session mismatch for '{editSession.RelativePath}'. Expected sessionId '{sessionId}', but the working candidate is bound to '{editSession.EditSessionId}'. Refresh the file with the intended sessionId before staging.");
-        }
-
-        StagedEditRecord record = workflowService.Stage(fullWatchedPath, ledgerSummary, sessionId);
-        workspaceState.SetCurrentEditSessionId(record.SessionId);
-        record = workflowService.PrepareReviewFileForLaunch(record.StagedRecordId);
-
-        PreMergeValidationResult validation = new PreMergeValidationService().Validate(settings, record);
-        record = workflowService.RecordPreMergeValidation(record.StagedRecordId, validation, forceApproved: false);
-
-        string reviewUrl = BuildReviewUrl(workspaceRoot, record);
-        string sessionLabel = string.IsNullOrWhiteSpace(record.SessionId) ? "single-file review" : $"edit session '{record.SessionId}'";
-        string launchMessage = validation.IsError
-            ? $"Governed review elicitation raised for {sessionLabel}, but pre-merge validation reported issues. ReviewUrl (diagnostic only): {reviewUrl}"
-            : $"Governed review elicitation raised for {sessionLabel}. ReviewUrl (diagnostic only): {reviewUrl}";
-        record = workflowService.RecordDiffLaunch(record.StagedRecordId, launched: true, launchMessage);
-
-        int pendingCount = reviewService.ListPending(workspaceRoot)
-            .Count(item => item.SessionId.Equals(record.SessionId, StringComparison.Ordinal));
-
-        // The elicitation is the block. Approving it opens the host review dialog, which resolves every
-        // staged file in the edit session (accept/reject per file) while this call stays suspended. The
-        // decision here reflects whether the operator completed the review session, not a single file:
-        // the per-file accept/reject was applied by the dialog, so we only report the resulting state.
-        ReviewDecision decision = await elicitor.RequestDecisionAsync(
-            new ReviewElicitationRequest(
-                record.SessionId,
-                record.RelativePath,
-                sessionLabel,
-                pendingCount,
-                validation.IsError,
-                validation.Status,
-                validation.DiagnosticCount,
-                reviewUrl),
-            cancellationToken);
-
-        if (decision == ReviewDecision.Cancelled)
-        {
-            throw new OperationCanceledException(
-                $"Governed review cancelled for {sessionLabel}. Staged record '{record.StagedRecordId}' left pending.");
-        }
-
-        StagedEditRecord refreshedRecord = workflowService.GetStagedRecord(record.StagedRecordId);
-        string completionMessage = decision == ReviewDecision.Accepted
-            ? $"Governed review session completed for {sessionLabel} via the review dialog."
-            : $"Governed review declined for {sessionLabel}; staged items left for the operator.";
-        return new StageForReviewResult(
-            workflowService.CreateSummary(refreshedRecord),
-            validation,
-            reviewUrl,
-            completionMessage);
+        cancellationToken.ThrowIfCancellationRequested();
+        throw new NotSupportedException(
+            "Single-file governed staging is retired. Declare the edit-session file set and use stage_edit_session_for_review for every governed review, including queue-of-one single-file sessions.");
     }
 
     public async Task<StageForReviewResult> StageEditSessionForReviewAsync(

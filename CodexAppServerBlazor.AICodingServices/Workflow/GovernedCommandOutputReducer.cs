@@ -199,7 +199,7 @@ public sealed class GovernedCommandOutputReducer
         {
             warnings.Add(new GovernedCommandWarning(
                 GovernedCommandWarningCode.RuntimeWorkingRead,
-                "Command targets the monitor-owned Working tree; use MCP workflow tools unless debugging workflow internals."));
+                "Command targets the governed Working tree; use MCP workflow tools unless debugging workflow internals."));
         }
 
         return warnings;

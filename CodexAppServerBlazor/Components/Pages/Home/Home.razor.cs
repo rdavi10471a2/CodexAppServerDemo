@@ -41,6 +41,7 @@ public partial class Home : IDisposable, IAsyncDisposable
     private string codexExe = "codex";
     private string repoRoot = string.Empty;
     private string instanceLabel = string.Empty;
+    private readonly string runStartedAtDisplay = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
     private string sourceFilter = string.Empty;
     private string? selectedSourcePath;
     private int? selectedSourceLine;

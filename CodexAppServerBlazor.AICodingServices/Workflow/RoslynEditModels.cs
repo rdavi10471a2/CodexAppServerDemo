@@ -96,12 +96,24 @@ public sealed record RoslynSourceMapSymbol(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? IsOverride = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? IsVirtual = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? IsPartial = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? IsDiRegistered = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<RoslynSourceMapDiRegistration>? DiRegistrations = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? IsElided = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ElisionReason = null);
 
 public sealed record RoslynSourceMapAttribute(
     string Name,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Arguments = null);
+
+public sealed record RoslynSourceMapDiRegistration(
+    string MatchRole,
+    string Lifetime,
+    string RegistrationMethod,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ServiceType = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ImplementationType = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? IsKeyed = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? RegistrationFile = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? RegistrationLine = null);
 
 public sealed record RoslynSourceMapNarrowingSuggestion(
     string RelativePath,

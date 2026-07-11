@@ -122,6 +122,12 @@ public sealed class HarnessWorkspaceEditService
         return new RoslynEditService(context.Settings).GetFileOutline(context.WatchedFilePath);
     }
 
+    public RoslynSourceMapResult GetSourceMap(string? path, string scope = "auto", string mode = "auto", string? namespaceName = null)
+    {
+        WorkspaceEditContext workspace = ResolveWorkspace();
+        return new RoslynEditService(workspace.Settings).GetSourceMap(path, scope, mode, namespaceName);
+    }
+
     public RoslynSymbolReadResult GetSymbol(string watchedFilePath, string symbolSelectorJson)
     {
         WorkspaceEditContext context = ResolveContext(watchedFilePath);

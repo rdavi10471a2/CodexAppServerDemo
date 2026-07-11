@@ -12,11 +12,14 @@
                 <img style="height:40px; width:auto;" src="/images/cs_header_logo_56x40.svg" alt="Coding Services" />                <h1>Coding Services</h1>
             </div>
         </div>
-        <RadzenButton Icon="dock_to_left"
-                      Text="@(isConnectionPanelVisible ? "Hide Connection" : "Show Connection")"
-                      ButtonStyle="ButtonStyle.Light"
-                      Size="ButtonSize.Small"
-                      Click="@ToggleConnectionPanel" />
+        <div class="command-bar-actions">
+            <div class="run-started-at">Run Started At : @runStartedAtDisplay</div>
+            <RadzenButton Icon="dock_to_left"
+                          Text="@(isConnectionPanelVisible ? "Hide Connection" : "Show Connection")"
+                          ButtonStyle="ButtonStyle.Light"
+                          Size="ButtonSize.Small"
+                          Click="@ToggleConnectionPanel" />
+        </div>
     </header>
 
     <main class="control-grid" @ref="controlGrid">

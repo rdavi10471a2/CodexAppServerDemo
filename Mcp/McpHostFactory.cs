@@ -189,13 +189,8 @@ public static class McpHostFactory
                 },
                 new
                 {
-                    name = "stage_current_candidate_for_review",
-                    description = "Stages the current governed Working candidate for a single workspace file into review using an explicit sessionId and returns the review URL. Do not use this for multi-file sessions."
-                },
-                new
-                {
                     name = "stage_edit_session_for_review",
-                    description = "Stages every declared file in a governed edit session, then raises one review for the whole session."
+                    description = "Stages every declared file in a governed edit session, then raises one review for the whole session. This is required for both single-file and multi-file governed review."
                 },
                 new
                 {

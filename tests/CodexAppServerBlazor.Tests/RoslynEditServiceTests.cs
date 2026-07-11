@@ -33,6 +33,72 @@ public sealed class RoslynEditServiceTests
     }
 
     [Fact]
+    public void GetSourceMap_reports_dependency_injection_registrations_for_registered_symbols()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        RoslynEditService service = new(CreateSettings(repository.RootPath));
+        CreateWatchedFile(
+            repository.RootPath,
+            "Program.cs",
+            """
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.DependencyInjection.Extensions;
+
+            var services = new ServiceCollection();
+            services.AddScoped<IGreeter, Greeter>();
+            services.AddKeyedSingleton<IClock, SystemClock>("utc");
+            services.TryAdd(ServiceDescriptor.Transient(typeof(IFormatter), typeof(DefaultFormatter)));
+            """);
+        CreateWatchedFile(
+            repository.RootPath,
+            "Features/DiServices.cs",
+            """
+            public interface IGreeter {}
+            public sealed class Greeter : IGreeter {}
+
+            public interface IClock {}
+            public sealed class SystemClock : IClock {}
+
+            public interface IFormatter {}
+            public sealed class DefaultFormatter : IFormatter {}
+            """);
+
+        RoslynSourceMapResult result = service.GetSourceMap(path: null, mode: "detail");
+
+        RoslynSourceMapSymbol greeterInterface = FindSourceMapSymbol(result, "interface", "IGreeter");
+        RoslynSourceMapSymbol greeterImplementation = FindSourceMapSymbol(result, "class", "Greeter");
+        RoslynSourceMapSymbol clockImplementation = FindSourceMapSymbol(result, "class", "SystemClock");
+        RoslynSourceMapSymbol formatterInterface = FindSourceMapSymbol(result, "interface", "IFormatter");
+
+        Assert.True(greeterInterface.IsDiRegistered);
+        Assert.Contains(greeterInterface.DiRegistrations!, registration =>
+            registration.MatchRole == "service"
+            && registration.Lifetime == "scoped"
+            && registration.RegistrationMethod == "AddScoped"
+            && registration.ServiceType == "IGreeter"
+            && registration.ImplementationType == "Greeter");
+
+        Assert.True(greeterImplementation.IsDiRegistered);
+        Assert.Contains(greeterImplementation.DiRegistrations!, registration =>
+            registration.MatchRole == "implementation"
+            && registration.ServiceType == "IGreeter"
+            && registration.ImplementationType == "Greeter");
+
+        Assert.True(clockImplementation.IsDiRegistered);
+        Assert.Contains(clockImplementation.DiRegistrations!, registration =>
+            registration.Lifetime == "singleton"
+            && registration.IsKeyed == true
+            && registration.RegistrationMethod == "AddKeyedSingleton");
+
+        Assert.True(formatterInterface.IsDiRegistered);
+        Assert.Contains(formatterInterface.DiRegistrations!, registration =>
+            registration.Lifetime == "transient"
+            && registration.RegistrationMethod == "TryAdd:Transient"
+            && registration.ServiceType == "IFormatter"
+            && registration.ImplementationType == "DefaultFormatter");
+    }
+
+    [Fact]
     public void SubmitSymbol_replaces_existing_method_body()
     {
         using TemporaryRepository repository = TemporaryRepository.Create();
@@ -535,6 +601,13 @@ public sealed class RoslynEditServiceTests
             MemberKind: memberKind,
             Name: name,
             ParameterTypes: parameterTypes));
+    }
+
+    private static RoslynSourceMapSymbol FindSourceMapSymbol(RoslynSourceMapResult result, string kind, string name)
+    {
+        return result.Files
+            .SelectMany(file => file.Symbols)
+            .Single(symbol => symbol.Kind == kind && symbol.Name == name);
     }
 
     private static void AssertFileContains(string path, string expected)
