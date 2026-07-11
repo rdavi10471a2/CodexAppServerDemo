@@ -59,7 +59,7 @@
 
 ## Governed Review Gate
 
-- The staged-review accept/reject decision is a governed gate driven by MCP elicitation. `StageCurrentCandidateForReview` BLOCKS until the operator answers the elicitation; do not expect it to return before the human decides.
+- The staged-review accept/reject decision is a governed gate driven by MCP elicitation. The session-first governed review launch BLOCKS until the operator answers the elicitation; do not expect it to return before the human decides.
 - Accept applies the staged change to watched source; decline rejects and leaves source unchanged; cancel leaves it pending. Never work around the gate by calling accept/reject tools to bypass an unanswered elicitation.
 - The gate depends on `mcp_elicitations = true` in the granular approval policy (`CodexAppServerClient.CreateApprovalPolicy`). The elicitation uses the same server-request channel as security/sandbox approvals.
 - `GovernedReviewCoordinatorService` is dormant; the elicitation path in `HarnessWorkspaceReviewService` (`IReviewElicitor`) is the live gate. See WORKFLOW.md "Governed Review Gate (Elicitation)".

@@ -50,6 +50,11 @@ public sealed class HarnessWorkspaceReviewService
         return CreateReviewService().Reject(GetWorkspaceRoot(), stagedRecordId);
     }
 
+#if false
+    // Retired single-file staging entrypoint.
+    // Keep this block only as a short-lived breadcrumb while the session-first
+    // governed review path settles. The live MCP surface must flow through
+    // stage_edit_session_for_review after declare_session_files/add_file_to_session.
     public async Task<StageForReviewResult> StageCurrentCandidateForReviewAsync(
         IReviewElicitor elicitor,
         string watchedFilePath,
@@ -61,6 +66,7 @@ public sealed class HarnessWorkspaceReviewService
         throw new NotSupportedException(
             "Single-file governed staging is retired. Declare the edit-session file set and use stage_edit_session_for_review for every governed review, including queue-of-one single-file sessions.");
     }
+#endif
 
     public async Task<StageForReviewResult> StageEditSessionForReviewAsync(
         IReviewElicitor elicitor,

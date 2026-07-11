@@ -144,7 +144,7 @@ The staged-review gate uses MCP elicitation as the BLOCK, bridged into the exist
 session review dialog which does the per-file work. It is not an out-of-band UI hold.
 
 Flow:
-1. `StageCurrentCandidateForReview` (MCP tool) stages the candidate, runs pre-merge
+1. The governed session-review launch MCP path stages the declared session files, runs pre-merge
    validation, then raises an MCP elicitation and BLOCKS on it. The elicitation
    message carries a `[[aim-review:<sessionId>]]` marker.
 2. The elicitation travels the app-server (stdio) `mcpServer/elicitation/request`
