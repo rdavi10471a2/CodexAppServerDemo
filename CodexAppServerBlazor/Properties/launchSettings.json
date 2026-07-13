@@ -1,14 +1,25 @@
 {
   "$schema": "https://json.schemastore.org/launchsettings.json",
-    "profiles": {
-      "http": {
-        "commandName": "Project",
-        "dotnetRunMessages": true,
-        "launchBrowser": true,
-        "applicationUrl": "http://localhost:5205",
-        "environmentVariables": {
-          "ASPNETCORE_ENVIRONMENT": "Development"
-        }
+  "profiles": {
+    "http": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": true,
+      "applicationUrl": "http://localhost:5205",
+      "commandLineArgs": "--Workspace:DefaultCwd=C:\\SchemaStudioWebViewer1 --Workspace:PersistencePath=runtime/app-state/selected-workspace-vs-schema.txt --CodingServices:RuntimeRoot=C:\\CodexAppServerWinForms_corrected\\runtime --CodingServices:WatchedSolutionPath=C:\\SchemaStudioWebViewer1\\SchemaStudioWebViewer.sln",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    },
+    "self-http": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": true,
+      "applicationUrl": "http://localhost:5215",
+      "commandLineArgs": "--Workspace:DefaultCwd=C:\\CodexAppServerWinForms_corrected --Workspace:PersistencePath=runtime/app-state/selected-workspace-vs-self.txt --CodingServices:RuntimeRoot=C:\\CodexAppServerWinForms_corrected\\runtime --CodingServices:WatchedSolutionPath=C:\\CodexAppServerWinForms_corrected\\CodexAppServerWinForms_corrected.slnx",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
       }
     }
   }
+}

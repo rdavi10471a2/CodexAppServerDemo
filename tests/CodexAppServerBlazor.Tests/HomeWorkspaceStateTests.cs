@@ -30,7 +30,7 @@ public sealed class HomeWorkspaceStateTests
 
         WorkspaceState workspaceState = new();
         WorkspaceSelectionService workspaceSelectionService = new(configuration);
-        CodingServicesSettingsProvider settingsProvider = new(configuration);
+        CodingServicesSettingsProvider settingsProvider = TestServiceFactory.CreateSettingsProvider(configuration, workspace.RootPath);
         SourceWorkspaceService sourceWorkspaceService = new(settingsProvider);
         WorkspaceWorkflowContextService workspaceWorkflowContextService = new(sourceWorkspaceService);
         TaskWorkflowContextService taskWorkflowContextService = new(settingsProvider);

@@ -32,7 +32,7 @@ public sealed class WorkspaceStartupHostedServiceTests
                 .Build();
             WorkspaceState workspaceState = new();
             WorkspaceSelectionService workspaceSelectionService = new(configuration);
-            CodingServicesSettingsProvider settingsProvider = new(configuration);
+            CodingServicesSettingsProvider settingsProvider = TestServiceFactory.CreateSettingsProvider(configuration, repository.RootPath);
             SourceWorkspaceService sourceWorkspaceService = new(settingsProvider);
             WorkspaceWorkflowContextService workspaceWorkflowContextService = new(sourceWorkspaceService);
             TaskWorkflowContextService taskWorkflowContextService = new(settingsProvider);
@@ -92,7 +92,7 @@ public sealed class WorkspaceStartupHostedServiceTests
         WorkspaceState workspaceState = new();
         WorkspaceSelectionService workspaceSelectionService = new(configuration);
         workspaceSelectionService.SaveWorkspace(persistedWorkspace.RootPath);
-        CodingServicesSettingsProvider settingsProvider = new(configuration);
+        CodingServicesSettingsProvider settingsProvider = TestServiceFactory.CreateSettingsProvider(configuration, defaultWorkspace.RootPath);
         SourceWorkspaceService sourceWorkspaceService = new(settingsProvider);
         WorkspaceWorkflowContextService workspaceWorkflowContextService = new(sourceWorkspaceService);
         TaskWorkflowContextService taskWorkflowContextService = new(settingsProvider);

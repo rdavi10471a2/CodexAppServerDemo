@@ -87,6 +87,7 @@ public sealed class HarnessWorkspaceReviewService
         string workspaceRoot = GetWorkspaceRoot();
         CodingServicesSettings settings = settingsProvider.GetSettings(workspaceRoot);
         WorkflowEditService workflowService = new(settings);
+        WorkflowRunRecorder recorder = CreateRecorder(settings, "stage-edit-session-for-review", out string runId);
         IStagedReviewPageService reviewService = CreateReviewService();
         EditSessionPlan sessionPlan = workflowService.GetSessionPlan(sessionId)
             ?? throw new InvalidOperationException(
@@ -96,67 +97,148 @@ public sealed class HarnessWorkspaceReviewService
             throw new InvalidOperationException(
                 $"Edit session '{sessionId}' does not declare any files. Declare the intended files before staging.");
         }
+        workflowService.EnsureDeclaredSessionFilesReadyForReview(sessionId);
 
-        List<StagedEditRecord> stagedRecords = [];
-        List<PreMergeValidationResult> validations = [];
-        foreach (string declaredPath in sessionPlan.DeclaredWatchedFilePaths)
+        recorder.Stage(runId, "mcp-stage-edit-session-start", new Dictionary<string, string>
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            string fullWatchedPath = ResolveWatchedFilePath(workspaceRoot, declaredPath);
-            EditSessionStatus editSession = workflowService.EnsureEditableSession(fullWatchedPath);
-            if (!editSession.EditSessionId.Equals(sessionId, StringComparison.Ordinal))
+            ["workspaceRoot"] = workspaceRoot,
+            ["sessionId"] = sessionId,
+            ["ledgerSummary"] = ledgerSummary ?? string.Empty,
+            ["declaredPathCount"] = sessionPlan.DeclaredWatchedFilePaths.Count.ToString(),
+            ["declaredPaths"] = string.Join(" | ", sessionPlan.DeclaredRelativePaths),
+            ["currentWorkspaceSessionId"] = workspaceState.CurrentEditSessionId ?? "<null>"
+        });
+
+        try
+        {
+            List<StagedEditRecord> stagedRecords = [];
+            List<PreMergeValidationResult> validations = [];
+            foreach (string declaredPath in sessionPlan.DeclaredWatchedFilePaths)
             {
-                throw new InvalidOperationException(
-                    $"Active governed edit session mismatch for '{editSession.RelativePath}'. Expected sessionId '{sessionId}', but the working candidate is bound to '{editSession.EditSessionId}'.");
+                cancellationToken.ThrowIfCancellationRequested();
+                string fullWatchedPath = ResolveWatchedFilePath(workspaceRoot, declaredPath);
+                recorder.Stage(runId, "mcp-stage-edit-session-file-start", new Dictionary<string, string>
+                {
+                    ["sessionId"] = sessionId,
+                    ["declaredPath"] = declaredPath,
+                    ["relativePath"] = workflowService.GetRelativePathForDiagnostics(fullWatchedPath)
+                });
+
+                EditSessionStatus editSession = workflowService.EnsureEditableSession(fullWatchedPath);
+                recorder.Stage(runId, "mcp-stage-edit-session-file-status", new Dictionary<string, string>
+                {
+                    ["sessionId"] = sessionId,
+                    ["relativePath"] = editSession.RelativePath,
+                    ["resolvedEditSessionId"] = editSession.EditSessionId,
+                    ["classification"] = editSession.Classification,
+                    ["workingFilePath"] = editSession.WorkingFilePath
+                });
+
+                if (!editSession.EditSessionId.Equals(sessionId, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"Active governed edit session mismatch for '{editSession.RelativePath}'. Expected sessionId '{sessionId}', but the working candidate is bound to '{editSession.EditSessionId}'.");
+                }
+
+                StagedEditRecord record = workflowService.Stage(fullWatchedPath, ledgerSummary, sessionId);
+                record = workflowService.PrepareReviewFileForLaunch(record.StagedRecordId);
+                PreMergeValidationResult validation = new PreMergeValidationService().Validate(settings, record);
+                record = workflowService.RecordPreMergeValidation(record.StagedRecordId, validation, forceApproved: false);
+                string launchMessage = validation.IsError
+                    ? $"Governed review elicitation raised for edit session '{sessionId}', but pre-merge validation reported issues."
+                    : $"Governed review elicitation raised for edit session '{sessionId}'.";
+                record = workflowService.RecordDiffLaunch(record.StagedRecordId, launched: true, launchMessage);
+                recorder.Stage(runId, "mcp-stage-edit-session-file-staged", new Dictionary<string, string>
+                {
+                    ["sessionId"] = sessionId,
+                    ["relativePath"] = record.RelativePath,
+                    ["stagedRecordId"] = record.StagedRecordId,
+                    ["validationStatus"] = validation.Status,
+                    ["validationIsError"] = validation.IsError.ToString(),
+                    ["validationDiagnostics"] = validation.DiagnosticCount.ToString()
+                });
+                stagedRecords.Add(record);
+                validations.Add(validation);
             }
 
-            StagedEditRecord record = workflowService.Stage(fullWatchedPath, ledgerSummary, sessionId);
-            record = workflowService.PrepareReviewFileForLaunch(record.StagedRecordId);
-            PreMergeValidationResult validation = new PreMergeValidationService().Validate(settings, record);
-            record = workflowService.RecordPreMergeValidation(record.StagedRecordId, validation, forceApproved: false);
-            string launchMessage = validation.IsError
-                ? $"Governed review elicitation raised for edit session '{sessionId}', but pre-merge validation reported issues."
-                : $"Governed review elicitation raised for edit session '{sessionId}'.";
-            record = workflowService.RecordDiffLaunch(record.StagedRecordId, launched: true, launchMessage);
-            stagedRecords.Add(record);
-            validations.Add(validation);
+            workspaceState.SetCurrentEditSessionId(sessionId);
+            string reviewUrl = BuildReviewUrl(workspaceRoot, stagedRecords[0]);
+            int pendingCount = reviewService.ListPending(workspaceRoot)
+                .Count(item => item.SessionId.Equals(sessionId, StringComparison.Ordinal));
+            bool validationIsError = validations.Any(result => result.IsError);
+            PreMergeValidationResult summaryValidation = validations.FirstOrDefault(result => result.IsError)
+                ?? validations[0];
+            recorder.Stage(runId, "mcp-stage-edit-session-elicitation", new Dictionary<string, string>
+            {
+                ["sessionId"] = sessionId,
+                ["reviewUrl"] = reviewUrl,
+                ["pendingCount"] = pendingCount.ToString(),
+                ["validationStatus"] = summaryValidation.Status,
+                ["validationIsError"] = validationIsError.ToString(),
+                ["validationDiagnostics"] = validations.Sum(result => result.DiagnosticCount).ToString(),
+                ["stagedRecordIds"] = string.Join(" | ", stagedRecords.Select(record => record.StagedRecordId))
+            });
+
+            ReviewDecision decision = await elicitor.RequestDecisionAsync(
+                new ReviewElicitationRequest(
+                    sessionId,
+                    string.Join(", ", sessionPlan.DeclaredRelativePaths),
+                    $"edit session '{sessionId}'",
+                    pendingCount,
+                    validationIsError,
+                    summaryValidation.Status,
+                    validations.Sum(result => result.DiagnosticCount),
+                    reviewUrl),
+                cancellationToken);
+            recorder.Stage(runId, "mcp-stage-edit-session-elicitation-complete", new Dictionary<string, string>
+            {
+                ["sessionId"] = sessionId,
+                ["decision"] = decision.ToString(),
+                ["reviewUrl"] = reviewUrl
+            });
+
+            if (decision == ReviewDecision.Cancelled)
+            {
+                throw new OperationCanceledException(
+                    $"Governed review cancelled for edit session '{sessionId}'. Staged records left pending.");
+            }
+
+            StagedEditRecord refreshedRecord = workflowService.GetStagedRecord(stagedRecords[0].StagedRecordId);
+            string completionMessage = decision == ReviewDecision.Accepted
+                ? $"Governed review session completed for edit session '{sessionId}' via the review dialog."
+                : $"Governed review declined for edit session '{sessionId}'; staged items left for the operator.";
+            recorder.Stage(runId, "mcp-stage-edit-session-success", new Dictionary<string, string>
+            {
+                ["sessionId"] = sessionId,
+                ["decision"] = decision.ToString(),
+                ["reviewUrl"] = reviewUrl,
+                ["summaryRecordId"] = refreshedRecord.StagedRecordId,
+                ["summaryRelativePath"] = refreshedRecord.RelativePath,
+                ["validationStatus"] = summaryValidation.Status,
+                ["validationDiagnostics"] = summaryValidation.DiagnosticCount.ToString()
+            });
+            return new StageForReviewResult(
+                workflowService.CreateSummary(refreshedRecord),
+                summaryValidation,
+                reviewUrl,
+                completionMessage);
         }
-
-        workspaceState.SetCurrentEditSessionId(sessionId);
-        string reviewUrl = BuildReviewUrl(workspaceRoot, stagedRecords[0]);
-        int pendingCount = reviewService.ListPending(workspaceRoot)
-            .Count(item => item.SessionId.Equals(sessionId, StringComparison.Ordinal));
-        bool validationIsError = validations.Any(result => result.IsError);
-        PreMergeValidationResult summaryValidation = validations.FirstOrDefault(result => result.IsError)
-            ?? validations[0];
-
-        ReviewDecision decision = await elicitor.RequestDecisionAsync(
-            new ReviewElicitationRequest(
-                sessionId,
-                string.Join(", ", sessionPlan.DeclaredRelativePaths),
-                $"edit session '{sessionId}'",
-                pendingCount,
-                validationIsError,
-                summaryValidation.Status,
-                validations.Sum(result => result.DiagnosticCount),
-                reviewUrl),
-            cancellationToken);
-
-        if (decision == ReviewDecision.Cancelled)
+        catch (Exception ex)
         {
-            throw new OperationCanceledException(
-                $"Governed review cancelled for edit session '{sessionId}'. Staged records left pending.");
+            EditSessionPlan? survivingPlan = workflowService.GetSessionPlan(sessionId);
+            recorder.Stage(runId, "mcp-stage-edit-session-failure", BuildFailureFields(ex, new Dictionary<string, string>
+            {
+                ["workspaceRoot"] = workspaceRoot,
+                ["sessionId"] = sessionId,
+                ["declaredPathCount"] = sessionPlan.DeclaredWatchedFilePaths.Count.ToString(),
+                ["declaredPaths"] = string.Join(" | ", sessionPlan.DeclaredRelativePaths),
+                ["currentWorkspaceSessionId"] = workspaceState.CurrentEditSessionId ?? "<null>",
+                ["survivingPlan"] = survivingPlan is null
+                    ? "<null>"
+                    : string.Join(" | ", survivingPlan.DeclaredRelativePaths)
+            }));
+            throw;
         }
-
-        StagedEditRecord refreshedRecord = workflowService.GetStagedRecord(stagedRecords[0].StagedRecordId);
-        string completionMessage = decision == ReviewDecision.Accepted
-            ? $"Governed review session completed for edit session '{sessionId}' via the review dialog."
-            : $"Governed review declined for edit session '{sessionId}'; staged items left for the operator.";
-        return new StageForReviewResult(
-            workflowService.CreateSummary(refreshedRecord),
-            summaryValidation,
-            reviewUrl,
-            completionMessage);
     }
 
     private IStagedReviewPageService CreateReviewService()
@@ -216,6 +298,24 @@ public sealed class HarnessWorkspaceReviewService
             ? $"/review/staged/{Uri.EscapeDataString(record.StagedRecordId)}"
             : $"/review/session/{Uri.EscapeDataString(record.SessionId)}";
         return $"{route}?workspace={Uri.EscapeDataString(Path.GetFullPath(workspaceRoot))}";
+    }
+
+    private static WorkflowRunRecorder CreateRecorder(
+        CodingServicesSettings settings,
+        string operationName,
+        out string runId)
+    {
+        WorkflowEditPaths paths = new(settings);
+        runId = $"{operationName}-{DateTimeOffset.UtcNow:yyyyMMddTHHmmssfff}-{Guid.NewGuid():N}";
+        return new WorkflowRunRecorder(paths.HistoryRoot, runId);
+    }
+
+    private static Dictionary<string, string> BuildFailureFields(Exception exception, Dictionary<string, string> fields)
+    {
+        fields["exceptionType"] = exception.GetType().FullName ?? exception.GetType().Name;
+        fields["exceptionMessage"] = exception.Message;
+        fields["exceptionStack"] = exception.ToString();
+        return fields;
     }
 }
 

@@ -137,6 +137,40 @@ public sealed class PermissionRequestService
         return method.Equals("mcpServer/elicitation/request", StringComparison.OrdinalIgnoreCase);
     }
 
+    public static bool IsWrappedOperatorConfirmationToolRequest(string method, string rawJson)
+    {
+        if (!IsElicitationRequest(method))
+        {
+            return false;
+        }
+
+        try
+        {
+            JsonNode? request = JsonNode.Parse(rawJson);
+            JsonNode? parameters = request?["params"];
+            JsonNode? meta = parameters?["_meta"];
+
+            string? approvalKind = GetStringValue(meta?["codex_approval_kind"]);
+            if (!string.Equals(approvalKind, "mcp_tool_call", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            string? toolName = GetStringValue(meta?["tool_name"]);
+            if (string.IsNullOrWhiteSpace(toolName))
+            {
+                string? prompt = GetStringValue(parameters?["message"]) ?? GetStringValue(parameters?["prompt"]);
+                toolName = ExtractToolNameFromPrompt(prompt);
+            }
+
+            return string.Equals(toolName, "request_operator_confirmation", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
     public static object CreateDenyResponse(string method, bool cancelTurn)
     {
         if (IsElicitationRequest(method))
@@ -176,14 +210,14 @@ public sealed class PermissionRequestService
         };
     }
 
-    public static object CreateApproveResponse(string method, string rawJson, PermissionApprovalScope scope)
+    public static object CreateApproveResponse(string method, string rawJson, PermissionApprovalScope scope, JsonObject? elicitationContent = null)
     {
         if (IsElicitationRequest(method))
         {
             return new
             {
                 action = "accept",
-                content = new { }
+                content = elicitationContent?.DeepClone() ?? new JsonObject()
             };
         }
 
@@ -301,6 +335,32 @@ public sealed class PermissionRequestService
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         });
+    }
+
+    private static string? GetStringValue(JsonNode? node)
+    {
+        return node is JsonValue value && value.TryGetValue<string>(out string? text)
+            ? text
+            : null;
+    }
+
+    private static string? ExtractToolNameFromPrompt(string? prompt)
+    {
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            return null;
+        }
+
+        const string marker = "tool \"";
+        int start = prompt.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (start < 0)
+        {
+            return null;
+        }
+
+        start += marker.Length;
+        int end = prompt.IndexOf('"', start);
+        return end <= start ? null : prompt[start..end];
     }
 }
 

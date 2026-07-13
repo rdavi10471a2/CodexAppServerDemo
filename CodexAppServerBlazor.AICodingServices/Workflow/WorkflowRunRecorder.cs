@@ -10,6 +10,7 @@ public sealed class WorkflowRunRecorder
     };
 
     private const int RunLogEntryRetentionLimit = 500;
+    private const int TelemetryFileRetentionLimit = 120;
     private readonly string runLogPath;
     private readonly string telemetryPath;
     private int sequence;
@@ -20,6 +21,7 @@ public sealed class WorkflowRunRecorder
         runLogPath = Path.Combine(historyRoot, "_runs.json");
         string telemetryRoot = Path.Combine(historyRoot, "Telemetry");
         Directory.CreateDirectory(telemetryRoot);
+        PruneTelemetryFiles(telemetryRoot);
         telemetryPath = Path.Combine(telemetryRoot, $"telemetry-{Sanitize(runId)}.log");
     }
 
@@ -96,6 +98,26 @@ public sealed class WorkflowRunRecorder
         string tempPath = $"{path}.tmp_{Environment.ProcessId}_{Guid.NewGuid():N}";
         File.WriteAllText(tempPath, contents);
         File.Move(tempPath, path, overwrite: true);
+    }
+
+    private static void PruneTelemetryFiles(string telemetryRoot)
+    {
+        try
+        {
+            FileInfo[] files = new DirectoryInfo(telemetryRoot)
+                .EnumerateFiles("telemetry-*.log", SearchOption.TopDirectoryOnly)
+                .OrderByDescending(file => file.LastWriteTimeUtc)
+                .ToArray();
+
+            foreach (FileInfo file in files.Skip(TelemetryFileRetentionLimit))
+            {
+                file.Delete();
+            }
+        }
+        catch
+        {
+            // Telemetry pruning is best-effort and should never break workflow execution.
+        }
     }
 
     private static string Sanitize(string value)

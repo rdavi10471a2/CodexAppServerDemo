@@ -1,0 +1,94 @@
+Coding Services worked examples
+
+Use these examples as the preferred workflow shape when the live tool surface supports them. Keep the doctrine in the bootstrap policy and the ranked choices in the edit-tool guidance; use this file for concrete tool patterns.
+
+1. Existing C# file, single contiguous replacement
+
+Use this when one literal or one contiguous fragment changes and the replacement is unique.
+
+1. `get_current_task`
+2. `get_workspace`
+3. `get_watched_solution_digest`
+4. `refresh_file(watchedFilePath)`
+5. Inspect the refreshed Working candidate through governed structure tools first; if needed, do one narrow read of the already-selected file.
+6. `replace_text_in_file(watchedFilePath, oldText, newText, expectedMatches: 1, expectedWorkingHash: ...)`
+7. `stage_edit_session_for_review(sessionId)`
+8. Stop at the in-app review boundary.
+
+Why this is preferred:
+- one contiguous unique replacement
+- smaller than replacing a whole symbol
+- safer than coordinate spans when the change is purely textual
+
+2. Existing C# file, multi-fragment edit inside one method
+
+Use this when two or more edits are intended inside the same method, property, constructor, or type.
+
+1. `get_current_task`
+2. `refresh_file(watchedFilePath)`
+3. `get_file_outline(watchedFilePath)` and, when needed, `get_source_map(...)` or `get_symbol(watchedFilePath, symbolSelectorJson)`
+4. Build the target symbol identity from file, containing type, and member.
+5. `submit_symbol(watchedFilePath, symbolSelectorJson, code)`
+6. `stage_edit_session_for_review(sessionId)`
+7. Stop at the in-app review boundary.
+
+Why this is preferred:
+- the intended change spans more than one fragment
+- later edits should still target stable symbol structure
+- this avoids chaining fragile coordinate edits through a mutating file
+
+3. Existing C# file, remove one member
+
+Use this when the task is deleting a property, method, constructor, field, or nested type.
+
+1. `get_current_task`
+2. `refresh_file(watchedFilePath)`
+3. `get_file_outline(watchedFilePath)` or `get_symbol(...)` if the selector is unclear
+4. `remove_symbol(watchedFilePath, symbolSelectorJson)`
+5. `stage_edit_session_for_review(sessionId)`
+6. Stop at the in-app review boundary.
+
+4. Razor or mixed-markup file
+
+Use index-first discovery, then governed text mutation.
+
+1. `get_current_task`
+2. `get_watched_solution_digest`
+3. Use the index/discovery surface to confirm the target file and nearby references.
+4. `refresh_file(watchedFilePath)`
+5. If the question is about literal markup, visible text, or placement, narrow text search against the already-selected file is allowed fallback.
+6. Prefer `replace_text_in_file` for one clean textual replacement.
+7. Use `replace_span_in_file` only when neither symbol-aware nor clean text replacement can express the change safely, and treat it as a destructive coordinate fallback.
+8. `stage_edit_session_for_review(sessionId)`
+9. Stop at the in-app review boundary.
+
+5. Brand-new watched file
+
+1. `get_current_task`
+2. Establish or reuse the coherent governed edit session id for the task.
+3. `new_file(watchedFilePath, sessionId)`
+4. `submit_file(watchedFilePath, content, ...)`
+5. If this new file is part of a larger coherent multi-file change, use `add_file_to_session(sessionId, watchedFilePath)` for normal growth, or `declare_session_files(sessionId, [...])` only after every declared file has already been bootstrapped into that same session.
+6. `stage_edit_session_for_review(sessionId)`
+7. Stop at the in-app review boundary.
+
+6. Multi-file coherent change
+
+1. `get_current_task`
+2. `refresh_file(firstFile)`
+3. Carry forward the first `EditSessionId`
+4. `refresh_file(secondFile, sessionId)` or `new_file(secondFile, sessionId)`
+5. `add_file_to_session(sessionId, secondFile)` when the coherent change grows incrementally
+6. `declare_session_files(sessionId, [...])` only when intentionally replacing the declared set with a known full list
+7. Apply governed mutations under that one session
+8. `stage_edit_session_for_review(sessionId)`
+9. Stop at the in-app review boundary.
+
+7. Fallback rule when Roslyn selector shape is unclear
+
+If the target C# symbol is known but the exact selector payload contract is still unclear after bounded governed discovery:
+
+- say plainly that symbol identity is known
+- say plainly that the selector payload contract is still unclear
+- use `replace_text_in_file` only when the intended change is one contiguous unique replacement
+- do not jump to `replace_span_in_file` just because coordinates feel more exact

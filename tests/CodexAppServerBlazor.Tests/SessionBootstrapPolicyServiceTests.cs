@@ -24,11 +24,19 @@ public sealed class SessionBootstrapPolicyServiceTests
             Bootstrap rule.
             - In Work mode, treat the selected workspace source tree as MCP-governed write-only.
             """);
+        string examplesPath = Path.Combine(contentRoot, "CS-WorkedExamples.txt");
+        File.WriteAllText(
+            examplesPath,
+            """
+            Example rule.
+            - `submit_symbol` replaces a whole method when the change spans more than one fragment.
+            """);
 
         IConfiguration configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["WorkflowPolicy:SessionBootstrapPath"] = "CS-SessionBootstrap.txt"
+                ["WorkflowPolicy:SessionBootstrapPath"] = "CS-SessionBootstrap.txt",
+                ["WorkflowPolicy:WorkedExamplesPath"] = "CS-WorkedExamples.txt"
             })
             .Build();
 
@@ -43,9 +51,12 @@ public sealed class SessionBootstrapPolicyServiceTests
         Assert.Contains("Coding Services host AGENTS.md policy:", policy.PromptText, StringComparison.Ordinal);
         Assert.Contains("Host rule.", policy.PromptText, StringComparison.Ordinal);
         Assert.Contains("Bootstrap rule.", policy.PromptText, StringComparison.Ordinal);
+        Assert.Contains("Coding Services worked examples:", policy.PromptText, StringComparison.Ordinal);
+        Assert.Contains("Example rule.", policy.PromptText, StringComparison.Ordinal);
         Assert.Contains("MCP-governed write-only", policy.PromptText, StringComparison.Ordinal);
         Assert.Contains(hostAgentsPath, policy.SourcePath, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(bootstrapPath, policy.SourcePath, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(examplesPath, policy.SourcePath, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

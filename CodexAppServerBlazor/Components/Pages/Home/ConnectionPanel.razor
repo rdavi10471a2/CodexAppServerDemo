@@ -1,106 +1,158 @@
 @using CodexAppServerBlazor.Services.Workflow
+@using CodexAppServerBlazor.Services
 
 <aside class="connection-panel" aria-label="Connection controls">
-    <div class="panel-heading">
-        <div>
-            <span class="eyebrow">Connection</span>
-            <h2>Runtime</h2>
-        </div>
-    </div>
-
-    <label class="field">
-        <span>Codex executable</span>
-        <RadzenTextBox Value="@CodexExe" Change="@OnCodexExeChanged" />
-    </label>
-
-    <label class="field">
-        <span>Model</span>
-        <RadzenTextBox Value="@Model" Change="@OnModelChanged" />
-    </label>
-
-    <div class="settings-pair">
-        <label class="field">
-            <span>Approval</span>
-            <RadzenDropDown TValue="string"
-                            Value="@ApprovalPolicy"
-                            ValueChanged="@OnApprovalPolicyChanged"
-                            Data="@ApprovalPolicies" />
-        </label>
-        <label class="field">
-            <span>Sandbox</span>
-            <RadzenDropDown TValue="string"
-                            Value="@Sandbox"
-                            ValueChanged="@OnSandboxChanged"
-                            Data="@AvailableSandboxes" />
-        </label>
-    </div>
-
-    <label class="field">
-        <span>Turn Mode</span>
-        <RadzenDropDown TValue="WorkflowTurnMode"
-                        Value="@TurnMode"
-                        ValueChanged="@OnTurnModeChanged"
-                        Data="@TurnModes" />
-    </label>
-
-    <div class="actions connection-actions">
-        <RadzenButton Icon="power_settings_new"
-                      Text="@(Snapshot.IsServerStarted ? "Stop Server" : "Start Server")"
-                      ButtonStyle="@(Snapshot.IsServerStarted ? ButtonStyle.Danger : ButtonStyle.Secondary)"
-                      Click="@ToggleServer"
-                      Disabled="@Busy" />
-    </div>
-
-    <section class="token-summary" aria-label="Token and rate summary">
-        <div class="token-summary-header">
-            <span>Tokens</span>
-            <strong>@FormatContextPercent()</strong>
-        </div>
-        <div class="token-grid">
-            <div>
-                <span>Input</span>
-                <strong>@FormatNumber(Snapshot.TelemetrySummary.InputTokens)</strong>
-            </div>
-            <div>
-                <span>Cached</span>
-                <strong>@FormatNumber(Snapshot.TelemetrySummary.CachedInputTokens)</strong>
-            </div>
-            <div>
-                <span>Output</span>
-                <strong>@FormatNumber(Snapshot.TelemetrySummary.OutputTokens)</strong>
-            </div>
-            <div>
-                <span>Reasoning</span>
-                <strong>@FormatNumber(Snapshot.TelemetrySummary.ReasoningOutputTokens)</strong>
-            </div>
-        </div>
-        <div class="rate-row">
-            <span>Rate</span>
-            <strong>@FormatRateSummary()</strong>
-        </div>
+    <section class="connection-notes" aria-label="Runtime notes">
+        <p class="panel-warning">Tested primarily with the current default runtime settings. Other configurations have not been verified yet.</p>
+        <p class="panel-help">
+            These tabs are runtime and workflow diagnostics. The information is accurate, but the presentation is still a work in progress from active debugging and cleanup.
+        </p>
+        @if (!string.IsNullOrWhiteSpace(WorkflowHistoryPath))
+        {
+            <p class="panel-help">
+                Runtime history and workflow logs live under <code>@WorkflowHistoryPath</code>. Resolved review artifacts are cleaned up automatically, run history is trimmed, and older telemetry logs are pruned.
+            </p>
+        }
     </section>
 
-    <div class="summary-stack">
-        <div>
-            <span>Thread</span>
-            <strong>@(Snapshot.ThreadId ?? "not started")</strong>
-        </div>
-        <div>
-            <span>MCP</span>
-            <strong>@McpDisplayUrl</strong>
-        </div>
-        <div>
-            <span>Health</span>
-            <strong>@McpHealthUrl</strong>
-        </div>
-    </div>
+    <RadzenTabs RenderMode="TabRenderMode.Client" class="connection-tabs">
+        <Tabs>
+            <RadzenTabsItem Text="Runtime">
+                <section class="connection-section" aria-label="Runtime settings">
+                    <div class="settings-panel-grid">
+                        <section class="settings-card settings-card-combined">
+                            <div class="settings-card-header">
+                                <span class="section-eyebrow">Executable, Approval, Model & Sandbox</span>
+                            </div>
 
-    <section class="connection-help" aria-label="Connection help">
-        <span>Help</span>
-        <p><strong>Start Server</strong> launches the local Codex app-server and MCP host.</p>
-        <p><strong>Send a turn</strong> starts a new Codex thread automatically for the current CWD when needed.</p>
-        <p><strong>MCP Health</strong> should answer at <code>@McpHealthUrl</code>.</p>
-    </section>
+                            <div class="settings-grid settings-grid-two-column">
+                                <label class="field">
+                                    <span>Codex executable</span>
+                                    <RadzenTextBox Value="@CodexExe" Change="@OnCodexExeChanged" />
+                                </label>
+
+                                <label class="field">
+                                    <span>Model</span>
+                                    <RadzenTextBox Value="@Model" Change="@OnModelChanged" />
+                                </label>
+
+                                <label class="field">
+                                    <span>Approval</span>
+                                    <RadzenDropDown TValue="string"
+                                                    Value="@ApprovalPolicy"
+                                                    ValueChanged="@OnApprovalPolicyChanged"
+                                                    Data="@ApprovalPolicies" />
+                                </label>
+
+                                <label class="field">
+                                    <span>Sandbox</span>
+                                    <RadzenDropDown TValue="string"
+                                                    Value="@Sandbox"
+                                                    ValueChanged="@OnSandboxChanged"
+                                                    Data="@AvailableSandboxes" />
+                                </label>
+                            </div>
+                        </section>
+
+                        <section class="settings-card settings-card-status">
+                            <div class="settings-card-header">
+                                <span class="section-eyebrow">Turn Mode & Status</span>
+                            </div>
+                            <div class="settings-grid settings-grid-single">
+                                <label class="field">
+                                    <span>Turn Mode</span>
+                                    <RadzenDropDown TValue="WorkflowTurnMode"
+                                        Value="@TurnMode"
+                                        ValueChanged="@OnTurnModeChanged"
+                                        Data="@TurnModes" />
+                                </label>
+                            </div>
+
+                            <div class="runtime-status-list runtime-status-grid">
+                                <div>
+                                    <span>Server</span>
+                                    <strong>@(Snapshot.IsServerStarted ? "Running" : "Stopped")</strong>
+                                </div>
+                                <div>
+                                    <span>Thread</span>
+                                    <strong>@(Snapshot.ThreadId ?? "Not started")</strong>
+                                </div>
+                                <div>
+                                    <span>Workspace</span>
+                                    <strong>@WorkspaceRoot</strong>
+                                </div>
+                            </div>
+
+                            <div class="actions connection-actions">
+                                <RadzenButton Icon="power_settings_new"
+                                              Text="@(Snapshot.IsServerStarted ? "Stop Server" : "Start Server")"
+                                              ButtonStyle="@(Snapshot.IsServerStarted ? ButtonStyle.Danger : ButtonStyle.Secondary)"
+                                              Click="@ToggleServer"
+                                              Disabled="@Busy" />
+                            </div>
+                        </section>
+                    </div>
+                </section>
+            </RadzenTabsItem>
+
+            <RadzenTabsItem Text="Telemetry">
+                <section class="connection-section connection-section-compact" aria-label="Token summary">
+                    <section class="token-summary">
+                        <div class="token-summary-header">
+                            <span>Tokens</span>
+                            <div class="token-summary-inline">
+                                <strong>@FormatContextPercent()</strong>
+                                <small>@FormatRateSummary()</small>
+                            </div>
+                        </div>
+                        <div class="token-grid">
+                            <div>
+                                <span>Input</span>
+                                <strong>@FormatNumber(Snapshot.TelemetrySummary.InputTokens)</strong>
+                            </div>
+                            <div>
+                                <span>Cached</span>
+                                <strong>@FormatNumber(Snapshot.TelemetrySummary.CachedInputTokens)</strong>
+                            </div>
+                            <div>
+                                <span>Output</span>
+                                <strong>@FormatNumber(Snapshot.TelemetrySummary.OutputTokens)</strong>
+                            </div>
+                            <div>
+                                <span>Reasoning</span>
+                                <strong>@FormatNumber(Snapshot.TelemetrySummary.ReasoningOutputTokens)</strong>
+                            </div>
+                        </div>
+                    </section>
+                </section>
+            </RadzenTabsItem>
+
+            <RadzenTabsItem Text="Status">
+                <section class="connection-section connection-section-log" aria-label="Status events">
+                    <OutputTab Events="@StatusEvents" EmptyText="No status events yet." />
+                </section>
+            </RadzenTabsItem>
+
+            <RadzenTabsItem Text="Protocol">
+                <section class="connection-section connection-section-log" aria-label="Protocol lines">
+                    <RawProtocolTab Lines="@RawLines" EmptyText="No protocol lines yet." />
+                </section>
+            </RadzenTabsItem>
+
+            <RadzenTabsItem Text="Debug">
+                <section class="connection-section connection-section-log" aria-label="Debug events">
+                    <ReviewLaunchDebugTab Events="@DebugEvents"
+                                          EmptyText="No launch-trace events yet."
+                                          CurrentEditSessionId="@CurrentEditSessionId"
+                                          QueuedReviewSessionId="@QueuedReviewSessionId"
+                                          LaunchedReviewSessionId="@LaunchedReviewSessionId"
+                                          ReviewDialogOpen="@ReviewDialogOpen"
+                                          ReviewLaunchCheckInProgress="@ReviewLaunchCheckInProgress"
+                                          ReviewLaunchProcessing="@ReviewLaunchProcessing" />
+                </section>
+            </RadzenTabsItem>
+        </Tabs>
+    </RadzenTabs>
 </aside>
 
 @code {
@@ -112,6 +164,39 @@
 
     [Parameter]
     public string McpUrl { get; set; } = string.Empty;
+
+    [Parameter]
+    public string WorkspaceRoot { get; set; } = string.Empty;
+
+    [Parameter]
+    public IReadOnlyList<CodexOutputEvent> StatusEvents { get; set; } = [];
+
+    [Parameter]
+    public IReadOnlyList<string> RawLines { get; set; } = [];
+
+    [Parameter]
+    public IReadOnlyList<CodexOutputEvent> DebugEvents { get; set; } = [];
+
+    [Parameter]
+    public string WorkflowHistoryPath { get; set; } = string.Empty;
+
+    [Parameter]
+    public string? CurrentEditSessionId { get; set; }
+
+    [Parameter]
+    public string? QueuedReviewSessionId { get; set; }
+
+    [Parameter]
+    public string? LaunchedReviewSessionId { get; set; }
+
+    [Parameter]
+    public bool ReviewDialogOpen { get; set; }
+
+    [Parameter]
+    public bool ReviewLaunchCheckInProgress { get; set; }
+
+    [Parameter]
+    public bool ReviewLaunchProcessing { get; set; }
 
     [Parameter]
     public string CodexExe { get; set; } = string.Empty;

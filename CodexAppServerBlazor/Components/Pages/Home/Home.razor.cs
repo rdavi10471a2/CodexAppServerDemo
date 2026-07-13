@@ -4,6 +4,7 @@ using CodexAppServerBlazor.Services.ArchivedDiscussions;
 using CodexAppServerBlazor.Services.Tasks;
 using CodexAppServerBlazor.Services.Workflow;
 using CodexAppServerBlazor.AICodingServices.Workflow;
+using CodexAppServerBlazor.AICodingServices.Core;
 using CodexAppServerBlazor.Components.Pages.Home.Tasks;
 using Markdig;
 using Markdig.Extensions.MediaLinks;
@@ -12,6 +13,7 @@ using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.JSInterop;
 using Radzen;
 using System.Net;
+using System.Text.RegularExpressions;
 using System.Text;
 
 namespace CodexAppServerBlazor.Components.Pages.Home;
@@ -24,6 +26,7 @@ public partial class Home : IDisposable, IAsyncDisposable
 
     private CodexConnectionSnapshot snapshot = new(
         false,
+        null,
         null,
         false,
         string.Empty,
@@ -40,7 +43,6 @@ public partial class Home : IDisposable, IAsyncDisposable
     private SourceWorkspaceSnapshot testSourceSnapshot = SourceWorkspaceSnapshot.Empty("No test project context is loaded.");
     private string codexExe = "codex";
     private string repoRoot = string.Empty;
-    private string instanceLabel = string.Empty;
     private readonly string runStartedAtDisplay = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
     private string sourceFilter = string.Empty;
     private string? selectedSourcePath;
@@ -51,7 +53,7 @@ public partial class Home : IDisposable, IAsyncDisposable
     private string model = "gpt-5.4";
     private string approvalPolicy = "on-request";
     private string sandbox = "read-only";
-    private WorkflowTurnMode turnMode = WorkflowTurnMode.Discuss;
+    private WorkflowTurnMode turnMode = WorkflowTurnMode.Work;
     private string mcpUrl = McpHostFactory.DefaultLocalMcpUrl;
     private readonly List<TranscriptMessage> chatMessages = [];
     private readonly List<CodexTurnAttachment> turnAttachments = [];
@@ -72,7 +74,7 @@ public partial class Home : IDisposable, IAsyncDisposable
     private string archiveConversationSuggestedName = string.Empty;
     private bool busy;
     private bool isRebuildingSourceIndex;
-    private bool isConnectionPanelVisible = true;
+    private bool isConnectionPanelVisible;
     private bool isDirectoryBrowserVisible;
     private string? launchedReviewSessionId;
     private bool reviewDialogOpen;
@@ -86,13 +88,12 @@ public partial class Home : IDisposable, IAsyncDisposable
     private TaskCompletionSource<bool>? reviewDialogCompletion;
     private int assistantViewVersion;
     private ElementReference controlGrid;
-    private ElementReference connectionPane;
     private ElementReference workPanel;
-    private ElementReference mainSplitter;
     private IJSObjectReference? mainResizeModule;
     private readonly List<CodexOutputEvent> debugEvents = [];
     private const int MaxDebugEvents = 300;
     private string? lastMirroredToolFailureKey;
+    private bool isDisposed;
     private static readonly MarkdownPipeline MarkdownPipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions()
         .DisableHtml()
@@ -104,6 +105,27 @@ public partial class Home : IDisposable, IAsyncDisposable
     private string CurrentTurnHtml => RenderMarkdown(GetCurrentTurnText());
     private string assistantViewKey => $"{repoRoot}:{assistantViewVersion}";
     private IReadOnlyList<CodexOutputEvent> DebugEvents => debugEvents.ToArray();
+    private string WorkflowHistoryPath
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(repoRoot))
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                CodingServicesSettings settings = SettingsProvider.GetSettings(repoRoot);
+                return Path.Combine(settings.RuntimeRoot, "workflow", "history");
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+    }
+
     [Inject]
     public CodexConnectionService ConnectionService { get; set; } = default!;
 
@@ -152,14 +174,13 @@ public partial class Home : IDisposable, IAsyncDisposable
         GovernedReviewCoordinator.Changed += OnGovernedReviewCoordinatorChanged;
         snapshot = ConnectionService.GetSnapshot();
         mcpUrl = Configuration["Mcp:Url"] ?? McpHostFactory.DefaultLocalMcpUrl;
-        instanceLabel = (Configuration["AppInstance:Label"] ?? string.Empty).Trim();
         string configuredCwd = WorkspaceSelectionService.GetStartupWorkspace();
         SetWorkspace(configuredCwd);
         AddDebugEvent(
             "HomeInit",
             "ok",
             "coding-services",
-            $"Initialized Home for workspace '{repoRoot}' with instance label '{instanceLabel}'.");
+            $"Initialized Home for workspace '{repoRoot}'.");
     }
 
     private async Task ToggleServer()
@@ -246,6 +267,50 @@ public partial class Home : IDisposable, IAsyncDisposable
         AddUserMessage(transcriptContent);
         StartAssistantMessage("_Awaiting assistant response..._", snapshot.IsTurnRunning);
         RenderAssistantSnapshot(snapshot.IsTurnRunning);
+    }
+
+    private async Task StopCurrentTurn()
+    {
+        if (!snapshot.IsTurnRunning)
+        {
+            return;
+        }
+
+        bool shouldInterrupt = await JS.InvokeAsync<bool>(
+            "confirm",
+            "Stop the current turn? Any in-flight assistant step will be interrupted.");
+        if (!shouldInterrupt)
+        {
+            return;
+        }
+
+        await RunCommandAsync(() => ConnectionService.InterruptTurnAsync(CancellationToken.None));
+        if (errorMessage is null)
+        {
+            NotificationService.Notify(new NotificationMessage
+            {
+                Severity = NotificationSeverity.Warning,
+                Summary = "Turn interrupt requested",
+                Detail = "Requested interruption of the current turn. Waiting for Codex to stop.",
+                Duration = 5000
+            });
+        }
+    }
+
+    private Task ChangeAssistantTurnMode(WorkflowTurnMode value)
+    {
+        if (value == WorkflowTurnMode.Work && !string.Equals(sandbox, "read-only", StringComparison.Ordinal))
+        {
+            sandbox = "read-only";
+            AddDebugEvent(
+                "TurnModeChanged",
+                "policy-coerced",
+                "assistant",
+                "Assistant mode switch to Work forced sandbox back to read-only.");
+        }
+
+        turnMode = value;
+        return InvokeAsync(StateHasChanged);
     }
 
     private void ResetGovernedReviewStateForNewTurn(bool clearEditSessionId)
@@ -442,11 +507,12 @@ public partial class Home : IDisposable, IAsyncDisposable
         }
     }
 
-    private async Task ApprovePermissionRequest(int requestId)
+    private async Task ApprovePermissionRequest(PermissionApprovalRequest request)
     {
         await RunCommandAsync(() => ConnectionService.ApprovePermissionRequestAsync(
-            requestId,
+            request.RequestId,
             PermissionApprovalScope.Turn,
+            request.ElicitationContent,
             CancellationToken.None));
         if (errorMessage is null)
         {
@@ -459,6 +525,7 @@ public partial class Home : IDisposable, IAsyncDisposable
         await RunCommandAsync(() => ConnectionService.ApprovePermissionRequestAsync(
             requestId,
             PermissionApprovalScope.Session,
+            null,
             CancellationToken.None));
         if (errorMessage is null)
         {
@@ -471,6 +538,7 @@ public partial class Home : IDisposable, IAsyncDisposable
         await RunCommandAsync(() => ConnectionService.ApprovePermissionRequestAsync(
             requestId,
             PermissionApprovalScope.Persistent,
+            null,
             CancellationToken.None));
         if (errorMessage is null)
         {
@@ -1008,17 +1076,6 @@ public partial class Home : IDisposable, IAsyncDisposable
             "setBeforeUnloadGuard",
             ShouldWarnBeforeUnload(),
             "Refreshing or closing this page will reset the current Coding Services session.");
-
-        if (isConnectionPanelVisible)
-        {
-            await mainResizeModule.InvokeVoidAsync(
-                "attachMainSplitter",
-                controlGrid,
-                connectionPane,
-                workPanel,
-                mainSplitter);
-        }
-
     }
 
     private bool ShouldWarnBeforeUnload()
@@ -1049,20 +1106,14 @@ public partial class Home : IDisposable, IAsyncDisposable
 
     private void OnConnectionChanged()
     {
+        if (isDisposed)
+        {
+            return;
+        }
+
         snapshot = ConnectionService.GetSnapshot();
         RenderAssistantSnapshot(isStreaming: snapshot.IsTurnRunning);
-        _ = InvokeAsync(async () =>
-        {
-            MirrorGovernedToolFailuresToDebug(snapshot);
-            CodexOutputEvent? latestStatus = snapshot.StatusEvents.LastOrDefault();
-            AddDebugEvent(
-                "ConnectionChanged",
-                snapshot.IsTurnRunning ? "running" : "idle",
-                "home",
-                $"turnRunning={snapshot.IsTurnRunning}; threadId={snapshot.ThreadId ?? "<none>"}; permissions={snapshot.PermissionRequests.Count}; currentEditSessionId={WorkspaceState.CurrentEditSessionId ?? "<none>"}; launchedReviewSessionId={launchedReviewSessionId ?? "<none>"}; queuedReviewSessionId={pendingReviewLaunch?.SessionId ?? "<none>"}; latestStatus={(latestStatus is null ? "<none>" : latestStatus.Type + "|" + (latestStatus.Status ?? "-") + "|" + latestStatus.Detail)}");
-            NotifyLatestPermissionResult();
-            StateHasChanged();
-        });
+        _ = InvokeAsync(ProcessConnectionChangedAsync);
     }
 
     private void MirrorGovernedToolFailuresToDebug(CodexConnectionSnapshot currentSnapshot)
@@ -1092,27 +1143,12 @@ public partial class Home : IDisposable, IAsyncDisposable
 
     private void OnGovernedReviewCoordinatorChanged()
     {
-        _ = InvokeAsync(async () =>
+        if (isDisposed)
         {
-            GovernedReviewPendingRequest? pendingRequest = GovernedReviewCoordinator.GetPendingRequest();
-            if (pendingRequest is null)
-            {
-                pendingReviewLaunch = null;
-                StateHasChanged();
-                return;
-            }
+            return;
+        }
 
-            pendingReviewLaunch = new PendingReviewLaunchState(
-                pendingRequest.Request.SessionId,
-                pendingRequest.Request.PendingCount);
-            AddDebugEvent(
-                "ReviewCoordinator",
-                "queued",
-                "home",
-                $"Coordinator queued governed review for edit session '{pendingRequest.Request.SessionId}' with {pendingRequest.Request.PendingCount} pending item(s).");
-            await ProcessQueuedReviewLaunchAsync();
-            StateHasChanged();
-        });
+        _ = InvokeAsync(ProcessGovernedReviewCoordinatorChangedAsync);
     }
 
     private async Task TryLaunchPendingReviewAsync(bool isTurnRunning, CodexOutputEvent? latestStatus)
@@ -1329,40 +1365,7 @@ public partial class Home : IDisposable, IAsyncDisposable
             "home",
             $"Dispatching blocking validation dialog for edit session '{model.SessionId}' on '{model.RelativePath}'. PendingCount={pendingCount}.");
 
-        _ = InvokeAsync(async () =>
-        {
-            try
-            {
-                await DialogService.OpenAsync<PreMergeValidationDialog>(
-                    "Pre-merge validation gate",
-                    new Dictionary<string, object?>
-                    {
-                        [nameof(PreMergeValidationDialog.RelativePath)] = model.RelativePath,
-                        [nameof(PreMergeValidationDialog.ValidationStatus)] = model.PreMergeValidationStatus,
-                        [nameof(PreMergeValidationDialog.PendingCount)] = pendingCount,
-                        [nameof(PreMergeValidationDialog.DecisionMade)] = EventCallback.Factory.Create<bool>(this, HandleValidationGateDecisionAsync)
-                    },
-                    new DialogOptions
-                    {
-                        Width = "88vw",
-                        Height = "88vh",
-                        CloseDialogOnEsc = false,
-                        CloseDialogOnOverlayClick = false,
-                        Resizable = true,
-                        Draggable = true,
-                        ShowClose = false
-                    });
-            }
-            catch (Exception ex)
-            {
-                AddDebugEvent(
-                    "ValidationGate",
-                    "open-error",
-                    "home",
-                    $"Validation dialog open failed for edit session '{model.SessionId}': {ex.Message}");
-                validationGateCompletion?.TrySetResult(false);
-            }
-        });
+        _ = InvokeAsync(() => OpenValidationGateDialogAsync(model, pendingCount));
 
         bool continueResult = await validationGateCompletion.Task;
         validationGateModel = null;
@@ -1544,41 +1547,7 @@ public partial class Home : IDisposable, IAsyncDisposable
             "home",
             $"Dispatching blocking staged review dialog for session '{sessionId}'.");
 
-        _ = InvokeAsync(async () =>
-        {
-            try
-            {
-                await DialogService.OpenAsync<StagedReviewDialog>(
-                    "Merge Review",
-                    new Dictionary<string, object?>
-                    {
-                        [nameof(StagedReviewDialog.WorkspaceRoot)] = repoRoot,
-                        [nameof(StagedReviewDialog.SessionId)] = sessionId,
-                        [nameof(StagedReviewDialog.AutoCloseWhenComplete)] = true,
-                        [nameof(StagedReviewDialog.TraceEventRaised)] = EventCallback.Factory.Create<string>(this, HandleStagedReviewTraceAsync),
-                        [nameof(StagedReviewDialog.CloseRequested)] = EventCallback.Factory.Create(this, HandleStagedReviewDialogClosedAsync)
-                    },
-                    new DialogOptions
-                    {
-                        Width = "88vw",
-                        Height = "88vh",
-                        CloseDialogOnEsc = false,
-                        CloseDialogOnOverlayClick = false,
-                        Resizable = true,
-                        Draggable = true,
-                        ShowClose = false
-                    });
-            }
-            catch (Exception ex)
-            {
-                AddDebugEvent(
-                    "ReviewDialog",
-                    "open-error",
-                    "home",
-                    $"Staged review dialog open failed for session '{sessionId}': {ex.Message}");
-                reviewDialogCompletion?.TrySetResult(true);
-            }
-        });
+        _ = InvokeAsync(() => OpenStagedReviewDialogCoreAsync(sessionId));
 
         AddDebugEvent(
             "ReviewDialog",
@@ -1685,10 +1654,16 @@ public partial class Home : IDisposable, IAsyncDisposable
         if (!string.IsNullOrEmpty(snapshot.AssistantText))
         {
             renderedAssistantText = snapshot.AssistantText;
-            message.Content = renderedAssistantText;
         }
 
+        message.Content = BuildAssistantTranscriptContent();
         message.IsStreaming = isStreaming;
+    }
+
+    private string BuildAssistantTranscriptContent()
+    {
+        string assistantBody = renderedAssistantText?.Trim() ?? string.Empty;
+        return assistantBody;
     }
 
     private static string JoinLines(IEnumerable<string> lines)
@@ -1884,23 +1859,16 @@ public partial class Home : IDisposable, IAsyncDisposable
 
     private string GetCurrentTurnText()
     {
-        var text = new StringBuilder();
-        if (!string.IsNullOrWhiteSpace(snapshot.CurrentTurnNoticeText))
-        {
-            text.AppendLine(snapshot.CurrentTurnNoticeText);
-            text.AppendLine();
-        }
-
         if (!string.IsNullOrWhiteSpace(activeAssistantMessageId))
         {
             TranscriptMessage? message = chatMessages.FirstOrDefault(candidate => candidate.Id == activeAssistantMessageId);
             if (message?.IsStreaming == true)
             {
-                text.Append(message.Content);
+                return message.Content;
             }
         }
 
-        return text.ToString();
+        return snapshot.CurrentTurnNoticeText ?? string.Empty;
     }
 
     private bool ValidateAttachmentsForSend(IReadOnlyList<CodexTurnAttachment> attachments)
@@ -2072,19 +2040,179 @@ public partial class Home : IDisposable, IAsyncDisposable
             return string.Empty;
         }
 
-        return Markdown.ToHtml(markdown, MarkdownPipeline);
+        return Markdown.ToHtml(NormalizeTranscriptMarkdown(markdown), MarkdownPipeline);
+    }
+
+    private static string NormalizeTranscriptMarkdown(string markdown)
+    {
+        string normalized = markdown.Replace("\r\n", "\n").TrimEnd();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return string.Empty;
+        }
+
+        normalized = Regex.Replace(
+            normalized,
+            @"(?<!\n)(\[\d{2}:\d{2}:\d{2}\])",
+            match => match.Index == 0 ? match.Value : $"{Environment.NewLine}{match.Value}");
+
+        normalized = Regex.Replace(
+            normalized,
+            @"(?<=waiting for the agent to continue\.)\s+(?=\S)",
+            $"{Environment.NewLine}{Environment.NewLine}");
+
+        normalized = Regex.Replace(
+            normalized,
+            @"(?<=releasing the agent\.)\s+(?=\S)",
+            $"{Environment.NewLine}{Environment.NewLine}");
+
+        return normalized;
+    }
+
+    private Task ProcessConnectionChangedAsync()
+    {
+        if (isDisposed)
+        {
+            return Task.CompletedTask;
+        }
+
+        MirrorGovernedToolFailuresToDebug(snapshot);
+        CodexOutputEvent? latestStatus = snapshot.StatusEvents.LastOrDefault();
+        AddDebugEvent(
+            "ConnectionChanged",
+            snapshot.IsTurnRunning ? "running" : "idle",
+            "home",
+            $"turnRunning={snapshot.IsTurnRunning}; threadId={snapshot.ThreadId ?? "<none>"}; activeTurnId={snapshot.ActiveTurnId ?? "<none>"}; permissions={snapshot.PermissionRequests.Count}; currentEditSessionId={WorkspaceState.CurrentEditSessionId ?? "<none>"}; launchedReviewSessionId={launchedReviewSessionId ?? "<none>"}; queuedReviewSessionId={pendingReviewLaunch?.SessionId ?? "<none>"}; latestStatus={(latestStatus is null ? "<none>" : latestStatus.Type + "|" + (latestStatus.Status ?? "-") + "|" + latestStatus.Detail)}");
+        NotifyLatestPermissionResult();
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private async Task ProcessGovernedReviewCoordinatorChangedAsync()
+    {
+        if (isDisposed)
+        {
+            return;
+        }
+
+        GovernedReviewPendingRequest? pendingRequest = GovernedReviewCoordinator.GetPendingRequest();
+        if (pendingRequest is null)
+        {
+            pendingReviewLaunch = null;
+            StateHasChanged();
+            return;
+        }
+
+        pendingReviewLaunch = new PendingReviewLaunchState(
+            pendingRequest.Request.SessionId,
+            pendingRequest.Request.PendingCount);
+        AddDebugEvent(
+            "ReviewCoordinator",
+            "queued",
+            "home",
+            $"Coordinator queued governed review for edit session '{pendingRequest.Request.SessionId}' with {pendingRequest.Request.PendingCount} pending item(s).");
+        await ProcessQueuedReviewLaunchAsync();
+        if (!isDisposed)
+        {
+            StateHasChanged();
+        }
+    }
+
+    private async Task OpenValidationGateDialogAsync(StagedReviewPageModel model, int pendingCount)
+    {
+        if (isDisposed)
+        {
+            validationGateCompletion?.TrySetResult(false);
+            return;
+        }
+
+        try
+        {
+            await DialogService.OpenAsync<PreMergeValidationDialog>(
+                "Pre-merge validation gate",
+                new Dictionary<string, object?>
+                {
+                    [nameof(PreMergeValidationDialog.RelativePath)] = model.RelativePath,
+                    [nameof(PreMergeValidationDialog.ValidationStatus)] = model.PreMergeValidationStatus,
+                    [nameof(PreMergeValidationDialog.PendingCount)] = pendingCount,
+                    [nameof(PreMergeValidationDialog.DecisionMade)] = EventCallback.Factory.Create<bool>(this, HandleValidationGateDecisionAsync)
+                },
+                new DialogOptions
+                {
+                    Width = "88vw",
+                    Height = "88vh",
+                    CloseDialogOnEsc = false,
+                    CloseDialogOnOverlayClick = false,
+                    Resizable = true,
+                    Draggable = true,
+                    ShowClose = false
+                });
+        }
+        catch (Exception ex)
+        {
+            AddDebugEvent(
+                "ValidationGate",
+                "open-error",
+                "home",
+                $"Validation dialog open failed for edit session '{model.SessionId}': {ex.Message}");
+            validationGateCompletion?.TrySetResult(false);
+        }
+    }
+
+    private async Task OpenStagedReviewDialogCoreAsync(string sessionId)
+    {
+        if (isDisposed)
+        {
+            reviewDialogCompletion?.TrySetResult(true);
+            return;
+        }
+
+        try
+        {
+            await DialogService.OpenAsync<StagedReviewDialog>(
+                "Merge Review",
+                new Dictionary<string, object?>
+                {
+                    [nameof(StagedReviewDialog.WorkspaceRoot)] = repoRoot,
+                    [nameof(StagedReviewDialog.SessionId)] = sessionId,
+                    [nameof(StagedReviewDialog.AutoCloseWhenComplete)] = true,
+                    [nameof(StagedReviewDialog.TraceEventRaised)] = EventCallback.Factory.Create<string>(this, HandleStagedReviewTraceAsync),
+                    [nameof(StagedReviewDialog.CloseRequested)] = EventCallback.Factory.Create(this, HandleStagedReviewDialogClosedAsync)
+                },
+                new DialogOptions
+                {
+                    Width = "88vw",
+                    Height = "88vh",
+                    CloseDialogOnEsc = false,
+                    CloseDialogOnOverlayClick = false,
+                    Resizable = true,
+                    Draggable = true,
+                    ShowClose = false
+                });
+        }
+        catch (Exception ex)
+        {
+            AddDebugEvent(
+                "ReviewDialog",
+                "open-error",
+                "home",
+                $"Staged review dialog open failed for session '{sessionId}': {ex.Message}");
+            reviewDialogCompletion?.TrySetResult(true);
+        }
     }
 
     private sealed record PendingReviewLaunchState(string SessionId, int PendingCount);
 
     public void Dispose()
     {
+        isDisposed = true;
         ConnectionService.Changed -= OnConnectionChanged;
         GovernedReviewCoordinator.Changed -= OnGovernedReviewCoordinatorChanged;
     }
 
     public async ValueTask DisposeAsync()
     {
+        isDisposed = true;
         if (mainResizeModule is not null)
         {
             try

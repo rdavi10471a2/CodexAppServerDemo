@@ -360,7 +360,7 @@ public sealed class WorkflowTaskBoardViewServiceTests
                 ["CodingServices:WatchedSolutionPath"] = configuredSolutionPath
             })
             .Build();
-        WorkflowTaskBoardViewService service = new(new CodingServicesSettingsProvider(configuration));
+        WorkflowTaskBoardViewService service = new(TestServiceFactory.CreateSettingsProvider(configuration, configuredRepository.RootPath));
 
         TaskBoardViewModel firstBoard = service.GetBoard(firstWorkspace.RootPath, null);
         TaskBoardViewModel secondBoard = service.GetBoard(secondWorkspace.RootPath, null);
@@ -442,6 +442,6 @@ public sealed class WorkflowTaskBoardViewServiceTests
             })
             .Build();
 
-        return new CodingServicesSettingsProvider(configuration);
+        return TestServiceFactory.CreateSettingsProvider(configuration, Directory.GetCurrentDirectory());
     }
 }

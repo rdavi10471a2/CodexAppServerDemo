@@ -28,20 +28,80 @@ public sealed class HarnessWorkspaceEditService
     {
         WorkspaceEditContext context = ResolveContext(watchedFilePath);
         WorkflowEditService workflowService = new(context.Settings);
-        string? resolvedSessionId = ResolveRefreshSessionId(workflowService, context.WatchedFilePath, sessionId);
-        EditSessionStatus status = workflowService.Refresh(context.WatchedFilePath, resolvedSessionId);
-        workspaceState.SetCurrentEditSessionId(status.EditSessionId);
-        return status;
+        WorkflowRunRecorder recorder = CreateRecorder(context.Settings, "refresh-file", out string runId);
+        recorder.Stage(runId, "mcp-refresh-file-start", new Dictionary<string, string>
+        {
+            ["workspaceRoot"] = context.WorkspaceRoot,
+            ["watchedFilePath"] = context.WatchedFilePath,
+            ["requestedSessionId"] = sessionId ?? "<null>",
+            ["currentWorkspaceSessionId"] = workspaceState.CurrentEditSessionId ?? "<null>"
+        });
+
+        try
+        {
+            string? resolvedSessionId = ResolveRefreshSessionId(workflowService, context.WatchedFilePath, sessionId);
+            EditSessionStatus status = workflowService.Refresh(context.WatchedFilePath, resolvedSessionId);
+            workspaceState.SetCurrentEditSessionId(status.EditSessionId);
+            recorder.Stage(runId, "mcp-refresh-file-success", new Dictionary<string, string>
+            {
+                ["resolvedSessionId"] = resolvedSessionId ?? "<new-session>",
+                ["resultSessionId"] = status.EditSessionId,
+                ["classification"] = status.Classification,
+                ["workingFilePath"] = status.WorkingFilePath
+            });
+            return status;
+        }
+        catch (Exception ex)
+        {
+            recorder.Stage(runId, "mcp-refresh-file-failure", BuildFailureFields(ex, new Dictionary<string, string>
+            {
+                ["workspaceRoot"] = context.WorkspaceRoot,
+                ["watchedFilePath"] = context.WatchedFilePath,
+                ["requestedSessionId"] = sessionId ?? "<null>",
+                ["currentWorkspaceSessionId"] = workspaceState.CurrentEditSessionId ?? "<null>"
+            }));
+            throw;
+        }
     }
 
     public EditSessionStatus NewFile(string watchedFilePath, string? sessionId = null)
     {
         WorkspaceEditContext context = ResolveContext(watchedFilePath);
         WorkflowEditService workflowService = new(context.Settings);
-        string? resolvedSessionId = ResolveRefreshSessionId(workflowService, context.WatchedFilePath, sessionId);
-        EditSessionStatus status = workflowService.NewFile(context.WatchedFilePath, resolvedSessionId);
-        workspaceState.SetCurrentEditSessionId(status.EditSessionId);
-        return status;
+        WorkflowRunRecorder recorder = CreateRecorder(context.Settings, "new-file", out string runId);
+        recorder.Stage(runId, "mcp-new-file-start", new Dictionary<string, string>
+        {
+            ["workspaceRoot"] = context.WorkspaceRoot,
+            ["watchedFilePath"] = context.WatchedFilePath,
+            ["requestedSessionId"] = sessionId ?? "<null>",
+            ["currentWorkspaceSessionId"] = workspaceState.CurrentEditSessionId ?? "<null>"
+        });
+
+        try
+        {
+            string? resolvedSessionId = ResolveRefreshSessionId(workflowService, context.WatchedFilePath, sessionId);
+            EditSessionStatus status = workflowService.NewFile(context.WatchedFilePath, resolvedSessionId);
+            workspaceState.SetCurrentEditSessionId(status.EditSessionId);
+            recorder.Stage(runId, "mcp-new-file-success", new Dictionary<string, string>
+            {
+                ["resolvedSessionId"] = resolvedSessionId ?? "<new-session>",
+                ["resultSessionId"] = status.EditSessionId,
+                ["classification"] = status.Classification,
+                ["workingFilePath"] = status.WorkingFilePath
+            });
+            return status;
+        }
+        catch (Exception ex)
+        {
+            recorder.Stage(runId, "mcp-new-file-failure", BuildFailureFields(ex, new Dictionary<string, string>
+            {
+                ["workspaceRoot"] = context.WorkspaceRoot,
+                ["watchedFilePath"] = context.WatchedFilePath,
+                ["requestedSessionId"] = sessionId ?? "<null>",
+                ["currentWorkspaceSessionId"] = workspaceState.CurrentEditSessionId ?? "<null>"
+            }));
+            throw;
+        }
     }
 
     public EditSessionPlan DeclareSessionFiles(string sessionId, IEnumerable<string> watchedFilePaths)
@@ -52,18 +112,88 @@ public sealed class HarnessWorkspaceEditService
             .Select(ResolveContext)
             .Select(context => context.WatchedFilePath)
             .ToList();
-        EditSessionPlan plan = workflowService.DeclareSessionFiles(sessionId, resolvedPaths);
-        workspaceState.SetCurrentEditSessionId(plan.SessionId);
-        return plan;
+        WorkflowRunRecorder recorder = CreateRecorder(workspace.Settings, "declare-session-files", out string runId);
+        recorder.Stage(runId, "mcp-declare-session-files-start", new Dictionary<string, string>
+        {
+            ["workspaceRoot"] = workspace.WorkspaceRoot,
+            ["sessionId"] = sessionId,
+            ["resolvedPathCount"] = resolvedPaths.Count.ToString(),
+            ["resolvedPaths"] = string.Join(" | ", resolvedPaths.Select(workflowService.GetRelativePathForDiagnostics)),
+            ["currentWorkspaceSessionId"] = workspaceState.CurrentEditSessionId ?? "<null>"
+        });
+
+        try
+        {
+            EditSessionPlan plan = workflowService.DeclareSessionFiles(sessionId, resolvedPaths);
+            workspaceState.SetCurrentEditSessionId(plan.SessionId);
+            recorder.Stage(runId, "mcp-declare-session-files-success", new Dictionary<string, string>
+            {
+                ["sessionId"] = plan.SessionId,
+                ["declaredPathCount"] = plan.DeclaredWatchedFilePaths.Count.ToString(),
+                ["declaredPaths"] = string.Join(" | ", plan.DeclaredRelativePaths)
+            });
+            return plan;
+        }
+        catch (Exception ex)
+        {
+            EditSessionPlan? survivingPlan = workflowService.GetSessionPlan(sessionId);
+            recorder.Stage(runId, "mcp-declare-session-files-failure", BuildFailureFields(ex, new Dictionary<string, string>
+            {
+                ["workspaceRoot"] = workspace.WorkspaceRoot,
+                ["sessionId"] = sessionId,
+                ["resolvedPathCount"] = resolvedPaths.Count.ToString(),
+                ["resolvedPaths"] = string.Join(" | ", resolvedPaths.Select(workflowService.GetRelativePathForDiagnostics)),
+                ["currentWorkspaceSessionId"] = workspaceState.CurrentEditSessionId ?? "<null>",
+                ["survivingPlan"] = survivingPlan is null
+                    ? "<null>"
+                    : string.Join(" | ", survivingPlan.DeclaredRelativePaths)
+            }));
+            throw;
+        }
     }
 
     public EditSessionPlan AddFileToSession(string sessionId, string watchedFilePath)
     {
         WorkspaceEditContext context = ResolveContext(watchedFilePath);
         WorkflowEditService workflowService = new(context.Settings);
-        EditSessionPlan plan = workflowService.AddFileToSession(sessionId, context.WatchedFilePath);
-        workspaceState.SetCurrentEditSessionId(plan.SessionId);
-        return plan;
+        WorkflowRunRecorder recorder = CreateRecorder(context.Settings, "add-file-to-session", out string runId);
+        recorder.Stage(runId, "mcp-add-file-to-session-start", new Dictionary<string, string>
+        {
+            ["workspaceRoot"] = context.WorkspaceRoot,
+            ["sessionId"] = sessionId,
+            ["watchedFilePath"] = context.WatchedFilePath,
+            ["relativePath"] = workflowService.GetRelativePathForDiagnostics(context.WatchedFilePath),
+            ["currentWorkspaceSessionId"] = workspaceState.CurrentEditSessionId ?? "<null>"
+        });
+
+        try
+        {
+            EditSessionPlan plan = workflowService.AddFileToSession(sessionId, context.WatchedFilePath);
+            workspaceState.SetCurrentEditSessionId(plan.SessionId);
+            recorder.Stage(runId, "mcp-add-file-to-session-success", new Dictionary<string, string>
+            {
+                ["sessionId"] = plan.SessionId,
+                ["declaredPathCount"] = plan.DeclaredWatchedFilePaths.Count.ToString(),
+                ["declaredPaths"] = string.Join(" | ", plan.DeclaredRelativePaths)
+            });
+            return plan;
+        }
+        catch (Exception ex)
+        {
+            EditSessionPlan? survivingPlan = workflowService.GetSessionPlan(sessionId);
+            recorder.Stage(runId, "mcp-add-file-to-session-failure", BuildFailureFields(ex, new Dictionary<string, string>
+            {
+                ["workspaceRoot"] = context.WorkspaceRoot,
+                ["sessionId"] = sessionId,
+                ["watchedFilePath"] = context.WatchedFilePath,
+                ["relativePath"] = workflowService.GetRelativePathForDiagnostics(context.WatchedFilePath),
+                ["currentWorkspaceSessionId"] = workspaceState.CurrentEditSessionId ?? "<null>",
+                ["survivingPlan"] = survivingPlan is null
+                    ? "<null>"
+                    : string.Join(" | ", survivingPlan.DeclaredRelativePaths)
+            }));
+            throw;
+        }
     }
 
     public ReplaceTextResult ReplaceTextInFile(
@@ -116,6 +246,20 @@ public sealed class HarnessWorkspaceEditService
             validateOverlay);
     }
 
+    public EditSessionStatus SubmitFile(
+        string watchedFilePath,
+        string content,
+        string? manifestJson = null,
+        bool validateOverlay = true)
+    {
+        WorkspaceEditContext context = ResolveContext(watchedFilePath);
+        return new WorkflowEditService(context.Settings).SubmitFile(
+            context.WatchedFilePath,
+            content,
+            manifestJson,
+            validateOverlay);
+    }
+
     public RoslynFileOutlineResult GetFileOutline(string watchedFilePath)
     {
         WorkspaceEditContext context = ResolveContext(watchedFilePath);
@@ -146,6 +290,26 @@ public sealed class HarnessWorkspaceEditService
             context.WatchedFilePath,
             symbolSelectorJson,
             code,
+            manifestJson,
+            validateOverlay);
+    }
+
+    public RoslynEditResult AddSymbol(
+        string watchedFilePath,
+        string containingType,
+        string symbolType,
+        string code,
+        string? afterSymbol = null,
+        string? manifestJson = null,
+        bool validateOverlay = true)
+    {
+        WorkspaceEditContext context = ResolveContext(watchedFilePath);
+        return new RoslynEditService(context.Settings).AddSymbol(
+            context.WatchedFilePath,
+            containingType,
+            symbolType,
+            code,
+            afterSymbol,
             manifestJson,
             validateOverlay);
     }
@@ -382,5 +546,23 @@ public sealed class HarnessWorkspaceEditService
 
         throw new InvalidOperationException(
             $"An active governed edit session '{currentSessionId}' is already selected. Pass that sessionId explicitly when refreshing an additional file for the same coherent task.");
+    }
+
+    private static WorkflowRunRecorder CreateRecorder(
+        CodingServicesSettings settings,
+        string operationName,
+        out string runId)
+    {
+        WorkflowEditPaths paths = new(settings);
+        runId = $"{operationName}-{DateTimeOffset.UtcNow:yyyyMMddTHHmmssfff}-{Guid.NewGuid():N}";
+        return new WorkflowRunRecorder(paths.HistoryRoot, runId);
+    }
+
+    private static Dictionary<string, string> BuildFailureFields(Exception exception, Dictionary<string, string> fields)
+    {
+        fields["exceptionType"] = exception.GetType().FullName ?? exception.GetType().Name;
+        fields["exceptionMessage"] = exception.Message;
+        fields["exceptionStack"] = exception.ToString();
+        return fields;
     }
 }

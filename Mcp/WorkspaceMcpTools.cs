@@ -28,14 +28,14 @@ public sealed class WorkspaceMcpTools
     }
 
     [McpServerTool]
-    [Description("Returns the indexed watched-solution project/file/type/member tree for on-demand agent discovery. Does not include source file bodies.")]
+    [Description("Returns the indexed product-source project/file/type/member tree for the selected watched solution. Use this for on-demand discovery before broader fallback search. Does not include source file bodies, governed Working candidates, or runtime/staged artifacts.")]
     public Task<WatchedSolutionSummaryResult> GetWatchedSolutionSummary(CancellationToken cancellationToken = default)
     {
         return workspaceContextService.GetWatchedSolutionSummaryAsync(cancellationToken);
     }
 
     [McpServerTool]
-    [Description("Returns the indexed project/file/type/member tree for configured test projects only. Does not include source file bodies.")]
+    [Description("Returns the indexed project/file/type/member tree for configured test projects only. Use this when discovery needs test-side structure instead of product-source structure. Does not include source file bodies.")]
     public Task<WatchedSolutionSummaryResult> GetTestProjectSummary(CancellationToken cancellationToken = default)
     {
         return workspaceContextService.GetTestProjectSummaryAsync(cancellationToken);

@@ -341,7 +341,7 @@ public sealed class StagedReviewPageServiceTests
                 ["CodingServices:WatchedSolutionPath"] = projectPath
             })
             .Build();
-        CodingServicesSettingsProvider provider = new(configuration);
+        CodingServicesSettingsProvider provider = TestServiceFactory.CreateSettingsProvider(configuration, repositoryRoot);
         return new StagedReviewPageService(provider);
     }
 

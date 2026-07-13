@@ -1,0 +1,95 @@
+Coding Services host bootstrap policy
+
+Session authority
+
+- This session is hosted by Coding Services.
+- Treat the selected CWD as the authoritative target workspace for the thread.
+- Do not assume the Coding Services host repository is the target workspace unless the selected CWD matches it.
+- Workspace-local `AGENTS.md` rules apply only when present in the selected workspace or its trusted project root.
+- When host policy, selected-workspace policy, and generic model habits conflict, Coding Services host policy wins for this session.
+- The controlling host rule set is the Coding Services bootstrap/session policy together with the host `AGENTS.md`, not either file in isolation.
+
+Context reporting
+
+- When asked for configuration or context, explain it first as a Coding Services session for the selected workspace.
+- Report effective Coding Services session policy, not the raw system/developer/user instruction hierarchy, unless the user explicitly asks for that hierarchy.
+- Present stable session context in this order:
+  1. Coding Services host/session policy
+  2. Selected workspace and workspace-local `AGENTS.md` policy
+  3. Coding Services indexed workspace metadata
+  4. Relevant environment metadata
+  5. Any active execution constraints
+- For policy-review or orientation-only turns, inspect policy artifacts directly and do not start governed task/edit workflow unless the user asks for implementation work.
+
+Governed task entry
+
+- For governed implementation work, call `get_current_task` before treating any task as authoritative.
+- If `get_current_task` reports no active task, stop and tell the user there is no current task.
+- If `get_current_task` is unavailable, stop and report that the governed task-context MCP surface is missing.
+- Restate the current task from `get_current_task`, not from stale transcript memory, task numbers, or filenames.
+- Host-supplied task summaries are startup context, not a substitute for the governed `get_current_task` call during an actual Work turn.
+- If the user asks for watched-source implementation work that is outside the active task, stop and say that the request is outside the current governed task rather than silently doing adjacent work.
+
+Governed discovery and source truth
+
+- Reason in the cloud; edit locally. (Discover and plan through MCP/context first; compose watched-source changes only through governed local Working/edit tools.)
+- Prefer Coding Services MCP discovery for workspace truth.
+- When the selected workspace lacks local copies of these policy docs, the host-repo copies remain the authoritative session-policy text.
+- Discovery should restart fresh each Work turn. Do not skip straight to direct source reads, index summaries, or transcript memory just because earlier turns already identified likely files.
+- At the start of each Work turn, perform one broad live tool-surface discovery pass before choosing a governed mutation path. Do not treat a narrow or relevance-filtered `tool_search` result as a complete inventory of callable MCP methods.
+- If the first discovery pass was intentionally narrow, say that plainly and broaden discovery before concluding that a mutation family is missing.
+- Discovery should proceed in order: derive candidate file set from task, confirm the target through governed discovery, refresh into Working, then reason primarily from the refreshed Working candidate and governed structure tools.
+- Direct watched-source reads are support-only after target selection; they are not a normal substitute for governed discovery or post-refresh structure reads.
+- Runtime artifacts under `runtime\\watched-solutions\\...`, including `working`, `staged`, `workflow\\history`, `metadata`, and `task-memory`, are not authoritative proof that watched source is complete.
+- Before any "already implemented" conclusion, refresh every task file through the current turn's governed edit surface and report the evidence.
+- Read live MCP tool descriptions during discovery when selecting a governed path. Required arguments and workflow expectations such as `sessionId`, `containingType`, declared session membership, or file-creation inputs are part of the current-turn contract.
+- If the host exposes `request_operator_confirmation`, use it for bounded yes/no operator questions instead of asking those questions freeform in chat.
+
+Governed edit protocol
+
+- The governed edit tools exist so the agent can reason from compact cloud context while composing watched-source edits locally through the harness-owned workflow.
+- Treat watched source as MCP-governed write-only. Read it for discovery and validation, but never mutate it through generic fallback writes.
+- Start each existing task file with `refresh_file` unless the user explicitly told you to resume an existing Working candidate.
+- Use `new_file` only when creating a file that does not yet exist in watched source.
+- A governed edit session is required for every watched-source change, whether the task touches one file or many.
+- If `declare_edit_session` is exposed and healthy, use it to declare the intended changed file set before mutation. If it is absent, continue by establishing the required governed edit session through the normal `refresh_file` / `new_file` path instead of treating that tool's absence as a blocker.
+- For a brand-new watched file, the normal governed path is `new_file` followed by `submit_file` against the monitor-owned Working candidate, then governed session review.
+- For existing files, prefer the narrowest governed mutation that fits the change. For C# this usually means `submit_symbol`, typed Roslyn add/remove tools, or governed text replacement before a whole-file `submit_file`.
+- Treat `replace_span_in_file` as the most fragile governed text mutation and rank it last among normal text-edit choices. Prefer `replace_text_in_file` when it can express the same change more clearly.
+- For C# files, prefer `replace_text_in_file` for one contiguous unique replacement.
+- For C# files, if the intended change spans more than one fragment inside the same symbol or if multiple edits are planned in the same file, prefer symbol-aware mutation such as `submit_symbol` or `remove_symbol` for the whole set.
+- Treat `replace_span_in_file` as a destructive coordinate fallback, not a trusted base for follow-on edits in the same file, unless the span is regenerated from the current governed Working candidate immediately before that bounded change.
+- Canonical new-file sequence:
+  1. `get_current_task`
+  2. establish or reuse the coherent governed edit session id for the task
+  3. if available, `declare_edit_session(filesPlanned: [...])` to declare the intended edit set for that session
+  4. `new_file(watchedFilePath, sessionId)`
+  5. `submit_file(path, content, sessionId)`
+  6. `stage_edit_session_for_review(sessionId)`
+  7. stop at the governed in-app review boundary
+- After `refresh_file` or `new_file`, treat the refreshed governed Working candidate as the authoritative local source for the turn. Prefer governed structure reads from that point forward; direct watched-source reads become diagnostic fallback, not the normal context source.
+- Fresh governed evidence must include `EditSessionId`, `watchedFilePath`, `workingFilePath`, and `classification`.
+- If the refreshed files come back `classification: unchanged`, only then may you conclude the task is already implemented.
+- The first governed edit establishes the session id for the coherent change. Reuse it.
+- For additional files in the same change, grow the session with `add_file_to_session`.
+- `refresh_file(secondFile, sessionId)` or `new_file(secondFile, sessionId)` refreshes the later file into the same coherent edit context, but does not by itself replace the declared session file set unless the tool contract explicitly says it does. When the coherent change grows incrementally, follow with `add_file_to_session`.
+- Use `declare_session_files` only when you intentionally have the full non-empty declared file set ready in one payload.
+- If a later file unexpectedly returns a different session id for the same coherent change, stop and report the mismatch before staging review.
+- If no governed mutation path exists for the file kind, fail closed and report the tooling gap instead of bypassing governance.
+- A truthful governed refusal or tooling-gap report is correct behavior. Do not improvise around missing governed capability just to keep momentum.
+
+Governed review gate
+
+- Review is session-first. Stage the declared session with `stage_edit_session_for_review`, whether the session contains one file or many.
+- If session staging fails, report the tooling failure. Do not fall back to ad hoc single-file staging.
+- Once staged review has launched, stop at the human review boundary unless the user explicitly instructs you to record the decision through MCP.
+- The authoritative review boundary is the in-app governed review flow. Review URLs are diagnostic fallback only.
+- The staged-review decision is a governed MCP elicitation. Do not work around it by calling accept/reject tools on the user's behalf unless the user explicitly asks for that path.
+
+Execution and freshness
+
+- After accepted review decisions, treat the governed post-accept build/digest/index refresh as the normal freshness path.
+- Prefer fresh post-accept build, digest, summary, and index evidence over stale prior context.
+- Run an explicit rebuild/reindex only when that accept-time refresh failed, was deferred, or the user is deliberately doing a recovery/diagnostic pass.
+- When asking whether task or agent notes should be updated, prefer `request_operator_confirmation` when it is exposed so the operator can answer through a governed structured yes/no prompt.
+- If a tool action fails, continue with the best viable governed fallback unless the user must make a real choice.

@@ -1,6 +1,7 @@
 using CodexAppServerBlazor.Mcp;
 using CodexAppServerBlazor.Services.Tasks;
 using CodexAppServerBlazor.Services.Workflow;
+using System.Text.Json.Nodes;
 
 namespace CodexAppServerBlazor.Services;
 
@@ -59,6 +60,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
             return new CodexConnectionSnapshot(
                 IsServerStarted: client?.IsStarted == true,
                 ThreadId: client?.ThreadId,
+                ActiveTurnId: client?.ActiveTurnId,
                 IsTurnRunning: isTurnRunning,
                 AssistantText: assistantText,
                 CurrentTurnNoticeText: currentTurnNoticeText,
@@ -203,6 +205,32 @@ public sealed class CodexConnectionService : IAsyncDisposable
                 string.IsNullOrWhiteSpace(reason)
                     ? "Cleared the active Codex thread and workflow session."
                     : reason);
+        }
+        finally
+        {
+            operationGate.Release();
+            Changed?.Invoke();
+        }
+    }
+
+    public async Task InterruptTurnAsync(CancellationToken cancellationToken)
+    {
+        if (!await operationGate.WaitAsync(0, cancellationToken))
+        {
+            throw new InvalidOperationException("A Codex operation is already running.");
+        }
+
+        try
+        {
+            CodexAppServerClient activeClient = GetStartedClient();
+            await activeClient.InterruptTurnAsync(cancellationToken);
+            AddCurrentTurnNotice("Interrupt requested. Waiting for the current turn to stop.");
+            AddEvent(
+                statusEvents,
+                "TurnInterrupt",
+                "requested",
+                "coding-services",
+                $"Requested interruption for active turn '{activeClient.ActiveTurnId ?? "<none>"}'.");
         }
         finally
         {
@@ -387,6 +415,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
     public async Task ApprovePermissionRequestAsync(
         int requestId,
         PermissionApprovalScope scope,
+        JsonObject? elicitationContent,
         CancellationToken cancellationToken)
     {
         CodexAppServerClient activeClient = GetStartedClient();
@@ -401,16 +430,17 @@ public sealed class CodexConnectionService : IAsyncDisposable
             throw new InvalidOperationException($"No pending permission request found for id {requestId}.");
         }
 
-        object response = PermissionRequestService.CreateApproveResponse(request.Method, request.RawJson, scope);
+        object response = PermissionRequestService.CreateApproveResponse(request.Method, request.RawJson, scope, elicitationContent);
         await activeClient.RespondToServerRequestAsync(request.RequestId, response, cancellationToken);
-        AddCurrentTurnNotice(PermissionRequestService.IsElicitationRequest(request.Method)
-            ? $"Answered elicitation request #{request.RequestId}; waiting for the agent to continue."
-            : scope switch
+        if (!PermissionRequestService.IsElicitationRequest(request.Method))
         {
-            PermissionApprovalScope.Session => $"Approved request #{request.RequestId} for this session; waiting for the command result.",
-            PermissionApprovalScope.Persistent => $"Approved request #{request.RequestId} always; waiting for the command result.",
-            _ => $"Approved request #{request.RequestId}; waiting for the command result."
-        });
+            AddCurrentTurnNotice(scope switch
+            {
+                PermissionApprovalScope.Session => $"Approved request #{request.RequestId} for this session; waiting for the command result.",
+                PermissionApprovalScope.Persistent => $"Approved request #{request.RequestId} always; waiting for the command result.",
+                _ => $"Approved request #{request.RequestId}; waiting for the command result."
+            });
+        }
         AddEvent(
             statusEvents,
             "PermissionResponse",
@@ -465,7 +495,21 @@ public sealed class CodexConnectionService : IAsyncDisposable
         {
             if (e.IsFinal)
             {
-                assistantText = e.Text;
+                if (string.IsNullOrEmpty(assistantText))
+                {
+                    assistantText = e.Text;
+                }
+                else if (!string.IsNullOrEmpty(e.Text))
+                {
+                    if (e.Text.StartsWith(assistantText, StringComparison.Ordinal))
+                    {
+                        assistantText = e.Text;
+                    }
+                    else if (!assistantText.EndsWith(e.Text, StringComparison.Ordinal))
+                    {
+                        assistantText += e.Text;
+                    }
+                }
             }
             else
             {
@@ -516,6 +560,18 @@ public sealed class CodexConnectionService : IAsyncDisposable
             return;
         }
 
+        if (PermissionRequestService.IsWrappedOperatorConfirmationToolRequest(e.Method, e.RawJson))
+        {
+            AddEvent(
+                statusEvents,
+                "PermissionRequest",
+                "auto-approved",
+                "coding-services",
+                $"Auto-approved wrapped operator confirmation tool request #{e.RequestId}; surfacing the actual yes/no elicitation directly.");
+            _ = AutoApproveServerRequestAsync(e);
+            return;
+        }
+
         CodexPermissionRequest request = permissionRequestService.Add(e);
         AddEvent(
             statusEvents,
@@ -523,6 +579,33 @@ public sealed class CodexConnectionService : IAsyncDisposable
             "pending",
             "codex app-server",
             $"{request.Method} #{request.RequestId}: {request.Summary}");
+    }
+
+    private async Task AutoApproveServerRequestAsync(CodexServerRequestEvent e)
+    {
+        CodexAppServerClient? activeClient = client;
+        if (activeClient is null)
+        {
+            return;
+        }
+
+        try
+        {
+            object response = PermissionRequestService.CreateApproveResponse(
+                e.Method,
+                e.RawJson,
+                PermissionApprovalScope.Turn);
+            await activeClient.RespondToServerRequestAsync(e.RequestId, response);
+        }
+        catch (Exception ex)
+        {
+            AddEvent(
+                statusEvents,
+                "PermissionRequest",
+                "error",
+                "coding-services",
+                $"Failed to auto-approve wrapped operator confirmation request #{e.RequestId}: {ex.Message}");
+        }
     }
 
     private async Task BridgeReviewElicitationAsync(CodexServerRequestEvent e, string sessionId)
@@ -823,6 +906,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
 public sealed record CodexConnectionSnapshot(
     bool IsServerStarted,
     string? ThreadId,
+    string? ActiveTurnId,
     bool IsTurnRunning,
     string AssistantText,
     string CurrentTurnNoticeText,

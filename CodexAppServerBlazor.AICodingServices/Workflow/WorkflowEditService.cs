@@ -120,6 +120,11 @@ public sealed class WorkflowEditService
             throw new InvalidOperationException("Declare at least one file path for the governed edit session.");
         }
 
+        foreach (string declaredPath in declaredPaths)
+        {
+            EnsureFileIsCurrentSessionCandidate(sessionId.Trim(), declaredPath);
+        }
+
         DateTimeOffset nowUtc = DateTimeOffset.UtcNow;
         EditSessionPlan plan = LoadSessionPlan(sessionId.Trim()) ?? new EditSessionPlan
         {
@@ -149,6 +154,7 @@ public sealed class WorkflowEditService
         }
 
         string fullWatchedPath = Path.GetFullPath(watchedFilePath);
+        EnsureFileIsCurrentSessionCandidate(sessionId.Trim(), fullWatchedPath);
         EnsureSessionPlanContainsFile(sessionId.Trim(), fullWatchedPath);
         return LoadSessionPlan(sessionId.Trim())
             ?? throw new InvalidOperationException($"Governed edit session '{sessionId}' could not be loaded after adding '{fullWatchedPath}'.");
@@ -162,6 +168,33 @@ public sealed class WorkflowEditService
         }
 
         return LoadSessionPlan(sessionId.Trim());
+    }
+
+    public string GetRelativePathForDiagnostics(string watchedFilePath)
+    {
+        return paths.GetRelativeWatchedPath(Path.GetFullPath(watchedFilePath));
+    }
+
+    public void EnsureDeclaredSessionFilesReadyForReview(string sessionId)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            throw new InvalidOperationException("A non-empty edit session id is required when validating governed session files.");
+        }
+
+        EditSessionPlan plan = LoadSessionPlan(sessionId.Trim())
+            ?? throw new InvalidOperationException(
+                $"No declared governed file set exists for edit session '{sessionId}'. Declare the session files before staging a multi-file review.");
+        if (plan.DeclaredWatchedFilePaths.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"Edit session '{sessionId}' does not declare any files. Declare the intended files before staging.");
+        }
+
+        foreach (string declaredPath in plan.DeclaredWatchedFilePaths)
+        {
+            EnsureFileIsCurrentSessionCandidate(sessionId.Trim(), declaredPath);
+        }
     }
 
     private string CreateRetrievalBackup(string fullWatchedPath, string originalHash, DateTimeOffset capturedAtUtc)
@@ -1334,6 +1367,66 @@ public sealed class WorkflowEditService
         plan.DeclaredRelativePaths.Add(paths.GetRelativeWatchedPath(watchedFilePath));
         plan.UpdatedAtUtc = DateTimeOffset.UtcNow.ToString("O");
         SaveSessionPlan(plan);
+    }
+
+    private void EnsureFileIsCurrentSessionCandidate(string sessionId, string watchedFilePath)
+    {
+        string fullWatchedPath = Path.GetFullPath(watchedFilePath);
+        using IDisposable manifestLock = AcquireManifestLock(fullWatchedPath);
+        EditSessionManifest? manifest = LoadManifest(fullWatchedPath);
+        bool watchedFileExists = File.Exists(fullWatchedPath);
+
+        if (manifest is null)
+        {
+            throw new InvalidOperationException(watchedFileExists
+                ? $"Governed file '{paths.GetRelativeWatchedPath(fullWatchedPath)}' is not attached to the current edit session '{sessionId}'. Run refresh_file for this watched path with sessionId '{sessionId}', then retry."
+                : $"Governed new-file target '{paths.GetRelativeWatchedPath(fullWatchedPath)}' is not attached to the current edit session '{sessionId}'. Run new_file for this watched path with sessionId '{sessionId}', then retry.");
+        }
+
+        if (!manifest.EditSessionId.Equals(sessionId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(watchedFileExists
+                ? $"Governed file '{manifest.RelativePath}' is bound to edit session '{manifest.EditSessionId}', not '{sessionId}'. Run refresh_file for this watched path with sessionId '{sessionId}', then retry."
+                : $"Governed new-file target '{manifest.RelativePath}' is bound to edit session '{manifest.EditSessionId}', not '{sessionId}'. Run new_file for this watched path with sessionId '{sessionId}', then retry.");
+        }
+
+        if (manifest.RequiresRefresh)
+        {
+            throw new InvalidOperationException(watchedFileExists
+                ? $"Governed file '{manifest.RelativePath}' requires a fresh bootstrap before it can join review session '{sessionId}'. Run refresh_file for this watched path with sessionId '{sessionId}', then retry."
+                : $"Governed new-file target '{manifest.RelativePath}' requires a fresh bootstrap before it can join review session '{sessionId}'. Run new_file for this watched path with sessionId '{sessionId}', then retry.");
+        }
+
+        if (!File.Exists(manifest.WorkingFilePath))
+        {
+            throw new InvalidOperationException(watchedFileExists
+                ? $"Governed file '{manifest.RelativePath}' has no working candidate for edit session '{sessionId}'. Run refresh_file for this watched path with sessionId '{sessionId}', then retry."
+                : $"Governed new-file target '{manifest.RelativePath}' has no working candidate for edit session '{sessionId}'. Run new_file for this watched path with sessionId '{sessionId}', then retry.");
+        }
+
+        if (manifest.IsNewFile)
+        {
+            if (watchedFileExists)
+            {
+                throw new InvalidOperationException(
+                    $"Governed new-file target '{manifest.RelativePath}' now exists in watched source and the working candidate is stale. Run new_file for this watched path with sessionId '{sessionId}', then retry.");
+            }
+
+            return;
+        }
+
+        if (!watchedFileExists)
+        {
+            throw new InvalidOperationException(
+                $"Governed file '{manifest.RelativePath}' no longer exists in watched source. Restore the file or run refresh_file again before adding it to review session '{sessionId}'.");
+        }
+
+        string watchedHash = FileHash.Compute(fullWatchedPath);
+        if (!watchedHash.Equals(manifest.OriginalHash, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"Governed file '{manifest.RelativePath}' changed in watched source after bootstrap for edit session '{sessionId}'. Run refresh_file for this watched path with sessionId '{sessionId}', then retry.");
+        }
     }
 
     private StagedEditRecord? LoadStagedRecord(string stagedRecordId)

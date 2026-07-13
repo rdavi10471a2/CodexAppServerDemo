@@ -1,0 +1,23 @@
+Coding Services edit-tool guidance:
+
+- Use Roslyn or symbol-aware edit tools for C# source files when the change targets a class, method, property, field, constructor, nested type, using, or partial modifier.
+- Use text or span replacement tools for non-C# files such as `.razor`, `.css`, `.js`, `.json`, `.md`, and config files, or when a C# change is truly raw text-oriented.
+- Prefer `get_file_outline` before symbol edits when the exact symbol shape or container is unclear.
+- Prefer `get_symbol` before remove or replace operations when the change depends on confirming the exact existing declaration text.
+- If a file kind is unsupported by symbol tools, say so plainly and fall back to text tools instead of forcing a semantic edit path.
+- For `.razor` files, use governed text tools such as `refresh_file`, `replace_text_in_file`, and `replace_span_in_file` for markup or mixed markup/code edits, then use the correct governed staging tool for the current session shape so the user can inspect the governed diff before any accept/reject decision.
+- After edits, refresh/build/reindex before trusting index-backed structure again.
+
+Governed workflow tool phases:
+
+- Discovery phase: prefer `get_workspace`, `get_watched_solution_digest`, `get_watched_solution_summary`, and `get_test_project_summary` before broad fallback search.
+- Edit phase: use `refresh_file`, `new_file`, `replace_text_in_file`, `replace_span_in_file`, `get_file_outline`, `get_symbol`, `submit_symbol`, and the typed Roslyn add/remove tools to produce governed staged candidates.
+- Edit phase: for existing files, do not skip `refresh_file` just because prior transcript text, prior run output, or a watched-source read suggests the change may already exist.
+- Edit phase: once the first governed edit call returns a session id, carry that same session id forward through the rest of the coherent change.
+- Edit phase: when another file joins the same coherent change, attach it explicitly with `add_file_to_session` after `refresh_file`/`new_file` establishes its working candidate.
+- Edit phase: use `declare_session_files` only when you intentionally have the full non-empty file set ready in one payload. Do not use it for empty, guessed, or placeholder file lists.
+- Edit phase: a no-op or already-implemented outcome still requires a governed `refresh_file` pass for every task file in the current turn.
+- Edit phase: only after the current-turn refresh evidence reports `classification: unchanged` for the relevant task files may you tell the user that the task is already implemented.
+- Review phase: make the session file set explicit, then use `stage_edit_session_for_review` for the whole declared set, even when the set contains only one file. After launch, use `list_pending_staged_reviews`, `load_staged_review`, or `load_next_session_review` to inspect what is staged for acceptance.
+- Review phase: if session staging fails, report the failure as a governed tooling problem. Do not recover by opening multiple one-file review sessions for the same task.
+- Decision phase: if the user explicitly directs you to record the review outcome through MCP, use `accept_staged_review` or `reject_staged_review` to do it. Otherwise, once the review UI has been launched, stop and let the human complete the review there. Do not claim merge/promotion was completed unless one of those review-decision paths actually ran successfully.

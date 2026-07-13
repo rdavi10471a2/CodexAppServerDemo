@@ -3,6 +3,8 @@ using CodexAppServerBlazor.Mcp;
 using CodexAppServerBlazor.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Hosting;
 
 namespace CodexAppServerBlazor.Tests;
 
@@ -27,11 +29,11 @@ public sealed class CodingServicesSettingsProviderTests
                 ["CodingServices:TestProjectPaths:0"] = "tests/Sample.Tests/Sample.Tests.csproj"
             })
             .Build();
-        CodingServicesSettingsProvider provider = new(configuration);
+        CodingServicesSettingsProvider provider = new(configuration, new TestHostEnvironment(workspaceRoot));
 
         CodingServicesSettings settings = provider.GetSettings(workspaceRoot);
 
-        Assert.Equal(workspaceRoot, settings.RepositoryRoot);
+        Assert.Equal(Path.GetFullPath(workspaceRoot), settings.RepositoryRoot);
         Assert.Equal(Path.GetFullPath(solutionPath), settings.WatchedSolutionPath);
         Assert.Equal(Path.Combine(workspaceRoot, "runtime"), settings.RuntimeRoot);
         Assert.Equal(Path.GetFullPath(testProjectPath), Assert.Single(settings.TestProjectPaths));
@@ -60,14 +62,14 @@ public sealed class CodingServicesSettingsProviderTests
                     ["CodingServices:TestProjectPaths:0"] = "tests/Sample.Tests/Sample.Tests.csproj"
                 })
                 .Build();
-            CodingServicesSettingsProvider provider = new(configuration);
+            CodingServicesSettingsProvider provider = new(configuration, new TestHostEnvironment(appRepository.RootPath));
 
             CodingServicesSettings settings = provider.GetSettings(selectedWorkspace.RootPath);
 
-            Assert.Equal(Path.GetFullPath(selectedWorkspace.RootPath), settings.RepositoryRoot);
-            Assert.Equal(Path.Combine(selectedWorkspace.RootPath, "runtime"), settings.RuntimeRoot);
-            Assert.Equal(Path.GetFullPath(workspaceTestProjectPath), Assert.Single(settings.TestProjectPaths));
-            Assert.NotEqual(Path.GetFullPath(appRepoTestProjectPath), settings.TestProjectPaths[0]);
+            Assert.Equal(Path.GetFullPath(appRepository.RootPath), settings.RepositoryRoot);
+            Assert.Equal(Path.Combine(appRepository.RootPath, "runtime"), settings.RuntimeRoot);
+            Assert.Equal(Path.GetFullPath(appRepoTestProjectPath), Assert.Single(settings.TestProjectPaths));
+            Assert.NotEqual(Path.GetFullPath(workspaceTestProjectPath), settings.TestProjectPaths[0]);
         }
     }
 
@@ -87,7 +89,7 @@ public sealed class CodingServicesSettingsProviderTests
                 ["CodingServices:RuntimeRoot"] = "runtime"
             })
             .Build();
-        CodingServicesSettingsProvider provider = new(configuration);
+        CodingServicesSettingsProvider provider = new(configuration, new TestHostEnvironment(workspaceRoot));
 
         CodingServicesSettings settings = provider.GetSettings(productRoot);
 
@@ -111,7 +113,7 @@ public sealed class CodingServicesSettingsProviderTests
                 ["CodingServices:WatchedSolutionPath"] = configuredSolutionPath
             })
             .Build();
-        CodingServicesSettingsProvider provider = new(configuration);
+        CodingServicesSettingsProvider provider = new(configuration, new TestHostEnvironment(selectedWorkspace.RootPath));
 
         CodingServicesSettings settings = provider.GetSettings(selectedWorkspace.RootPath);
 
@@ -133,7 +135,7 @@ public sealed class CodingServicesSettingsProviderTests
                 ["CodingServices:WatchedSolutionPath"] = configuredSolutionPath
             })
             .Build();
-        CodingServicesSettingsProvider provider = new(configuration);
+        CodingServicesSettingsProvider provider = new(configuration, new TestHostEnvironment(selectedWorkspace.RootPath));
 
         CodingServicesSettings settings = provider.GetSettings(selectedWorkspace.RootPath);
 
@@ -222,4 +224,18 @@ internal sealed class TemporaryRepository : IDisposable
             }
         }
     }
+}
+
+internal sealed class TestHostEnvironment : IHostEnvironment
+{
+    public TestHostEnvironment(string contentRootPath)
+    {
+        ContentRootPath = Path.GetFullPath(contentRootPath);
+        ContentRootFileProvider = new PhysicalFileProvider(ContentRootPath);
+    }
+
+    public string EnvironmentName { get; set; } = Environments.Development;
+    public string ApplicationName { get; set; } = "CodexAppServerBlazor.Tests";
+    public string ContentRootPath { get; set; }
+    public IFileProvider ContentRootFileProvider { get; set; }
 }

@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json.Nodes;
 using CodexAppServerBlazor.Mcp;
 using CodexAppServerBlazor.Services;
 using CodexAppServerBlazor.Services.Tasks;
@@ -260,7 +261,104 @@ public sealed class CodexConnectionServiceSequenceTests
         }
     }
 
-    private static CodexConnectionService CreateService(string workspaceRoot)
+    [Fact]
+    public async Task Wrapped_operator_confirmation_request_is_auto_approved_and_not_added_to_permission_queue()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        List<string> sentMessages = [];
+        CodexAppServerClient client = new((json, _) =>
+        {
+            sentMessages.Add(json);
+            return Task.CompletedTask;
+        });
+
+        CodexConnectionService service = CreateServiceWithActiveClient(repository.RootPath, client);
+
+        try
+        {
+            InvokePrivate(
+                service,
+                "OnServerRequest",
+                new CodexServerRequestEvent(
+                    301,
+                    "mcpServer/elicitation/request",
+                    "Need approval",
+                    """
+                    {
+                      "id": 301,
+                      "method": "mcpServer/elicitation/request",
+                      "params": {
+                        "serverName": "harness",
+                        "message": "Allow the harness MCP server to run tool \"request_operator_confirmation\"?",
+                        "_meta": {
+                          "codex_approval_kind": "mcp_tool_call"
+                        }
+                      }
+                    }
+                    """,
+                    null,
+                    null));
+
+            await Task.Delay(50);
+
+            CodexConnectionSnapshot snapshot = service.GetSnapshot();
+            Assert.Empty(snapshot.PermissionRequests);
+            CodexOutputEvent status = Assert.Single(snapshot.StatusEvents, e => e.Type == "PermissionRequest");
+            Assert.Equal("auto-approved", status.Status);
+
+            JsonNode? message = JsonNode.Parse(Assert.Single(sentMessages));
+            Assert.Equal(301, message?["id"]?.GetValue<int>());
+            Assert.Equal("accept", message?["result"]?["action"]?.GetValue<string>());
+        }
+        finally
+        {
+            await service.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Final_assistant_blocks_append_when_they_are_additional_chunks()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        CodexConnectionService service = CreateService(repository.RootPath);
+
+        try
+        {
+            InvokePrivate(service, "OnAssistantText", new AssistantTextEvent("First chunk. ", IsFinal: false));
+            InvokePrivate(service, "OnAssistantText", new AssistantTextEvent("Second chunk. ", IsFinal: false));
+            InvokePrivate(service, "OnAssistantText", new AssistantTextEvent("Final block.", IsFinal: true));
+
+            CodexConnectionSnapshot current = service.GetSnapshot();
+            Assert.Equal("First chunk. Second chunk. Final block.", current.AssistantText);
+        }
+        finally
+        {
+            await service.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Final_assistant_payload_replaces_when_it_contains_the_full_text()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        CodexConnectionService service = CreateService(repository.RootPath);
+
+        try
+        {
+            InvokePrivate(service, "OnAssistantText", new AssistantTextEvent("Hello ", IsFinal: false));
+            InvokePrivate(service, "OnAssistantText", new AssistantTextEvent("world", IsFinal: false));
+            InvokePrivate(service, "OnAssistantText", new AssistantTextEvent("Hello world", IsFinal: true));
+
+            CodexConnectionSnapshot current = service.GetSnapshot();
+            Assert.Equal("Hello world", current.AssistantText);
+        }
+        finally
+        {
+            await service.DisposeAsync();
+        }
+    }
+
+    private static CodexConnectionService CreateService(string workspaceRoot, CodexAppServerClient? client = null)
     {
         IConfiguration configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -284,7 +382,7 @@ public sealed class CodexConnectionServiceSequenceTests
         }
 
         WorkspaceState workspaceState = new();
-        CodingServicesSettingsProvider settingsProvider = new(configuration);
+        CodingServicesSettingsProvider settingsProvider = TestServiceFactory.CreateSettingsProvider(configuration, workspaceRoot);
         SourceWorkspaceService sourceWorkspaceService = new(settingsProvider);
         WorkspaceWorkflowContextService workspaceWorkflowContextService = new(sourceWorkspaceService);
         TaskWorkflowContextService taskWorkflowContextService = new(settingsProvider);
@@ -298,7 +396,17 @@ public sealed class CodexConnectionServiceSequenceTests
             workspaceWorkflowContextService,
             taskWorkflowContextService,
             sessionBootstrapPolicyService,
-            workflowTurnContextComposer);
+            workflowTurnContextComposer,
+            clientFactory: client is null ? null : (() => client));
+    }
+
+    private static CodexConnectionService CreateServiceWithActiveClient(string workspaceRoot, CodexAppServerClient client)
+    {
+        CodexConnectionService service = CreateService(workspaceRoot, client);
+        FieldInfo clientField = typeof(CodexConnectionService).GetField("client", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("CodexConnectionService.client field not found.");
+        clientField.SetValue(service, client);
+        return service;
     }
 
     private sealed class HostingEnvironmentStub : IHostEnvironment

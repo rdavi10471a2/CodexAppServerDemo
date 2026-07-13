@@ -30,10 +30,12 @@ public sealed class CodexAppServerClient : IAsyncDisposable
 
     public bool IsStarted => IsProcessRunning(_process);
     public string? ThreadId { get; private set; }
+    public string? ActiveTurnId { get; private set; }
 
     public void ResetThreadState()
     {
         ThreadId = null;
+        ActiveTurnId = null;
     }
 
     public async Task StartAsync(
@@ -202,8 +204,33 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         var response = await SendRequestAsync("turn/start", payload, cancellationToken);
 
         ThrowIfRpcError(response);
+        ActiveTurnId = response.Result?["turn"]?["id"]?.GetValue<string>();
         Status?.Invoke(new StatusEvent("turn", "Turn accepted by app-server."));
         LogLine?.Invoke("Turn started.");
+    }
+
+    public async Task InterruptTurnAsync(CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(ThreadId))
+        {
+            throw new InvalidOperationException("Start a thread first.");
+        }
+
+        if (string.IsNullOrWhiteSpace(ActiveTurnId))
+        {
+            throw new InvalidOperationException("No active turn is available to interrupt.");
+        }
+
+        object payload = new
+        {
+            threadId = ThreadId,
+            turnId = ActiveTurnId
+        };
+
+        LogLine?.Invoke("turn/interrupt payload: " + JsonSerializer.Serialize(payload));
+        JsonRpcResponse response = await SendRequestAsync("turn/interrupt", payload, cancellationToken);
+        ThrowIfRpcError(response);
+        Status?.Invoke(new StatusEvent("turn/interrupt", $"Interrupt requested for turn {ActiveTurnId}."));
     }
 
     private static object CreateApprovalPolicy(string approvalPolicy)
@@ -558,6 +585,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         {
             var turnId = turnNode.GetValue<string>();
             var turnStatus = result?["turn"]?["status"]?.GetValue<string>() ?? "unknown";
+            ActiveTurnId = turnId;
             Status?.Invoke(new StatusEvent("turn", $"turn/start result: {turnId} ({turnStatus})"));
         }
     }
@@ -593,8 +621,16 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             case "thread/status/changed":
             case "thread/started":
             case "turn/started":
+                TryCaptureActiveTurnId(node);
+                Status?.Invoke(new StatusEvent(method, Compact(node)));
+                break;
+
             case "turn/completed":
             case "turn/failed":
+                ActiveTurnId = null;
+                Status?.Invoke(new StatusEvent(method, Compact(node)));
+                break;
+
             case "remoteControl/status/changed":
                 Status?.Invoke(new StatusEvent(method, Compact(node)));
                 break;
@@ -602,6 +638,18 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             default:
                 Status?.Invoke(new StatusEvent(method, Compact(node)));
                 break;
+        }
+    }
+
+    private void TryCaptureActiveTurnId(JsonNode node)
+    {
+        string? turnId =
+            GetStringValue(node["params"]?["turn"]?["id"]) ??
+            GetStringValue(node["turn"]?["id"]);
+
+        if (!string.IsNullOrWhiteSpace(turnId))
+        {
+            ActiveTurnId = turnId;
         }
     }
 

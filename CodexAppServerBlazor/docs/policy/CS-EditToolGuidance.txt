@@ -1,17 +1,51 @@
-Coding Services edit-tool guidance:
+Coding Services edit-tool decision rules
 
-- Use Roslyn or symbol-aware edit tools for C# source files when the change targets a class, method, property, field, constructor, nested type, using, or partial modifier.
-- Use text or span replacement tools for non-C# files such as `.razor`, `.css`, `.js`, `.json`, `.md`, and config files, or when a C# change is truly raw text-oriented.
-- Prefer `get_file_outline` before symbol edits when the exact symbol shape or container is unclear.
-- Prefer `get_symbol` before remove or replace operations when the change depends on confirming the exact existing declaration text.
-- If a file kind is unsupported by symbol tools, say so plainly and fall back to text tools instead of forcing a semantic edit path.
-- For `.razor` files, use governed text tools such as `refresh_file`, `replace_text_in_file`, and `replace_span_in_file` for markup or mixed markup/code edits, then use the correct governed staging tool for the current session shape so the user can inspect the governed diff before any accept/reject decision.
-- After edits, refresh/build/reindex before trusting index-backed structure again.
+Tool families
 
-Governed workflow tool phases:
+- Use Roslyn or symbol-aware governed tools for C# source when the change targets a class, method, property, field, constructor, nested type, using, or partial modifier.
+- Use governed text tools for `.razor`, `.css`, `.js`, `.json`, `.md`, config files, and any mixed-markup edit that is not a clean Roslyn symbol operation.
+- Use `submit_file` for brand-new watched files, generated files, or deliberate whole-file replacement. For new-file authoring, enter through `new_file` first, then author the Working candidate with `submit_file`.
+- Treat governed editing as RPC against typed local artifacts, not as ad hoc file editing. Prefer the operation that matches the semantic unit of change so review and merge stay deterministic.
 
-- Discovery phase: prefer `get_workspace`, `get_watched_solution_digest`, `get_watched_solution_summary`, and `get_test_project_summary` before broad fallback search.
-- Edit phase: use `refresh_file`, `new_file`, `replace_text_in_file`, `replace_span_in_file`, `get_file_outline`, `get_symbol`, `submit_symbol`, and the typed Roslyn add/remove tools to produce governed staged candidates.
-- Review phase: declare the intended session file set, then use `stage_edit_session_for_review` for the whole declared set, even when the set contains only one file. After launch, use `list_pending_staged_reviews`, `load_staged_review`, or `load_next_session_review` to inspect what is staged for acceptance.
-- Review phase: if session staging fails, report the failure as a governed tooling problem. Do not recover by opening multiple one-file review sessions for the same task.
-- Decision phase: if the user explicitly directs you to record the review outcome through MCP, use `accept_staged_review` or `reject_staged_review` to do it. Otherwise, once the review UI has been launched, stop and let the human complete the review there. Do not claim merge/promotion was completed unless one of those review-decision paths actually ran successfully.
+Discovery rules
+
+- Prefer `get_workspace`, `get_watched_solution_digest`, `get_watched_solution_summary`, `get_test_project_summary`, and `get_current_task` before broad fallback search.
+- If the exact C# symbol/container is unclear, prefer `get_file_outline` first and `get_symbol` before remove or replace operations.
+- After `refresh_file` or `new_file`, the refreshed governed Working state is the primary local context source for the turn.
+- If governed structure tools such as `get_file_outline`, `get_source_map`, or `get_symbol` are sufficient, do not keep reading the watched source directly through shell tools.
+- For Razor or mixed-markup work, prefer the index/discovery surface first. Narrow text search against already-selected files is allowed fallback when the question is about literal markup or visible text placement rather than symbol structure.
+
+Mutation ranking
+
+- For existing-file mutation, prefer the narrowest governed tool that clearly fits the change:
+  1. Roslyn/symbol-aware mutation such as `submit_symbol`, `add_*`, or `remove_symbol`
+  2. `replace_text_in_file`
+  3. `replace_span_in_file` only when the safer governed paths cannot express the change cleanly
+  4. `submit_file` only for whole-file intent or when the live governed surface genuinely leaves no narrower correct path
+- For existing C# source, Roslyn-backed semantic edit tools are the required default for reliable governed editing because they establish reliable semantic edit boundaries, provide deterministic block-level replacement behavior, and improve diff stability for governed merge review.
+- For C# specifically, prefer `replace_text_in_file` for one contiguous unique replacement.
+- For C# specifically, prefer symbol-aware mutation such as `submit_symbol` or `remove_symbol` when the intended change spans more than one fragment inside the same symbol or when multiple edits are planned in the same file.
+- For C# specifically, prefer `add_using` / `remove_using` for using directives and typed `add_*` tools for member addition instead of broader text or whole-file rewrites.
+- Treat `replace_span_in_file` as a destructive coordinate fallback. Do not trust it as the base for further intended edits in the same file unless the span is regenerated from the current governed Working candidate immediately before the bounded change.
+- For Roslyn add/edit/remove calls, prefer the simple containing type name from the target file first when the tool asks for `containingType`, unless discovery shows a more specific form is required.
+- If a file kind is unsupported by symbol tools, say so plainly and fall back to the governed text path instead of forcing a semantic edit path.
+
+Session and review rules
+
+- For every task file in the turn, start with `refresh_file` unless the user explicitly asked to resume the existing Working candidate.
+- Use `new_file` only when creating a file that does not yet exist in watched source.
+- If `declare_session_files` is visible in the live tool surface and healthy, use it only when you already have the full non-empty intended changed file set for that already-required edit session. If it is not exposed, continue with the ordinary governed session path and do not treat that absence as a workflow failure.
+- For a new file, the normal path is `new_file(path, sessionId)` then `submit_file(path, content)`.
+- `submit_file` does not take `sessionId`; it writes the Working candidate already bound to `watchedFilePath`, so establish or reuse the governed session first through `refresh_file` or `new_file`.
+- Use `declare_session_files` only when you already know the full non-empty file set and intend to replace the declared set in one payload.
+- If multi-file work is required, keep the whole change under one shared review session. Do not silently split it into per-file review sessions.
+- Review is session-first. Make the session file set explicit, then use `stage_edit_session_for_review`.
+- If session staging fails, report the exact tooling failure. Do not recover by launching multiple single-file reviews for the same task.
+
+Freshness and stop rules
+
+- A task is not "already implemented" until the current turn has produced fresh governed refresh evidence for every task file and those files come back `classification: unchanged`.
+- If no governed mutation path is available for the requested change, say so plainly and stop rather than faking completion or silently bypassing governance.
+- After accepted review decisions, use the governed post-accept build/digest/index refresh as the normal way to restore freshness.
+- Do not add a second explicit rebuild/reindex by default after accept unless the post-accept refresh failed, was deferred, or the user explicitly wants a recovery/diagnostic rebuild.
+- When asking whether task or agent notes should be updated, prefer `request_operator_confirmation` when it is exposed so the operator can answer through a governed structured yes/no prompt.

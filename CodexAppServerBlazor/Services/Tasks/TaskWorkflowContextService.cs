@@ -103,7 +103,10 @@ public sealed class TaskWorkflowContextService : ITaskWorkflowContextService
         builder.AppendLine("- If the user request appears inconsistent with this task, report the inconsistency and ask for clarification instead of switching tasks.");
         builder.AppendLine("- Durable workflow memory lives in user notes, agent notes, task files, and task events.");
         builder.AppendLine("- Keep solution index context volatile: refresh digest/MCP summaries when code structure matters; do not treat indexed summaries as durable task memory.");
-        builder.AppendLine("- At turn completion, ask whether agent notes should be updated if the outcome changes durable workflow memory.");
+        builder.AppendLine("- Runtime artifacts under the watched workspace, including runtime\\watched-solutions\\..., workflow\\history, working, staged, metadata, and task-memory, are not authoritative proof that source work is complete.");
+        builder.AppendLine("- At turn completion, ask whether agent notes should be updated only if the outcome changes durable workflow memory.");
+        builder.AppendLine("- If request_operator_confirmation is exposed, use it for that notes question instead of asking freeform in chat.");
+        builder.AppendLine("- When you ask that notes question without the tool, make it a tight yes/no prompt rather than an open-ended follow-up.");
         AppendNoteSection(builder, "User notes", activeTask.NotesMarkdownPath, repository.ReadNotes(activeTask.NotesMarkdownPath));
         AppendNoteSection(builder, "Agent notes", activeTask.AgentNotesMarkdownPath, repository.ReadNotes(activeTask.AgentNotesMarkdownPath));
         AppendFiles(builder, files, totalFileCount);
@@ -147,8 +150,11 @@ public sealed class TaskWorkflowContextService : ITaskWorkflowContextService
         if (files.Count == 0)
         {
             builder.AppendLine("- none");
+            builder.AppendLine("- No authoritative task-file list is attached. Use governed MCP discovery first, then refresh the chosen task files before concluding the task is already complete.");
             return;
         }
+
+        builder.AppendLine("- These files are the initial governed refresh targets for this Work turn. Refresh them in the current turn before claiming the task is already implemented.");
 
         foreach (WorkflowTaskFileRow file in files)
         {

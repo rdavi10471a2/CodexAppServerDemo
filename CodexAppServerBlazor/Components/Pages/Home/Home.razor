@@ -3,9 +3,9 @@
 @inject IJSRuntime JS
 @using CodexAppServerBlazor.Services.Workflow
 
-<PageTitle>@(string.IsNullOrWhiteSpace(instanceLabel) ? "Coding Services" : $"Coding Services [{instanceLabel}]")</PageTitle>
+<PageTitle>Coding Services</PageTitle>
 
-<section class="control-screen @(isConnectionPanelVisible ? string.Empty : "connection-hidden")">
+<section class="control-screen">
     <header class="command-bar">
         <div class="title-strip">
             <div class="brand-lockup">
@@ -14,8 +14,8 @@
         </div>
         <div class="command-bar-actions">
             <div class="run-started-at">Run Started At : @runStartedAtDisplay</div>
-            <RadzenButton Icon="dock_to_left"
-                          Text="@(isConnectionPanelVisible ? "Hide Connection" : "Show Connection")"
+            <RadzenButton Icon="settings"
+                          Text="Connection"
                           ButtonStyle="ButtonStyle.Light"
                           Size="ButtonSize.Small"
                           Click="@ToggleConnectionPanel" />
@@ -23,40 +23,20 @@
     </header>
 
     <main class="control-grid" @ref="controlGrid">
-        @if (isConnectionPanelVisible)
-        {
-            <div class="connection-shell" @ref="connectionPane">
-                <ConnectionPanel Snapshot="@snapshot"
-                                 Busy="@busy"
-                                 McpUrl="@mcpUrl"
-                                 @bind-CodexExe="@codexExe"
-                                 @bind-Model="@model"
-                                 @bind-ApprovalPolicy="@approvalPolicy"
-                                 @bind-Sandbox="@sandbox"
-                                 @bind-TurnMode="@turnMode"
-                                 ToggleServer="@ToggleServer" />
-            </div>
-
-            <div class="main-splitter" @ref="mainSplitter" title="Drag to resize connection panel" aria-hidden="true"></div>
-        }
-
         <section class="work-panel" @ref="workPanel">
             <div class="workspace-toolbar">
                 <div class="workspace-path">
-                    <span>CWD</span>
-                    @if (!string.IsNullOrWhiteSpace(instanceLabel))
-                    {
-                        <span class="instance-badge">@instanceLabel</span>
-                    }
                     <strong>@repoRoot</strong>
                 </div>
                 <div class="workspace-state">
-                    <span class="state-chip @(snapshot.IsServerStarted ? "state-chip-ok" : "state-chip-muted")">
-                        @(snapshot.IsServerStarted ? "Server running" : "Server stopped")
-                    </span>
+                    <span class="workspace-state-text">@(snapshot.IsServerStarted ? "Running" : "Stopped")</span>
                     @if (snapshot.IsTurnRunning)
                     {
-                        <span class="state-chip state-chip-running">Turn running</span>
+                        <span class="workspace-state-divider" aria-hidden="true">•</span>
+                        <span class="workspace-state-text workspace-state-text-live">
+                            <span class="workspace-state-spinner" aria-hidden="true"></span>
+                            <span>Thinking</span>
+                        </span>
                     }
                 </div>
                 <RadzenButton Icon="folder_open"
@@ -149,6 +129,7 @@
                                       TranscriptText="@TranscriptText"
                                       CurrentTurnHtml="@CurrentTurnHtml"
                                       TurnMode="@turnMode"
+                                      TurnModeChanged="@ChangeAssistantTurnMode"
                                       PermissionRequests="@snapshot.PermissionRequests"
                                       Attachments="@turnAttachments"
                                       AttachmentPickerKey="@attachmentPickerKey"
@@ -158,6 +139,7 @@
                                       Busy="@busy"
                                       CreateTaskFromTranscript="@CreateTaskFromTranscript"
                                       SendChatDraft="@SendChatDraft"
+                                      StopTurn="@StopCurrentTurn"
                                       AttachFiles="@AttachTurnFiles"
                                       RemoveAttachment="@RemoveTurnAttachment"
                                       ClearHistory="@ClearChatHistory"
@@ -197,38 +179,6 @@
                                    RebuildIndex="@RebuildSourceIndex"
                                    SelectFile="@SelectTestSourceFile" />
                     </RadzenTabsItem>
-
-                    <RadzenTabsItem Text="Status">
-                        <OutputTab Events="@snapshot.StatusEvents" EmptyText="No status events yet." />
-                    </RadzenTabsItem>
-
-                    <RadzenTabsItem Text="Protocol">
-                        <RawProtocolTab Lines="@snapshot.RawLines" EmptyText="No protocol lines yet." />
-                    </RadzenTabsItem>
-
-                    <RadzenTabsItem Text="Telemetry">
-                        <OutputTab Events="@snapshot.TelemetryEvents" EmptyText="No telemetry events yet." />
-                    </RadzenTabsItem>
-
-                    <RadzenTabsItem Text="Debug">
-                        <ReviewLaunchDebugTab Events="@DebugEvents"
-                                              EmptyText="No launch-trace events yet."
-                                              CurrentEditSessionId="@WorkspaceState.CurrentEditSessionId"
-                                              QueuedReviewSessionId="@pendingReviewLaunch?.SessionId"
-                                              LaunchedReviewSessionId="@launchedReviewSessionId"
-                                              ReviewDialogOpen="@reviewDialogOpen"
-                                              ReviewLaunchCheckInProgress="@reviewLaunchCheckInProgress"
-                                              ReviewLaunchProcessing="@reviewLaunchProcessing" />
-                    </RadzenTabsItem>
-
-                    <RadzenTabsItem Text="Tools">
-                        <ToolsTab PermissionRequests="@snapshot.PermissionRequests"
-                                  Events="@snapshot.ToolEvents"
-                                  CurrentEditSessionId="@WorkspaceState.CurrentEditSessionId"
-                                  Busy="@busy"
-                                  DenyPermission="@DenyPermissionRequest"
-                                  CancelPermission="@CancelPermissionRequest" />
-                    </RadzenTabsItem>
                 </Tabs>
             </RadzenTabs>
         </section>
@@ -239,6 +189,48 @@
         <div class="error-banner">@errorMessage</div>
     }
 </section>
+
+@if (isConnectionPanelVisible)
+{
+    <div class="screen-modal-overlay" role="dialog" aria-modal="true" aria-label="Connection settings">
+        <section class="screen-modal-card connection-modal-card">
+            <div class="connection-modal-header">
+                <div>
+                    <span class="connection-modal-eyebrow">Runtime Controls</span>
+                    <h2>Connection</h2>
+                </div>
+                <RadzenButton Icon="close"
+                              Text="Close"
+                              ButtonStyle="ButtonStyle.Light"
+                              Size="ButtonSize.Small"
+                              Click="@ToggleConnectionPanel" />
+            </div>
+
+            <div class="connection-modal-body">
+                <ConnectionPanel Snapshot="@snapshot"
+                                 Busy="@busy"
+                                 McpUrl="@mcpUrl"
+                                 WorkspaceRoot="@repoRoot"
+                                 WorkflowHistoryPath="@WorkflowHistoryPath"
+                                 StatusEvents="@snapshot.StatusEvents"
+                                 RawLines="@snapshot.RawLines"
+                                 DebugEvents="@DebugEvents"
+                                 CurrentEditSessionId="@WorkspaceState.CurrentEditSessionId"
+                                 QueuedReviewSessionId="@pendingReviewLaunch?.SessionId"
+                                 LaunchedReviewSessionId="@launchedReviewSessionId"
+                                 ReviewDialogOpen="@reviewDialogOpen"
+                                 ReviewLaunchCheckInProgress="@reviewLaunchCheckInProgress"
+                                 ReviewLaunchProcessing="@reviewLaunchProcessing"
+                                 @bind-CodexExe="@codexExe"
+                                 @bind-Model="@model"
+                                 @bind-ApprovalPolicy="@approvalPolicy"
+                                 @bind-Sandbox="@sandbox"
+                                 @bind-TurnMode="@turnMode"
+                                 ToggleServer="@ToggleServer" />
+            </div>
+        </section>
+    </div>
+}
 
 @if (isRebuildingSourceIndex)
 {

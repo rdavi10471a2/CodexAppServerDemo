@@ -13,7 +13,7 @@ $projectPath = Join-Path $repoRoot "CodexAppServerBlazor\CodexAppServerBlazor.cs
 dotnet run --project $projectPath -- `
   --BlazorHost:Url=http://localhost:5215 `
   --Mcp:Url=http://localhost:6289 `
-  --AppInstance:Label=Child `
   --Workspace:DefaultCwd=$WorkspaceRoot `
   --Workspace:PersistencePath=runtime/app-state/selected-workspace-child.txt `
+  --CodingServices:RuntimeRoot="$repoRoot\runtime" `
   --CodingServices:WatchedSolutionPath=$WatchedSolutionPath

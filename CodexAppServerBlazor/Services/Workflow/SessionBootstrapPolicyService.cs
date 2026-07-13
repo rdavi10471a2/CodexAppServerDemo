@@ -14,12 +14,17 @@ public sealed class SessionBootstrapPolicyService
     public SessionBootstrapPolicy LoadPolicy()
     {
         string? bootstrapPath = configuration["WorkflowPolicy:SessionBootstrapPath"];
+        string? workedExamplesPath = configuration["WorkflowPolicy:WorkedExamplesPath"];
         string? hostAgentsPath = configuration["WorkflowPolicy:HostAgentsPath"];
 
         LoadedPolicyText bootstrap = LoadOptionalText(
             bootstrapPath,
             defaultRelativePath: null,
             label: "session bootstrap");
+        LoadedPolicyText workedExamples = LoadOptionalText(
+            workedExamplesPath,
+            defaultRelativePath: Path.Combine("docs", "policy", "CS-WorkedExamples.txt"),
+            label: "worked examples");
         LoadedPolicyText hostAgents = LoadOptionalText(
             hostAgentsPath,
             defaultRelativePath: Path.Combine("..", "AGENTS.md"),
@@ -64,6 +69,21 @@ public sealed class SessionBootstrapPolicyService
         else
         {
             statusParts.Add(bootstrap.Status);
+        }
+
+        if (!string.IsNullOrWhiteSpace(workedExamples.Text))
+        {
+            sections.Add("Coding Services worked examples:" + Environment.NewLine + Environment.NewLine + workedExamples.Text);
+            if (!string.IsNullOrWhiteSpace(workedExamples.SourcePath))
+            {
+                sourcePaths.Add(workedExamples.SourcePath);
+            }
+
+            statusParts.Add("Worked examples loaded.");
+        }
+        else
+        {
+            statusParts.Add(workedExamples.Status);
         }
 
         string? prompt = sections.Count == 0

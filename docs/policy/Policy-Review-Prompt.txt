@@ -1,0 +1,28 @@
+Review the current Coding Services policy and startup guidance before any real Work turn. Do not edit code or policy yet. I want your impression of whether the intended governed model is now clear enough to guide a fresh run.
+
+Evaluate these specific questions:
+
+1. Is `Reason in the cloud; edit locally.` explicit enough as a central rule?
+2. Is it clear that governed discovery should normally begin with task/context plus index/source-map style discovery, not broad direct source reads?
+3. Is it clear that direct watched-source reads are allowed only as bounded fallback or validation, not the normal discovery path when governed discovery tools are sufficient?
+4. Is it clear that `refresh_file` / `new_file` is the handoff into authoritative local Working state for the turn?
+5. Is it clear that, after refresh, the Working candidate plus governed structure tools should usually replace direct shell reads?
+6. Are the RPC-style examples strong enough to teach the intended workflow shape?
+7. Is discovery now clearly separated from mutation and review?
+8. Are there still weak spots, ambiguities, or likely agent misreads in the policy?
+
+Use the actual local policy files as your source of truth. Prefer reviewing:
+- `AGENTS.md`
+- `CodexAppServerBlazor/docs/policy/CS-SessionBootstrap.txt`
+- `CodexAppServerBlazor/docs/policy/CS-EditToolGuidance.txt`
+
+Respond in exactly two sections:
+
+**What Is Clear**
+- short concrete points
+
+**Remaining Weaknesses**
+- short concrete points
+- for each weakness, include the smallest wording or structure change you would recommend
+
+Do not start a governed edit workflow. Do not perform task work. This is a policy-review turn only.

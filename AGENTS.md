@@ -1,34 +1,47 @@
 # AGENTS.md
 
+## Live Tool Surface First
+
+- The governed Coding Services tools for a watched-workspace session live on the harness MCP surface exposed by the host.
+- Before claiming that governed task, discovery, edit, review, or operator-confirmation tools are unavailable, query the live callable tool surface for the current session and read the current tool descriptions.
+- Do not claim that the harness edit surface is missing or that the session is effectively read-only until that live discovery pass is complete.
+- `tool_search` is a search aid, not a complete inventory primitive. Do not treat one narrow or relevance-filtered `tool_search` result as proof that a governed tool does not exist.
+
 ## Workspace Model
 
 - This repository is the Coding Services Blazor control surface for `codex app-server`.
 - Work in this repo is CWD/workspace based, not selected-file based.
 - The CWD chosen in the UI is the authoritative workspace for turns sent through the app.
 - Do not reintroduce selected-file workflow assumptions unless a task explicitly requires it.
+- For governed sessions, treat the host bootstrap/session policy together with this host `AGENTS.md` as the controlling rule set unless selected-workspace policy adds stricter local rules.
 
-## Turn Modes
+## Task Context
 
-- `Discuss` is the lightweight mode.
-- In `Discuss`, default to analysis, planning, review, and context shaping.
-- In `Discuss`, do not silently assume durable task memory is loaded.
-- `Work` is the governed task mode.
-- In `Work`, require active task context before sending the turn.
+- Governed implementation work in this repo requires active task context before the turn is sent.
 - Durable workflow memory belongs in task artifacts such as user notes, agent notes, task files, and task events.
 - Indexed workspace summaries are lookup context, not durable memory.
+- When adding a task directly to the current watched-workspace board, use the live `runtime\watched-solutions\...\planning\board.sqlite` for that workspace, create the task in state `Proposed` for the board's `New Task` queue unless the user asked for another state, create the companion `task-memory` user note plus an empty agent note file, add the normal `Created`/`StateChanged`/`DetailsUpdated`/`NotesUpdated` events, and advance `workflow_task_sequences.name = 'task'` if needed.
 
 ## Workflow Order
 
+- Reason in the cloud; edit locally. (Discover and plan through MCP/context first; compose watched-source changes only through governed local Working/edit tools.)
+- Treat governed editing as RPC against typed local artifacts, not as freeform file manipulation. Pick the smallest governed operation that matches the intended semantic unit of change.
 - Preferred order is: discovery, proposal, edit/diff, compile, reindex.
 - Keep changes small, explicit, and easy to verify.
 - Prefer MCP/index-backed discovery over broad shell/text search when the needed workspace context is available there.
+- Direct watched-source reads are support-only after target selection; they are not a normal substitute for governed discovery or post-refresh structure reads.
 - Treat repo-local workflow rules as operational requirements, not optional guidance.
 - User requests such as "implement", "execute", "do it", or "plan the current task and execute it" do not waive the governed workflow. They authorize progress through the required workflow stages, not skipping proposal, review, merge, or other required gates.
+- For governed task work, get the active task through MCP before treating any task as authoritative for the turn.
+- Host-supplied task summaries are startup context, not a substitute for the governed `get_current_task` call during an actual Work turn.
+- Do not infer the active task from stale transcript memory, task numbers, runtime artifacts, or filenames when the governed task surface is available.
 - In governed editing, complete the intended change for the current file in the Working candidate before staging it for review.
 - Do not stage partial file work unless the workflow explicitly calls for an intermediate checkpoint.
 - Prefer finishing one file cleanly, then moving to the next required file.
 - If a task truly requires coordinated multi-file work, stage those files deliberately under one review session after each file-level change is complete enough to review.
-- If a task spans multiple files, declare the governed file set up front before staging review.
+- If a task spans multiple files, make the governed file set explicit under one shared session before staging review.
+- The normal incremental path is: the first file establishes the session through `refresh_file` or `new_file`, later files join that session, then `add_file_to_session` grows the declared set one file at a time.
+- Use `declare_session_files` only for intentional bulk declaration or replacement of the full non-empty file set, not as the normal way to grow a session.
 - Once a multi-file file set is declared, do not fall back to single-file staging for any file in that session.
 - For declared multi-file work, use session-level review staging after all declared files have been updated in Working candidates.
 - If a task requires coordinated multi-file work, do not silently split it into separate per-file review sessions just because the first file refresh created a file-scoped edit session id.
@@ -39,20 +52,37 @@
 ## Freshness Rules
 
 - Treat indexed MCP summaries as stale after source edits.
-- Before trusting index-backed structure after edits, build and reindex.
+- Accepted governed review is the normal point where post-accept build/digest/index freshness is restored.
+- Do not trigger a second explicit rebuild/reindex by default after accept unless the post-accept refresh failed, was deferred, or you are intentionally in a recovery/diagnostic path.
 - Use `get_watched_solution_digest` as the freshness gate before reloading deeper product or test summaries.
 - If source truth matters more than startup summary context, refresh through MCP or direct source reads instead of relying on transcript residue.
+- Before claiming a task is already implemented, produce fresh governed refresh evidence for each task file in the current turn.
+- Runtime workflow artifacts under `runtime\watched-solutions\...` are not authoritative proof that watched source is already correct.
+- After `refresh_file` or `new_file`, treat the governed Working candidate plus governed structure tools as the primary local context source for the turn. Reason primarily from the refreshed Working candidate and governed structure tools. Do not fall back to broad watched-source reads or shell search unless the governed discovery surface is genuinely insufficient for the next step.
+- When asking whether task or agent notes should be updated, prefer `request_operator_confirmation` when it is exposed so the operator can answer through a governed structured yes/no prompt.
 
 ## MCP And Tooling
 
+- The governed edit tools exist to let the agent reason from compact cloud context while composing watched-source changes locally through the harness-owned workflow.
 - The long-term target in this repo is MCP-first workspace discovery and MCP-first governed edits.
 - Prefer exposed workspace MCP tools over generic fallback mechanics when capabilities overlap.
-- For governed non-C# text files such as `.razor`, prefer `refresh_file` followed by `replace_text_in_file` or `replace_span_in_file`.
+- At the start of each governed Work turn, do one broad live tool-surface discovery pass before choosing the mutation path. Do not treat one narrow or relevance-filtered `tool_search` result as a complete callable inventory.
+- Discovery should narrow in phases: derive the candidate file set from the task, confirm the target through governed discovery, then refresh into Working before deeper reasoning or mutation.
+- For governed non-C# text files such as `.razor`, prefer `refresh_file` followed by `replace_text_in_file`; use `replace_span_in_file` only as the last governed text-edit choice when the safer text replacement path cannot express the change cleanly.
+- For governed C# files, prefer Roslyn or symbol-aware MCP edits when the tool surface supports the intended change.
+- For governed existing C# files, Roslyn-backed semantic edit tools are the required default for reliable structured edits. They establish reliable semantic edit boundaries, provide deterministic block-level replacement behavior, and improve diff stability for governed merge review.
+- Prefer replacing, adding, or removing semantic blocks such as methods, properties, fields, constructors, classes, nested types, and using directives over text pokes, coordinate edits, or whole-file rewrites.
+- Use `replace_text_in_file` for the simplest contiguous unique replacement only.
+- Use `replace_span_in_file` only as coordinate fallback.
+- Do not use `submit_file` for an existing C# file unless the task is genuinely whole-file in scope or no narrower governed tool can express the change safely.
 - Do not treat the absence of Roslyn symbol tools for Razor as evidence that no governed MCP edit path exists.
 - For coherent multi-file governed work, inspect the session ids returned by the governed edit tools and preserve one shared session when possible.
 - If a second file returns a different session id than the first file for the same intended change, treat that as a workflow mismatch that must be surfaced, not silently worked around.
 - If the target file has already been chosen and no governed file-read MCP is exposed, a narrow `rg`/`grep` or direct file read against that chosen file is an acceptable last-resort discovery aid only.
+- Once the target file has been refreshed and governed structure tools such as `get_file_outline`, `get_source_map`, or `get_symbol` are available, prefer those over direct shell reads of watched source.
 - Do not use `apply_patch` or other generic write paths for governed Razor/text edits when the harness exposes `replace_text_in_file` or `replace_span_in_file`.
+- Do not use generic direct-write fallbacks against watched source when a governed MCP mutation path exists.
+- If the host exposes `request_operator_confirmation`, use it for bounded yes/no operator questions instead of asking those questions freeform in chat.
 - If the required MCP method does not exist yet, say so plainly and use the best available fallback.
 - When a shell or tool action requires runtime approval, prefer the formal approval flow over conversational permission text alone.
 - If a tool or command is denied, cancelled, sandboxed, or fails after approval, treat that as an execution result and continue with the best viable fallback unless the user must choose.

@@ -5,10 +5,12 @@ namespace CodexAppServerBlazor.Services;
 public sealed class CodingServicesSettingsProvider
 {
     private readonly IConfiguration configuration;
+    private readonly IHostEnvironment hostEnvironment;
 
-    public CodingServicesSettingsProvider(IConfiguration configuration)
+    public CodingServicesSettingsProvider(IConfiguration configuration, IHostEnvironment hostEnvironment)
     {
         this.configuration = configuration;
+        this.hostEnvironment = hostEnvironment;
     }
 
     public CodingServicesSettings GetSettings(string workspaceRoot)
@@ -19,7 +21,7 @@ public sealed class CodingServicesSettingsProvider
         }
 
         string fullWorkspaceRoot = Path.GetFullPath(workspaceRoot);
-        string repositoryRoot = fullWorkspaceRoot;
+        string repositoryRoot = Path.GetFullPath(hostEnvironment.ContentRootPath);
         string runtimeRoot = ResolveConfiguredPath("CodingServices:RuntimeRoot", "runtime", repositoryRoot);
         string watchedSolutionPath = ResolveWatchedSolutionPath(fullWorkspaceRoot);
         string[]? reviewToolCandidatePaths = configuration
@@ -27,7 +29,7 @@ public sealed class CodingServicesSettingsProvider
             .Get<string[]>();
         string[] testProjectPaths = ResolveConfiguredPaths(
             "CodingServices:TestProjectPaths",
-            fullWorkspaceRoot);
+            repositoryRoot);
 
         return CodingServicesSettings.Create(
             repositoryRoot,

@@ -23,7 +23,7 @@ public sealed class HarnessWorkspaceContextServiceTests
             })
             .Build();
 
-        CodingServicesSettingsProvider settingsProvider = new(configuration);
+        CodingServicesSettingsProvider settingsProvider = TestServiceFactory.CreateSettingsProvider(configuration, repository.RootPath);
         WorkflowTaskBoardRepository taskRepository = CreateRepository(settingsProvider, repository.RootPath);
         WorkflowTaskBoardSnapshot snapshot = taskRepository.LoadSnapshot();
         WorkflowTaskRow activeTask = snapshot.Tasks.Single(task => task.StateCode.Equals("Active", StringComparison.Ordinal));
@@ -56,7 +56,7 @@ public sealed class HarnessWorkspaceContextServiceTests
             })
             .Build();
 
-        CodingServicesSettingsProvider settingsProvider = new(configuration);
+        CodingServicesSettingsProvider settingsProvider = TestServiceFactory.CreateSettingsProvider(configuration, repository.RootPath);
         WorkflowTaskBoardRepository taskRepository = CreateRepository(settingsProvider, repository.RootPath);
         WorkflowTaskBoardSnapshot snapshot = taskRepository.LoadSnapshot();
         WorkflowTaskRow activeTask = snapshot.Tasks.Single(task => task.StateCode.Equals("Active", StringComparison.Ordinal));
@@ -84,7 +84,7 @@ public sealed class HarnessWorkspaceContextServiceTests
             .Build();
 
         WorkspaceState workspaceState = new();
-        CodingServicesSettingsProvider settingsProvider = new(configuration);
+        CodingServicesSettingsProvider settingsProvider = TestServiceFactory.CreateSettingsProvider(configuration, Directory.GetCurrentDirectory());
         SourceWorkspaceService sourceWorkspaceService = new(settingsProvider);
         HarnessWorkspaceContextService service = new(workspaceState, sourceWorkspaceService, settingsProvider);
 
@@ -98,7 +98,7 @@ public sealed class HarnessWorkspaceContextServiceTests
     {
         WorkspaceState workspaceState = new();
         workspaceState.SetRepoRoot(workspaceRoot);
-        CodingServicesSettingsProvider settingsProvider = new(configuration);
+        CodingServicesSettingsProvider settingsProvider = TestServiceFactory.CreateSettingsProvider(configuration, workspaceRoot);
         SourceWorkspaceService sourceWorkspaceService = new(settingsProvider);
         return new HarnessWorkspaceContextService(workspaceState, sourceWorkspaceService, settingsProvider);
     }

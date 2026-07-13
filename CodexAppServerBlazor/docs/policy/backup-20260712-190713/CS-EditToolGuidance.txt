@@ -1,0 +1,101 @@
+Coding Services edit-tool guidance
+
+Tool selection
+
+- Use Roslyn or symbol-aware governed tools for C# source when the change targets a class, method, property, field, constructor, nested type, using, or partial modifier.
+- Use governed text tools for `.razor`, `.css`, `.js`, `.json`, `.md`, config files, and any mixed-markup edit that is not a clean Roslyn symbol operation.
+- Use `submit_file` for brand-new watched files, generated files, or deliberate whole-file replacement. For new-file authoring, enter through `new_file` first, then author the Working candidate with `submit_file`.
+- If the exact C# symbol/container is unclear, prefer `get_file_outline` first and `get_symbol` before remove or replace operations.
+- If a file kind is unsupported by symbol tools, say so plainly and fall back to the governed text path instead of forcing a semantic edit path.
+
+Governed discovery
+
+- Prefer `get_workspace`, `get_watched_solution_digest`, `get_watched_solution_summary`, `get_test_project_summary`, and `get_current_task` before broad fallback search.
+- In Work mode, restart discovery fresh each turn. Do not let startup context, transcript memory, or stale index/source-map knowledge short-circuit the governed discovery path.
+- At the start of each Work turn, perform one broad live tool-surface discovery pass before selecting a governed mutation tool. Do not treat a single narrow or relevance-filtered `tool_search` result as a complete callable inventory.
+- If the first tool discovery query was scoped for speed, explicitly broaden it before concluding that symbol-aware or text-aware mutation tools are unavailable.
+- Discovery should narrow in phases:
+  1. derive the candidate file set from the task
+  2. confirm the target through governed discovery
+  3. refresh into governed Working
+  4. reason primarily from the refreshed Working candidate and governed structure tools
+  5. mutate with governed tools
+  6. stage review
+- Direct watched-source reads are support-only after target selection; they are not a normal substitute for governed discovery or post-refresh structure reads.
+- Once the task or MCP discovery has already chosen a file, a narrow file read or `rg`/`grep` against that chosen file is acceptable discovery support.
+- Do not treat runtime artifacts, prior transcript claims, or stale working files as authoritative watched-source proof.
+- Read the MCP tool descriptions carefully at discovery time; they are part of the live contract and should spell out required arguments such as `sessionId`, `watchedFilePath`, `containingType`, selector payloads, and declaration inputs.
+- After `refresh_file` or `new_file`, the refreshed governed Working state is the primary local context source for the turn. If governed structure tools such as `get_file_outline`, `get_source_map`, or `get_symbol` are sufficient, do not keep reading the watched source directly through shell tools.
+- If the current request is outside the active governed task, stop and report that mismatch instead of using the nearest plausible file or adjacent task memory.
+
+Governed edit protocol
+
+- For every task file in the turn, start with `refresh_file` unless the user explicitly asked to resume the existing Working candidate.
+- Use `new_file` only when creating a file that does not yet exist in watched source.
+- A governed edit session is required for every watched-source change, whether the task touches one file or many.
+- If `declare_edit_session` is visible in the live tool surface and healthy, prefer it to declare the intended changed file set for that already-required edit session before mutation. If it is not exposed, continue with the ordinary governed session path and do not treat that absence as a workflow failure.
+- For a new file, the normal path is `new_file(path, sessionId)` then `submit_file(path, content, sessionId)`.
+- A task is not "already implemented" until the current turn has produced fresh governed refresh evidence for every task file and those files come back `classification: unchanged`.
+- The first governed edit result establishes the session id for the coherent change. Carry that same session id forward.
+- When another file joins that same change, attach it explicitly with `add_file_to_session` after `refresh_file` or `new_file`.
+- `refresh_file(secondFile, sessionId)` or `new_file(secondFile, sessionId)` refreshes that file into the same coherent edit context, but does not by itself replace the declared session file set unless the live tool contract explicitly says it does.
+- For existing-file mutation, prefer the narrowest governed tool that clearly fits the change:
+  1. Roslyn/symbol-aware mutation such as `submit_symbol`, `add_*`, or `remove_symbol`
+  2. `replace_text_in_file`
+  3. `replace_span_in_file` only when the safer governed paths cannot express the change cleanly
+  4. `submit_file` only for whole-file intent or when the live governed surface genuinely leaves no narrower correct path
+- For C# specifically, prefer `replace_text_in_file` for one contiguous unique replacement.
+- For C# specifically, prefer symbol-aware mutation such as `submit_symbol` or `remove_symbol` when the intended change spans more than one fragment inside the same symbol or when multiple edits are planned in the same file.
+- Treat `replace_span_in_file` as a destructive coordinate fallback. Do not trust it as the base for further intended edits in the same file unless the span is regenerated from the current governed Working candidate immediately before the bounded change.
+- For Roslyn add/edit/remove calls, prefer the simple containing type name from the target file first when the tool asks for `containingType`, unless discovery shows a more specific form is required.
+- For single-file Roslyn edits, `get_file_outline` plus `get_source_map` or `get_symbol` should usually be enough after refresh; exact line-number reads are optional diagnostics, not the normal path.
+- Use `declare_session_files` only when you already know the full non-empty file set and intend to replace the declared set in one payload.
+- If multi-file work is required, keep the whole change under one shared review session. Do not silently split it into per-file review sessions.
+- Do not use `apply_patch` or other generic write paths for watched-source governed edits when the harness exposes the correct MCP path.
+- If no governed mutation path is available for the requested change, say so plainly and stop rather than faking completion or silently bypassing governance.
+- If the host exposes `request_operator_confirmation`, use it for bounded yes/no operator questions instead of asking those questions freeform in chat.
+
+Governed review
+
+- Review is session-first. Make the session file set explicit, then use `stage_edit_session_for_review`.
+- If session staging fails, report the exact tooling failure. Do not recover by launching multiple single-file reviews for the same task.
+- After review launch, stop at the human review boundary unless the user explicitly instructs you to record the decision through MCP.
+- The in-app review boundary is authoritative. Any returned review URL is diagnostic fallback, not the primary workflow.
+
+RPC-style example
+
+- Intended single-file C# path:
+  1. Discovery: `get_current_task`
+  2. Discovery: `refresh_file(watchedFilePath)`
+  3. Discovery: report `EditSessionId`, `watchedFilePath`, `workingFilePath`, and `classification`
+  4. Mutation: `add_property` / `add_method` / `submit_symbol` / other governed mutation tool
+  5. Review: `stage_edit_session_for_review(sessionId)`
+  6. Review: stop at the in-app review boundary
+  7. Post-accept verification: use fresh digest/build/reindex evidence before trusting prior structure
+- Intended multi-file path:
+  1. Discovery: `get_current_task`
+  2. Discovery: `refresh_file(firstFile)`
+  3. Discovery: carry forward that `EditSessionId`
+  4. Discovery: `refresh_file(secondFile, sessionId)` or `new_file(secondFile, sessionId)`
+  5. Mutation/session growth: `add_file_to_session(sessionId, secondFile)` when the coherent change grows incrementally
+  6. Mutation/session declaration: `declare_session_files(sessionId, [...])` only when intentionally replacing the declared set with a known non-empty full list
+  7. Review: `stage_edit_session_for_review(sessionId)`
+  8. Review: stop at the in-app review boundary
+- Intended new-file path:
+  1. Discovery: `get_current_task`
+  2. Discovery/session: establish or reuse the coherent governed edit session id for the task
+  3. Discovery/session: if available, `declare_edit_session(filesPlanned: [...])` for the intended changed file set in that session
+  4. Discovery/mutation: `new_file(watchedFilePath, sessionId)`
+  5. Mutation: `submit_file(path, content, sessionId)`
+  6. Review: `stage_edit_session_for_review(sessionId)`
+  7. Review: stop at the in-app review boundary
+- Multi-file rule: refreshing a later file into a session does not, by itself, declare that file as part of the staged review set.
+- Anti-pattern: do not broad-search watched source or mutate files before refresh unless the governed discovery surface is genuinely insufficient.
+- Read this as the intended RPC/workflow shape: reason in the cloud about the next small step, then compose the watched-source edit locally through the governed MCP tool path.
+
+Evidence after edit
+
+- After accepted review decisions, use the governed post-accept build/digest/index refresh as the normal way to restore freshness.
+- Do not add a second explicit rebuild/reindex by default after accept unless the post-accept refresh failed, was deferred, or the user explicitly wants a recovery/diagnostic rebuild.
+- When asking whether task or agent notes should be updated, prefer `request_operator_confirmation` when it is exposed so the operator can answer through a governed structured yes/no prompt.
+- If the user reports a runtime mismatch, refresh the governed files again in the current turn before defending the prior conclusion.

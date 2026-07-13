@@ -57,6 +57,6 @@ public sealed class TranscriptTaskPromotionServiceTests
             })
             .Build();
 
-        return new CodingServicesSettingsProvider(configuration);
+        return TestServiceFactory.CreateSettingsProvider(configuration, Directory.GetCurrentDirectory());
     }
 }

@@ -137,7 +137,7 @@ public sealed class ArchivedDiscussionServiceTests
             })
             .Build();
 
-        return new CodingServicesSettingsProvider(configuration);
+        return TestServiceFactory.CreateSettingsProvider(configuration, Directory.GetCurrentDirectory());
     }
 
     private sealed class ThrowingArchivedDiscussionService : ArchivedDiscussionService

@@ -76,6 +76,7 @@ public sealed class WorkspaceEditMcpToolsTests
         CreateWatchedFile(repository.RootPath, secondPath, "public class Second { }");
 
         EditSessionStatus first = tools.RefreshFile(firstPath);
+        tools.RefreshFile(secondPath, first.EditSessionId);
         EditSessionPlan plan = tools.DeclareSessionFiles(first.EditSessionId, [firstPath, secondPath]);
 
         Assert.Equal(first.EditSessionId, plan.SessionId);
@@ -95,12 +96,51 @@ public sealed class WorkspaceEditMcpToolsTests
         CreateWatchedFile(repository.RootPath, secondPath, "public class Second { }");
 
         EditSessionStatus first = tools.RefreshFile(firstPath);
+        tools.RefreshFile(secondPath, first.EditSessionId);
         EditSessionPlan plan = tools.AddFileToSession(first.EditSessionId, secondPath);
 
         Assert.Equal(first.EditSessionId, plan.SessionId);
         Assert.Equal(2, plan.DeclaredWatchedFilePaths.Count);
         Assert.Contains(Path.GetFullPath(Path.Combine(repository.RootPath, firstPath)), plan.DeclaredWatchedFilePaths, StringComparer.OrdinalIgnoreCase);
         Assert.Contains(Path.GetFullPath(Path.Combine(repository.RootPath, secondPath)), plan.DeclaredWatchedFilePaths, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void AddFileToSession_requires_file_to_be_bootstrapped_into_same_session()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        WorkspaceEditMcpTools tools = CreateTools(repository.RootPath);
+        string firstPath = Path.Combine("Features", "First.cs");
+        string secondPath = Path.Combine("Features", "Second.cs");
+        CreateWatchedFile(repository.RootPath, firstPath, "public class First { }");
+        CreateWatchedFile(repository.RootPath, secondPath, "public class Second { }");
+
+        EditSessionStatus first = tools.RefreshFile(firstPath);
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            tools.AddFileToSession(first.EditSessionId, secondPath));
+
+        Assert.Contains("Run refresh_file", ex.Message, StringComparison.Ordinal);
+        Assert.Contains(first.EditSessionId, ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DeclareSessionFiles_requires_each_file_to_be_bootstrapped_into_same_session()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        WorkspaceEditMcpTools tools = CreateTools(repository.RootPath);
+        string firstPath = Path.Combine("Features", "First.cs");
+        string secondPath = Path.Combine("Features", "Second.cs");
+        CreateWatchedFile(repository.RootPath, firstPath, "public class First { }");
+        CreateWatchedFile(repository.RootPath, secondPath, "public class Second { }");
+
+        EditSessionStatus first = tools.RefreshFile(firstPath);
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            tools.DeclareSessionFiles(first.EditSessionId, [firstPath, secondPath]));
+
+        Assert.Contains("Run refresh_file", ex.Message, StringComparison.Ordinal);
+        Assert.Contains(first.EditSessionId, ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -152,6 +192,72 @@ public sealed class WorkspaceEditMcpToolsTests
 
         Assert.True(result.Changed);
         Assert.Contains("\"after\"", File.ReadAllText(result.WorkingFilePath), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NewFile_then_submit_file_authors_complete_new_file_through_tool_surface()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        WorkspaceEditMcpTools tools = CreateTools(repository.RootPath);
+        string relativePath = Path.Combine("Features", "Unused2.cs");
+
+        EditSessionStatus initial = tools.NewFile(relativePath);
+        EditSessionStatus result = tools.SubmitFile(
+            relativePath,
+            """
+            namespace Demo;
+
+            public class Unused2
+            {
+                public int Value { get; set; }
+
+                public Unused2(int value)
+                {
+                    Value = value;
+                }
+
+                public int AddOne()
+                {
+                    return Value + 1;
+                }
+            }
+            """,
+            validateOverlay: false);
+
+        Assert.Equal(initial.EditSessionId, result.EditSessionId);
+        Assert.Equal("new-file-pending", result.Classification);
+        Assert.True(File.Exists(result.WorkingFilePath));
+
+        string content = File.ReadAllText(result.WorkingFilePath);
+        Assert.Contains("public int Value { get; set; }", content, StringComparison.Ordinal);
+        Assert.Contains("public Unused2(int value)", content, StringComparison.Ordinal);
+        Assert.Contains("return Value + 1;", content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AddSymbol_is_exposed_for_symbol_kinds_not_covered_by_narrow_helpers()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        WorkspaceEditMcpTools tools = CreateTools(repository.RootPath);
+        string relativePath = Path.Combine("Features", "AddSymbolSample.cs");
+        CreateWatchedFile(
+            repository.RootPath,
+            relativePath,
+            """
+            public class AddSymbolSample
+            {
+            }
+            """);
+
+        RoslynEditResult result = tools.AddSymbol(
+            relativePath,
+            "AddSymbolSample",
+            "event",
+            "public event System.EventHandler? Changed;",
+            validateOverlay: false);
+
+        string content = File.ReadAllText(result.WorkingFilePath);
+        Assert.Contains("public event System.EventHandler? Changed;", content, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -448,7 +554,7 @@ public sealed class WorkspaceEditMcpToolsTests
 
         WorkspaceState workspaceState = new();
         workspaceState.SetRepoRoot(workspaceRoot);
-        CodingServicesSettingsProvider settingsProvider = new(configuration);
+        CodingServicesSettingsProvider settingsProvider = TestServiceFactory.CreateSettingsProvider(configuration, workspaceRoot);
         HarnessWorkspaceEditService editService = new(workspaceState, settingsProvider);
         return new WorkspaceEditMcpTools(editService);
     }

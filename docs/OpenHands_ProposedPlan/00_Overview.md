@@ -213,7 +213,7 @@ Key capabilities in the reference implementation:
 - **Semantic Edit** (Roslyn tools): `submit_symbol`, `add_field`, `add_property`, `add_method`, `add_constructor`, `remove_symbol`, `add_using`, `remove_using`
 - **Text Edit** (Workflow tools): `submit_file`, `replace_text_in_file`, `replace_span_in_file`, `find_text_span`
 - **File Management**: `refresh_file`, `new_file`, `get_file`, `find_file`, `check_file_hash`
-- **Workflow**: `start_monitor_session`, `stage_candidate_for_review`, `record_diff_decision`, `launch_staged_diff`
+- **Workflow**: `declare_edit_session`, `stage_candidate_for_review`, `record_diff_decision`, `launch_staged_diff`
 
 ---
 

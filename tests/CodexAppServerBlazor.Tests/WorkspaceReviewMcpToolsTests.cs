@@ -124,10 +124,11 @@ public sealed class WorkspaceReviewMcpToolsTests
 
         WorkflowEditService workflowService = CreateWorkflowService(repository.RootPath, Path.Combine(repository.RootPath, "Example.csproj"));
         EditSessionStatus first = workflowService.Refresh(firstPath);
-        EditSessionStatus second = workflowService.Refresh(secondPath);
+        EditSessionStatus second = workflowService.Refresh(secondPath, first.EditSessionId);
         workflowService.DeclareSessionFiles(first.EditSessionId, [firstPath, secondPath]);
+        EditSessionStatus mismatchedSecond = workflowService.Refresh(secondPath, "edit-" + Guid.NewGuid().ToString("N"));
         File.WriteAllText(first.WorkingFilePath, "<h1>Changed</h1>");
-        File.WriteAllText(second.WorkingFilePath, "<p>Changed</p>");
+        File.WriteAllText(mismatchedSecond.WorkingFilePath, "<p>Changed</p>");
 
         HarnessWorkspaceReviewService service = CreateReviewService(repository.RootPath);
         StubReviewElicitor elicitor = new(ReviewDecision.Accepted);
@@ -135,9 +136,9 @@ public sealed class WorkspaceReviewMcpToolsTests
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.StageEditSessionForReviewAsync(elicitor, first.EditSessionId));
 
-        Assert.Contains("mismatch", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("is bound to edit session", ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(first.EditSessionId, ex.Message, StringComparison.Ordinal);
-        Assert.Contains(second.EditSessionId, ex.Message, StringComparison.Ordinal);
+        Assert.Contains(mismatchedSecond.EditSessionId, ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -164,6 +165,46 @@ public sealed class WorkspaceReviewMcpToolsTests
         Assert.Equal(1, elicitor.CallCount);
         Assert.Equal(2, pending.Count(item => item.SessionId.Equals(first.EditSessionId, StringComparison.Ordinal)));
         Assert.Contains($"/review/session/{first.EditSessionId}", result.ReviewUrl, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StageEditSessionForReview_fails_when_declared_file_was_not_bootstrapped_into_session()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        string projectPath = CreateProject(repository.RootPath);
+        string firstPath = CreateWatchedFile(repository.RootPath, "Components/Layout/MainLayout.razor", "<h1>One</h1>");
+        string secondPath = CreateWatchedFile(repository.RootPath, "Components/Pages/Home.razor", "<p>Two</p>");
+
+        WorkflowEditService workflowService = CreateWorkflowService(repository.RootPath, projectPath);
+        EditSessionStatus first = workflowService.Refresh(firstPath);
+        workflowService.DeclareSessionFiles(first.EditSessionId, [firstPath]);
+
+        EditSessionPlan plan = workflowService.GetSessionPlan(first.EditSessionId)!;
+        plan.DeclaredWatchedFilePaths.Add(Path.GetFullPath(secondPath));
+        plan.DeclaredRelativePaths.Add("Components/Pages/Home.razor");
+        WorkflowEditPaths paths = new(CodingServicesSettings.Create(
+            repository.RootPath,
+            projectPath,
+            runtimeRoot: Path.Combine(repository.RootPath, "runtime-test")));
+        string sessionPlanPath = paths.GetSessionPlanPath(first.EditSessionId);
+        Directory.CreateDirectory(Path.GetDirectoryName(sessionPlanPath)!);
+        File.WriteAllText(
+            sessionPlanPath,
+            System.Text.Json.JsonSerializer.Serialize(
+                plan,
+                new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)
+                {
+                    WriteIndented = true
+                }));
+
+        HarnessWorkspaceReviewService service = CreateReviewService(repository.RootPath);
+        StubReviewElicitor elicitor = new(ReviewDecision.Accepted);
+
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.StageEditSessionForReviewAsync(elicitor, first.EditSessionId));
+
+        Assert.Contains("Run refresh_file", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Home.razor", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -411,7 +452,7 @@ public sealed class WorkspaceReviewMcpToolsTests
         WorkspaceState workspaceState = new();
         workspaceState.SetRepoRoot(workspaceRoot);
         workspaceState.SetCurrentEditSessionId(editSessionId);
-        CodingServicesSettingsProvider settingsProvider = new(configuration);
+        CodingServicesSettingsProvider settingsProvider = TestServiceFactory.CreateSettingsProvider(configuration, workspaceRoot);
         return new HarnessWorkspaceReviewService(workspaceState, settingsProvider);
     }
 

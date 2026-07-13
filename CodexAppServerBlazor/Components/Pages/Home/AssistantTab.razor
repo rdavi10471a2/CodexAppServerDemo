@@ -1,10 +1,104 @@
 @using CodexAppServerBlazor.Services
 @using CodexAppServerBlazor.Services.Workflow
 @using Microsoft.AspNetCore.Components.Forms
+@using System.Text.Json.Nodes
 @inject IJSRuntime JS
 @implements IAsyncDisposable
 
+<div class="assistant-host">
 <div class="assistant-layout" @ref="assistantLayout">
+    <div class="chat-composer" @ref="chatComposer">
+        <div class="attachment-strip">
+            <label class="attachment-picker-label" title="Copy files into runtime and attach them to the next turn">
+                <span class="attachment-icon">+</span>
+                <span>Attach</span>
+                @if (!Busy)
+                {
+                    <InputFile @key="AttachmentPickerKey"
+                               class="attachment-picker"
+                               OnChange="@AttachFiles"
+                               multiple />
+                }
+            </label>
+            <span class="attachment-count">@GetAttachmentCountText()</span>
+            @if (Attachments.Count > 0)
+            {
+                <div class="attachment-chips" aria-label="Attached files">
+                    @foreach (CodexTurnAttachment attachment in Attachments)
+                    {
+                        <span class="attachment-chip" title="@attachment.Path">
+                            <span class="attachment-kind">@GetAttachmentKindText(attachment)</span>
+                            <span>@attachment.Name</span>
+                            <small>@FormatAttachmentSize(attachment.SizeBytes)</small>
+                            <button type="button"
+                                    title="Remove attachment"
+                                    disabled="@Busy"
+                                    @onclick="@(() => RemoveAttachment.InvokeAsync(attachment.Path))">x</button>
+                        </span>
+                    }
+                </div>
+            }
+        </div>
+        <div class="assistant-mode-bar">
+            <div class="mode-toggle" role="group" aria-label="Global turn mode">
+                <button type="button"
+                        class="mode-toggle-button @(TurnMode == WorkflowTurnMode.Discuss ? "active" : string.Empty)"
+                        disabled="@Busy"
+                        @onclick="@(() => ChangeTurnMode(WorkflowTurnMode.Discuss))">Discuss</button>
+                <button type="button"
+                        class="mode-toggle-button @(TurnMode == WorkflowTurnMode.Work ? "active" : string.Empty)"
+                        disabled="@Busy"
+                        @onclick="@(() => ChangeTurnMode(WorkflowTurnMode.Work))">Work</button>
+            </div>
+            <span class="mode-toggle-note">Global runtime mode for the next turn.</span>
+            @if (HasPendingRequests)
+            {
+                <span class="mode-toggle-warning">Action required before the agent can continue.</span>
+            }
+        </div>
+        @if (IsTurnRunning && !HasPendingRequests)
+        {
+            <div class="assistant-turn-activity" role="status" aria-live="polite">
+                <span class="assistant-turn-spinner" aria-hidden="true"></span>
+                <div class="assistant-turn-copy">
+                    <strong>@GetTurnActivityText()</strong>
+                    <span>Current turn is still running.</span>
+                </div>
+            </div>
+        }
+        <textarea @ref="chatInput"
+                  class="chat-composer-input"
+                  @bind="composerDraft"
+                  @bind:event="oninput"
+                  @bind:after="OnComposerDraftBound"
+                  placeholder="Inspect the current workspace..."></textarea>
+        <div class="chat-composer-actions">
+            <RadzenButton Icon="policy"
+                          Text="System Evaluation"
+                          Class="chat-prompt-button"
+                          ButtonStyle="ButtonStyle.Light"
+                          Click="@LoadSystemEvaluationPrompt"
+                          Disabled="@Busy" />
+            <RadzenButton Icon="send"
+                          Text="Submit Turn"
+                          Class="chat-send-button"
+                          ButtonStyle="ButtonStyle.Primary"
+                          Click="@SendChatDraft"
+                          Disabled="@(!IsServerStarted || Busy || IsTurnRunning || (string.IsNullOrWhiteSpace(composerDraft) && Attachments.Count == 0))" />
+            @if (IsTurnRunning)
+            {
+                <RadzenButton Icon="stop_circle"
+                              Text="Stop Turn"
+                              Class="chat-stop-button"
+                              ButtonStyle="ButtonStyle.Danger"
+                              Click="@StopTurn"
+                              Disabled="@Busy" />
+            }
+        </div>
+    </div>
+
+    <div class="assistant-splitter" @ref="assistantSplitter" title="Drag to resize input and chat history" aria-hidden="true"></div>
+
     <section class="transcript-panel" @ref="transcriptPanel" aria-label="Completed Codex transcript">
         <div class="transcript-header">
             <span>Chat History</span>
@@ -39,7 +133,7 @@
         @if (HasPendingRequests)
         {
             <div class="permission-waiting-banner">
-                Agent is waiting for your approval in <strong>Agent Actions</strong>.
+                Agent is waiting for your approval in <strong>Agent Action Required</strong>.
             </div>
         }
         @if (isCreateTaskPanelVisible)
@@ -98,165 +192,223 @@
         </div>
     </section>
 
-    <div class="stream-splitter" @ref="streamSplitter" title="Drag to resize chat and agent rail" aria-hidden="true"></div>
+    @if (CurrentVisibleRequest is not null)
+    {
+        bool isPending = IsPending(CurrentVisibleRequest);
+        PermissionRequestDisplayModel presentation = PermissionRequestDisplayFormatter.Build(CurrentVisibleRequest);
+        bool hasElicitationForm = PermissionRequestService.IsElicitationRequest(CurrentVisibleRequest.Method)
+            && currentElicitationSchema is not null
+            && currentElicitationSchema.Fields.Count > 0;
+        bool isSimpleBooleanElicitation = IsSimpleBooleanElicitation(currentElicitationSchema);
+        <div class="agent-modal-overlay" role="dialog" aria-modal="true" aria-label="Agent action required">
+            <section class="agent-modal-card">
+                <div class="agent-modal-header">
+                    <div>
+                        <span class="agent-modal-eyebrow">Agent Action Required</span>
+                        <h3>@presentation.Headline</h3>
+                    </div>
+                    <div class="agent-modal-header-actions">
+                        <div class="agent-modal-tab-strip" role="tablist" aria-label="Request detail tabs">
+                            <button type="button"
+                                    class="agent-modal-tab-button @(showAdvancedRequestDetails ? string.Empty : "active")"
+                                    @onclick="@(() => showAdvancedRequestDetails = false)">Action</button>
+                            <button type="button"
+                                    class="agent-modal-tab-button @(showAdvancedRequestDetails ? "active" : string.Empty)"
+                                    @onclick="@(() => showAdvancedRequestDetails = true)">Advanced</button>
+                        </div>
+                        <div class="agent-modal-status">@GetPendingHeaderText()</div>
+                    </div>
+                </div>
 
-    <aside class="current-turn-panel" @ref="currentTurnPanel" aria-label="Agent rail">
-        <div class="rail-tabs" role="tablist" aria-label="Agent rail views">
-            <button type="button"
-                    class="@GetRailTabClass(RailTab.AgentActions)"
-                    role="tab"
-                    aria-selected="@(activeRailTab == RailTab.AgentActions)"
-                    @onclick="@(() => SelectRailTab(RailTab.AgentActions))">
-                Agent Actions
-                <strong>@PendingRequests.Count</strong>
-            </button>
-            <button type="button"
-                    class="@GetRailTabClass(RailTab.CurrentTurn)"
-                    role="tab"
-                    aria-selected="@(activeRailTab == RailTab.CurrentTurn)"
-                    @onclick="@(() => SelectRailTab(RailTab.CurrentTurn))">
-                Current Turn
-            </button>
-        </div>
-
-        @if (activeRailTab == RailTab.CurrentTurn)
-        {
-            <section class="turn-stream-region" @ref="turnStreamRegion" role="tabpanel" aria-label="Current turn stream">
-                <div class="current-turn-body" @ref="currentTurnBody">
-                    @if (string.IsNullOrWhiteSpace(CurrentTurnHtml))
+                <div class="agent-modal-body @(!showAdvancedRequestDetails ? "action-mode" : "advanced-mode")">
+                    @if (!showAdvancedRequestDetails)
                     {
-                        <div class="current-turn-empty">Current turn stream will appear here.</div>
+                    <section class="agent-modal-main agent-modal-main-full">
+                        @if (!string.IsNullOrWhiteSpace(presentation.DetailText))
+                        {
+                            <div class="agent-modal-section">
+                                <span class="agent-modal-label">@(isSimpleBooleanElicitation ? "Question" : presentation.DetailTitle)</span>
+                                <pre class="agent-modal-rich-box @(isSimpleBooleanElicitation ? "agent-modal-question-box" : string.Empty)">@presentation.DetailText</pre>
+                            </div>
+                        }
+                        @if (!isSimpleBooleanElicitation)
+                        {
+                            <div class="agent-modal-section agent-modal-secondary-section">
+                                <span class="agent-modal-label">Summary</span>
+                                <div class="agent-modal-summary-box">@presentation.Summary</div>
+                            </div>
+                        }
+                        @if (hasElicitationForm)
+                        {
+                            <div class="agent-modal-section">
+                                <span class="agent-modal-label">Answer</span>
+                                <div class="agent-modal-form-grid">
+                                    @foreach (ElicitationFieldDefinition field in currentElicitationSchema!.Fields)
+                                    {
+                                        <label class="agent-modal-form-field">
+                                            <span class="agent-modal-field-label">@field.Label</span>
+                                            @if (!string.IsNullOrWhiteSpace(field.Description))
+                                            {
+                                                <small>@field.Description</small>
+                                            }
+                                            @switch (field.Kind)
+                                            {
+                                                case ElicitationFieldKind.Boolean:
+                                                    @if (isSimpleBooleanElicitation)
+                                                    {
+                                                        <div class="agent-modal-boolean-choice" role="group" aria-label="@field.Label">
+                                                            <button type="button"
+                                                                    class="agent-modal-choice-button @(GetElicitationBooleanValue(field.Name) ? "selected" : string.Empty)"
+                                                                    @onclick="@(() => SetElicitationBooleanValue(field.Name, true))">Yes</button>
+                                                            <button type="button"
+                                                                    class="agent-modal-choice-button @(!GetElicitationBooleanValue(field.Name) ? "selected" : string.Empty)"
+                                                                    @onclick="@(() => SetElicitationBooleanValue(field.Name, false))">No</button>
+                                                        </div>
+                                                    }
+                                                    else
+                                                    {
+                                                        <input type="checkbox"
+                                                               checked="@GetElicitationBooleanValue(field.Name)"
+                                                               @onchange="args => OnElicitationBooleanChanged(field.Name, args)" />
+                                                    }
+                                                    break;
+                                                case ElicitationFieldKind.Enum:
+                                                    <select value="@GetElicitationTextValue(field.Name)"
+                                                            @onchange="args => OnElicitationTextChanged(field.Name, args)">
+                                                        @foreach (ElicitationFieldOption option in field.Options)
+                                                        {
+                                                            <option value="@option.Value">@option.Label</option>
+                                                        }
+                                                    </select>
+                                                    break;
+                                                case ElicitationFieldKind.Number:
+                                                    <input type="text"
+                                                           inputmode="decimal"
+                                                           value="@GetElicitationNumberValue(field.Name)"
+                                                           @onchange="args => OnElicitationNumberChanged(field.Name, args)" />
+                                                    break;
+                                                default:
+                                                    <textarea rows="3"
+                                                              @onchange="args => OnElicitationTextChanged(field.Name, args)">@GetElicitationTextValue(field.Name)</textarea>
+                                                    break;
+                                            }
+                                        </label>
+                                    }
+                                </div>
+                            </div>
+                        }
+                        @if (isPending && !CurrentVisibleRequest.SupportsSessionApproval && !CurrentVisibleRequest.SupportsPersistentApproval)
+                        {
+                            <div class="agent-modal-note">One-shot response only for this request type.</div>
+                        }
+                        @if (!isSimpleBooleanElicitation)
+                        {
+                            <div class="agent-modal-section agent-modal-secondary-section">
+                                <span class="agent-modal-label">Request Details</span>
+                                <div class="agent-modal-field-grid">
+                                    <div class="agent-modal-field">
+                                        <span class="agent-modal-field-label">Request Type</span>
+                                        <strong>@presentation.KindLabel</strong>
+                                    </div>
+                                    <div class="agent-modal-field">
+                                        <span class="agent-modal-field-label">Method</span>
+                                        <code>@CurrentVisibleRequest.Method</code>
+                                    </div>
+                                    <div class="agent-modal-field">
+                                        <span class="agent-modal-field-label">Status</span>
+                                        <strong>@GetRequestStatusText(CurrentVisibleRequest)</strong>
+                                    </div>
+                                    <div class="agent-modal-field">
+                                        <span class="agent-modal-field-label">Created</span>
+                                        <strong>@GetRequestTimeText(CurrentVisibleRequest)</strong>
+                                    </div>
+                                    @foreach (PermissionRequestDisplayField field in presentation.Fields)
+                                    {
+                                        <div class="agent-modal-field">
+                                            <span class="agent-modal-field-label">@field.Label</span>
+                                            @if (field.IsCode)
+                                            {
+                                                <code>@field.Value</code>
+                                            }
+                                            else
+                                            {
+                                                <strong>@field.Value</strong>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </section>
                     }
                     else
                     {
-                        <div class="current-turn-markdown">@((MarkupString)CurrentTurnHtml)</div>
-                    }
-                </div>
-            </section>
-        }
-        else
-        {
-            <section class="agent-request-region" @ref="agentRequestRegion" role="tabpanel" aria-label="Agent actions">
-                <div class="agent-request-header">
-                    <span>Agent Actions</span>
-                    <strong>@GetPendingHeaderText()</strong>
-                </div>
-
-                @if (VisibleRequests.Count == 0)
-                {
-                    <div class="agent-request-empty">Permission and elicitation actions will appear here.</div>
-                }
-                else
-                {
-                    <div class="agent-request-list">
-                        @if (CurrentVisibleRequest is not null)
+                    <section class="agent-modal-log">
+                        <div class="@GetRequestCardClass(CurrentVisibleRequest)">
+                            <div class="agent-request-main">
+                                <span>@presentation.KindLabel</span>
+                                <strong>@presentation.Headline</strong>
+                                <code>#@CurrentVisibleRequest.RequestId</code>
+                            </div>
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(presentation.ArgumentsJson))
                         {
-                            bool isPending = IsPending(CurrentVisibleRequest);
-                            <article class="@GetRequestCardClass(CurrentVisibleRequest)">
-                                @if (isPending)
-                                {
-                                    <div class="agent-request-actions">
-                                        <RadzenButton Text="@GetApproveButtonText(CurrentVisibleRequest)"
-                                                      ButtonStyle="ButtonStyle.Success"
-                                                      Size="ButtonSize.Small"
-                                                      Disabled="@Busy"
-                                                      Click="@(() => ApprovePermission.InvokeAsync(CurrentVisibleRequest.RequestId))" />
-                                        @if (CurrentVisibleRequest.SupportsSessionApproval)
-                                        {
-                                            <RadzenButton Text="Allow Session"
-                                                          ButtonStyle="ButtonStyle.Success"
-                                                          Size="ButtonSize.Small"
-                                                          Disabled="@Busy"
-                                                          Click="@(() => ApprovePermissionForSession.InvokeAsync(CurrentVisibleRequest.RequestId))" />
-                                        }
-                                        @if (CurrentVisibleRequest.SupportsPersistentApproval)
-                                        {
-                                            <RadzenButton Text="Allow Always"
-                                                          ButtonStyle="ButtonStyle.Warning"
-                                                          Size="ButtonSize.Small"
-                                                          Disabled="@Busy"
-                                                          Click="@(() => ApprovePermissionAlways.InvokeAsync(CurrentVisibleRequest.RequestId))" />
-                                        }
-                                        <RadzenButton Text="Deny"
-                                                      ButtonStyle="ButtonStyle.Light"
-                                                      Size="ButtonSize.Small"
-                                                      Disabled="@Busy"
-                                                      Click="@(() => DenyPermission.InvokeAsync(CurrentVisibleRequest.RequestId))" />
-                                        <RadzenButton Text="Cancel Turn"
-                                                      ButtonStyle="ButtonStyle.Danger"
-                                                      Size="ButtonSize.Small"
-                                                      Disabled="@Busy"
-                                                      Click="@(() => CancelPermission.InvokeAsync(CurrentVisibleRequest.RequestId))" />
-                                    </div>
-                                }
-                                <div class="agent-request-main">
-                                    <span>@CurrentVisibleRequest.Method</span>
-                                    <strong>@CurrentVisibleRequest.Summary</strong>
-                                    <code>#@CurrentVisibleRequest.RequestId</code>
-                                    <div class="agent-request-state">
-                                        <span>@GetRequestStatusText(CurrentVisibleRequest)</span>
-                                        <time>@GetRequestTimeText(CurrentVisibleRequest)</time>
-                                    </div>
-                                </div>
-                                @if (isPending && !CurrentVisibleRequest.SupportsSessionApproval && !CurrentVisibleRequest.SupportsPersistentApproval)
-                                {
-                                    <div class="agent-request-scope-note">
-                                        One-shot response only for this request type.
-                                    </div>
-                                }
-                            </article>
+                            <details class="agent-modal-details">
+                                <summary>@presentation.ArgumentsTitle</summary>
+                                <pre class="agent-modal-payload-box">@presentation.ArgumentsJson</pre>
+                            </details>
                         }
-                    </div>
-                }
-            </section>
-        }
-    </aside>
-    <div class="assistant-splitter" @ref="assistantSplitter" title="Drag to resize transcript and input" aria-hidden="true"></div>
-
-    <div class="chat-composer" @ref="chatComposer">
-        <div class="attachment-strip">
-            <label class="attachment-picker-label" title="Copy files into runtime and attach them to the next turn">
-                <span class="attachment-icon">+</span>
-                <span>Attach</span>
-                @if (!Busy)
-                {
-                    <InputFile @key="AttachmentPickerKey"
-                               class="attachment-picker"
-                               OnChange="@AttachFiles"
-                               multiple />
-                }
-            </label>
-            <span class="attachment-count">@GetAttachmentCountText()</span>
-            @if (Attachments.Count > 0)
-            {
-                <div class="attachment-chips" aria-label="Attached files">
-                    @foreach (CodexTurnAttachment attachment in Attachments)
-                    {
-                        <span class="attachment-chip" title="@attachment.Path">
-                            <span class="attachment-kind">@GetAttachmentKindText(attachment)</span>
-                            <span>@attachment.Name</span>
-                            <small>@FormatAttachmentSize(attachment.SizeBytes)</small>
-                            <button type="button"
-                                    title="Remove attachment"
-                                    disabled="@Busy"
-                                    @onclick="@(() => RemoveAttachment.InvokeAsync(attachment.Path))">x</button>
-                        </span>
+                        <details class="agent-modal-details">
+                            <summary>Raw request JSON</summary>
+                            <pre class="agent-modal-payload-box raw">@presentation.RawJson</pre>
+                        </details>
+                    </section>
                     }
                 </div>
-            }
+
+                <div class="agent-modal-footer">
+                    @if (isPending)
+                    {
+                        <RadzenButton Text="@GetApproveButtonText(CurrentVisibleRequest)"
+                                      ButtonStyle="ButtonStyle.Success"
+                                      Size="ButtonSize.Small"
+                                      Disabled="@(Busy || !CanSubmitCurrentPermission())"
+                                      Click="@SubmitCurrentPermissionResponse" />
+                        @if (!isSimpleBooleanElicitation && CurrentVisibleRequest.SupportsSessionApproval)
+                        {
+                            <RadzenButton Text="Allow Session"
+                                          ButtonStyle="ButtonStyle.Success"
+                                          Size="ButtonSize.Small"
+                                          Disabled="@Busy"
+                                          Click="@(() => ApprovePermissionForSession.InvokeAsync(CurrentVisibleRequest.RequestId))" />
+                        }
+                        @if (!isSimpleBooleanElicitation && CurrentVisibleRequest.SupportsPersistentApproval)
+                        {
+                            <RadzenButton Text="Allow Always"
+                                          ButtonStyle="ButtonStyle.Warning"
+                                          Size="ButtonSize.Small"
+                                          Disabled="@Busy"
+                                          Click="@(() => ApprovePermissionAlways.InvokeAsync(CurrentVisibleRequest.RequestId))" />
+                        }
+                        @if (!isSimpleBooleanElicitation)
+                        {
+                            <RadzenButton Text="Deny"
+                                          ButtonStyle="ButtonStyle.Light"
+                                          Size="ButtonSize.Small"
+                                          Disabled="@Busy"
+                                          Click="@(() => DenyPermission.InvokeAsync(CurrentVisibleRequest.RequestId))" />
+                            <RadzenButton Text="Cancel Turn"
+                                          ButtonStyle="ButtonStyle.Danger"
+                                          Size="ButtonSize.Small"
+                                          Disabled="@Busy"
+                                          Click="@(() => CancelPermission.InvokeAsync(CurrentVisibleRequest.RequestId))" />
+                        }
+                    }
+                </div>
+            </section>
         </div>
-        <textarea @ref="chatInput"
-                  class="chat-composer-input"
-                  @bind:get="ChatDraft"
-                  @bind:set="OnChatDraftChanged"
-                  @bind:event="oninput"
-                  placeholder="Inspect the current workspace..."
-                  ></textarea>
-        <RadzenButton Icon="send"
-                      ButtonStyle="ButtonStyle.Primary"
-                      Click="@SendChatDraft"
-                      Disabled="@(!IsServerStarted || Busy || (string.IsNullOrWhiteSpace(ChatDraft) && Attachments.Count == 0))" />
-    </div>
+    }
+</div>
 </div>
 
 @code {
@@ -274,6 +426,9 @@
 
     [Parameter]
     public WorkflowTurnMode TurnMode { get; set; }
+
+    [Parameter]
+    public EventCallback<WorkflowTurnMode> TurnModeChanged { get; set; }
 
     [Parameter]
     public IReadOnlyList<CodexPermissionRequest> PermissionRequests { get; set; } = [];
@@ -304,6 +459,9 @@
 
     [Parameter]
     public EventCallback SendChatDraft { get; set; }
+
+    [Parameter]
+    public EventCallback StopTurn { get; set; }
 
     [Parameter]
     public EventCallback<InputFileChangeEventArgs> AttachFiles { get; set; }
@@ -348,7 +506,7 @@
     public EventCallback<int> DenyPermission { get; set; }
 
     [Parameter]
-    public EventCallback<int> ApprovePermission { get; set; }
+    public EventCallback<PermissionApprovalRequest> ApprovePermission { get; set; }
 
     [Parameter]
     public EventCallback<int> ApprovePermissionForSession { get; set; }
@@ -364,10 +522,14 @@
     private bool IsDiscussMode => TurnMode == WorkflowTurnMode.Discuss;
     private bool CanCreateTaskFromTranscript => HasTranscript && IsDiscussMode && !Busy;
     private bool CanSubmitTaskCreation => CanCreateTaskFromTranscript && !string.IsNullOrWhiteSpace(taskTitleDraft);
-    private RailTab activeRailTab = RailTab.AgentActions;
     private bool isCreateTaskPanelVisible;
     private string taskTitleDraft = string.Empty;
-    private int? lastPendingRequestId;
+    private bool showAdvancedRequestDetails;
+    private int? elicitationStateRequestId;
+    private ElicitationRequestSchema? currentElicitationSchema;
+    private readonly Dictionary<string, bool> elicitationBooleanValues = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> elicitationTextValues = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> elicitationNumberValues = new(StringComparer.Ordinal);
 
     private IReadOnlyList<CodexPermissionRequest> PendingRequests =>
         PermissionRequests
@@ -379,27 +541,14 @@
     private CodexPermissionRequest? CurrentVisibleRequest =>
         PendingRequests.FirstOrDefault();
 
-    private void SelectRailTab(RailTab tab)
-    {
-        activeRailTab = tab;
-    }
-
     protected override void OnParametersSet()
     {
-        CodexPermissionRequest? latestPending = PendingRequests
-            .OrderByDescending(request => request.CreatedAt)
-            .FirstOrDefault();
-        if (latestPending is not null)
+        base.OnParametersSet();
+        SynchronizeElicitationState();
+
+        if (!string.Equals(ChatDraft, composerDraft, StringComparison.Ordinal))
         {
-            if (lastPendingRequestId != latestPending.RequestId)
-            {
-                activeRailTab = RailTab.AgentActions;
-                lastPendingRequestId = latestPending.RequestId;
-            }
-        }
-        else
-        {
-            lastPendingRequestId = null;
+            composerDraft = ChatDraft ?? string.Empty;
         }
     }
 
@@ -418,32 +567,12 @@
         taskTitleDraft = string.Empty;
     }
 
-    private string GetRailTabClass(RailTab tab)
-    {
-        bool isActive = activeRailTab == tab;
-        bool isWaitingTab = tab == RailTab.AgentActions && HasPendingRequests;
-        if (isActive && isWaitingTab)
-        {
-            return "rail-tab active waiting";
-        }
-
-        if (isActive)
-        {
-            return "rail-tab active";
-        }
-
-        return isWaitingTab
-            ? "rail-tab waiting"
-            : "rail-tab";
-    }
-
     private string GetPendingHeaderText()
     {
         return PendingRequests.Count switch
         {
             0 => "No pending requests",
-            1 => "Waiting for you",
-            _ => $"{PendingRequests.Count} waiting for you"
+            _ => "Waiting for you"
         };
     }
 
@@ -520,15 +649,273 @@
 
     private static string GetApproveButtonText(CodexPermissionRequest request)
     {
+        PermissionRequestDisplayModel display = PermissionRequestDisplayFormatter.Build(request);
+        if (display.KindLabel.Equals("MCP Tool Call", StringComparison.OrdinalIgnoreCase))
+        {
+            return request.SupportsSessionApproval || request.SupportsPersistentApproval
+                ? "Allow"
+                : "Allow Once";
+        }
+
+        if (PermissionRequestService.IsElicitationRequest(request.Method))
+        {
+            return "Submit Answer";
+        }
+
         return request.SupportsSessionApproval || request.SupportsPersistentApproval
             ? "Allow"
             : "Allow Once";
+    }
+
+    private void SynchronizeElicitationState()
+    {
+        CodexPermissionRequest? request = CurrentVisibleRequest;
+        if (request is null)
+        {
+            ClearElicitationState();
+            return;
+        }
+
+        if (elicitationStateRequestId == request.RequestId)
+        {
+            return;
+        }
+
+        elicitationStateRequestId = request.RequestId;
+        currentElicitationSchema = PermissionRequestService.IsElicitationRequest(request.Method)
+            ? ElicitationRequestSchemaParser.Parse(request.RawJson)
+            : null;
+
+        elicitationBooleanValues.Clear();
+        elicitationTextValues.Clear();
+        elicitationNumberValues.Clear();
+
+        if (currentElicitationSchema is null)
+        {
+            return;
+        }
+
+        foreach (ElicitationFieldDefinition field in currentElicitationSchema.Fields)
+        {
+            switch (field.Kind)
+            {
+                case ElicitationFieldKind.Boolean:
+                    elicitationBooleanValues[field.Name] = field.DefaultBoolean ?? false;
+                    break;
+                case ElicitationFieldKind.String:
+                case ElicitationFieldKind.Enum:
+                    elicitationTextValues[field.Name] = field.DefaultText ?? field.Options.FirstOrDefault()?.Value ?? string.Empty;
+                    break;
+                case ElicitationFieldKind.Number:
+                    elicitationNumberValues[field.Name] = field.DefaultNumber?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+                    break;
+            }
+        }
+    }
+
+    private void ClearElicitationState()
+    {
+        elicitationStateRequestId = null;
+        currentElicitationSchema = null;
+        showAdvancedRequestDetails = false;
+        elicitationBooleanValues.Clear();
+        elicitationTextValues.Clear();
+        elicitationNumberValues.Clear();
+    }
+
+    private async Task SubmitCurrentPermissionResponse()
+    {
+        CodexPermissionRequest? request = CurrentVisibleRequest;
+        if (request is null)
+        {
+            return;
+        }
+
+        JsonObject? elicitationContent = null;
+        if (PermissionRequestService.IsElicitationRequest(request.Method))
+        {
+            elicitationContent = BuildElicitationContent();
+        }
+
+        await ApprovePermission.InvokeAsync(new PermissionApprovalRequest(request.RequestId, elicitationContent));
+    }
+
+    private JsonObject? BuildElicitationContent()
+    {
+        if (currentElicitationSchema is null || currentElicitationSchema.Fields.Count == 0)
+        {
+            return null;
+        }
+
+        JsonObject content = [];
+        foreach (ElicitationFieldDefinition field in currentElicitationSchema.Fields)
+        {
+            switch (field.Kind)
+            {
+                case ElicitationFieldKind.Boolean:
+                    content[field.Name] = elicitationBooleanValues.TryGetValue(field.Name, out bool boolValue)
+                        ? boolValue
+                        : field.DefaultBoolean ?? false;
+                    break;
+
+                case ElicitationFieldKind.String:
+                case ElicitationFieldKind.Enum:
+                    if (elicitationTextValues.TryGetValue(field.Name, out string? textValue) &&
+                        !string.IsNullOrWhiteSpace(textValue))
+                    {
+                        content[field.Name] = textValue;
+                    }
+                    break;
+
+                case ElicitationFieldKind.Number:
+                    if (elicitationNumberValues.TryGetValue(field.Name, out string? numberText) &&
+                        decimal.TryParse(numberText, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out decimal numberValue))
+                    {
+                        content[field.Name] = numberValue;
+                    }
+                    break;
+            }
+        }
+
+        return content;
+    }
+
+    private bool CanSubmitCurrentPermission()
+    {
+        CodexPermissionRequest? request = CurrentVisibleRequest;
+        if (request is null || !IsPending(request))
+        {
+            return false;
+        }
+
+        if (!PermissionRequestService.IsElicitationRequest(request.Method) || currentElicitationSchema is null)
+        {
+            return true;
+        }
+
+        foreach (ElicitationFieldDefinition field in currentElicitationSchema.Fields)
+        {
+            if (!field.IsRequired)
+            {
+                continue;
+            }
+
+            switch (field.Kind)
+            {
+                case ElicitationFieldKind.Boolean:
+                    continue;
+
+                case ElicitationFieldKind.String:
+                case ElicitationFieldKind.Enum:
+                    if (!elicitationTextValues.TryGetValue(field.Name, out string? textValue) || string.IsNullOrWhiteSpace(textValue))
+                    {
+                        return false;
+                    }
+                    break;
+
+                case ElicitationFieldKind.Number:
+                    if (!elicitationNumberValues.TryGetValue(field.Name, out string? numberText) ||
+                        !decimal.TryParse(numberText, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out _))
+                    {
+                        return false;
+                    }
+                    break;
+            }
+        }
+
+        return true;
+    }
+
+    private bool GetElicitationBooleanValue(string fieldName)
+    {
+        return elicitationBooleanValues.TryGetValue(fieldName, out bool value) && value;
+    }
+
+    private string GetElicitationTextValue(string fieldName)
+    {
+        return elicitationTextValues.TryGetValue(fieldName, out string? value) ? value : string.Empty;
+    }
+
+    private string GetElicitationNumberValue(string fieldName)
+    {
+        return elicitationNumberValues.TryGetValue(fieldName, out string? value) ? value : string.Empty;
+    }
+
+    private void OnElicitationBooleanChanged(string fieldName, ChangeEventArgs args)
+    {
+        bool value = args.Value switch
+        {
+            bool boolValue => boolValue,
+            string stringValue when bool.TryParse(stringValue, out bool parsed) => parsed,
+            _ => false
+        };
+
+        elicitationBooleanValues[fieldName] = value;
+    }
+
+    private void SetElicitationBooleanValue(string fieldName, bool value)
+    {
+        elicitationBooleanValues[fieldName] = value;
+    }
+
+    private void OnElicitationTextChanged(string fieldName, ChangeEventArgs args)
+    {
+        elicitationTextValues[fieldName] = args.Value?.ToString() ?? string.Empty;
+    }
+
+    private void OnElicitationNumberChanged(string fieldName, ChangeEventArgs args)
+    {
+        elicitationNumberValues[fieldName] = args.Value?.ToString() ?? string.Empty;
     }
 
     private static string GetRequestTimeText(CodexPermissionRequest request)
     {
         DateTimeOffset timestamp = request.ResolvedAt ?? request.CreatedAt;
         return timestamp.ToLocalTime().ToString("HH:mm:ss");
+    }
+
+    private static bool IsSimpleBooleanElicitation(ElicitationRequestSchema? schema)
+    {
+        return schema is not null
+            && schema.Fields.Count == 1
+            && schema.Fields[0].Kind == ElicitationFieldKind.Boolean;
+    }
+
+    private static string GetRequestHeading(CodexPermissionRequest request)
+    {
+        return PermissionRequestDisplayFormatter.Build(request).Headline;
+    }
+
+    private static string GetRequestSummaryText(CodexPermissionRequest request)
+    {
+        return PermissionRequestDisplayFormatter.Build(request).Summary;
+    }
+
+    private static string FormatRequestPayload(CodexPermissionRequest request)
+    {
+        string payload = string.IsNullOrWhiteSpace(request.RawJson)
+            ? request.Summary
+            : request.RawJson;
+
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return request.Method;
+        }
+
+        try
+        {
+            using System.Text.Json.JsonDocument document = System.Text.Json.JsonDocument.Parse(payload);
+            return System.Text.Json.JsonSerializer.Serialize(
+                document.RootElement,
+                new System.Text.Json.JsonSerializerOptions
+                {
+                    WriteIndented = true
+                });
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return payload;
+        }
     }
 
     private static string GetAttachmentKindText(CodexTurnAttachment attachment)
@@ -564,27 +951,91 @@
     }
 
     private ElementReference assistantLayout;
-    private ElementReference transcriptPanel;
-    private ElementReference transcriptView;
-    private ElementReference streamSplitter;
-    private ElementReference currentTurnPanel;
-    private ElementReference turnStreamRegion;
-    private ElementReference currentTurnBody;
-    private ElementReference agentRequestRegion;
     private ElementReference chatComposer;
     private ElementReference assistantSplitter;
+    private ElementReference transcriptPanel;
+    private ElementReference transcriptView;
     private ElementReference chatInput;
     private IJSObjectReference? resizeModule;
+    private string composerDraft = string.Empty;
+    private const string SystemEvaluationPrompt = """
+Check current system parameters before any implementation work.
 
-    private Task OnChatDraftChanged(string value)
+Do not execute the task.
+Do not mutate files.
+Do not start a governed edit session.
+Do not start governed review.
+
+Explain how you would operate as a junior developer coding assistant under the current Coding Services governed workflow.
+
+Required behavior:
+1. Discover the live callable MCP tool surface first and treat it as authoritative before making any claim about missing tools.
+2. Explain the workflow in this order:
+   get_current_task -> discovery -> refresh/new_file -> governed mutation -> session-first review -> post-accept freshness
+3. Distinguish these tools clearly:
+   refresh_file
+   new_file
+   add_file_to_session
+   declare_session_files
+   replace_text_in_file
+   replace_span_in_file
+   submit_symbol
+   remove_symbol
+   submit_file
+4. State the normal tool choice for:
+   - single contiguous text replacement
+   - multi-fragment C# edit inside one symbol
+   - symbol removal
+   - new-file authoring
+   - incremental multi-file session growth
+   - bulk declaration/replacement of a full session file set
+5. State clearly:
+   - submit_file does not take sessionId and why
+   - replace_span_in_file is fallback-only
+   - declare_session_files is advanced bulk declaration/replacement, not normal session growth
+   - request_operator_confirmation should be used for bounded yes/no operator questions when exposed
+   - Roslyn-backed semantic edit tools are the required default for reliable governed C# edits
+
+If policy text and the live tool surface do not match, report the mismatch explicitly.
+
+Respond in exactly three sections:
+- Effective Rules
+- Tool Decisions
+- Remaining Mismatches
+
+Keep it concise, specific, and implementation-oriented.
+""";
+
+    private Task OnComposerDraftBound()
     {
-        return ChatDraftChanged.InvokeAsync(value);
+        return ChatDraftChanged.InvokeAsync(composerDraft);
+    }
+
+    private async Task LoadSystemEvaluationPrompt()
+    {
+        composerDraft = SystemEvaluationPrompt;
+        await ChatDraftChanged.InvokeAsync(composerDraft);
+    }
+
+    private string GetTurnActivityText()
+    {
+        if (HasPendingRequests)
+        {
+            return "Waiting for approval";
+        }
+
+        return "Thinking...";
     }
 
     private Task OnTaskTitleInput(ChangeEventArgs args)
     {
         taskTitleDraft = args.Value?.ToString() ?? string.Empty;
         return Task.CompletedTask;
+    }
+
+    private Task ChangeTurnMode(WorkflowTurnMode value)
+    {
+        return TurnModeChanged.InvokeAsync(value);
     }
 
     private async Task CreateTask()
@@ -634,26 +1085,15 @@
         if (firstRender)
         {
             await resizeModule.InvokeVoidAsync(
-                "attachAssistantSplitter",
+                "attachSourceSplitter",
                 assistantLayout,
-                transcriptPanel,
                 chatComposer,
-                assistantSplitter);
-            await resizeModule.InvokeVoidAsync(
-                "attachStreamSplitter",
-                assistantLayout,
                 transcriptPanel,
-                currentTurnPanel,
-                streamSplitter);
-            await resizeModule.InvokeVoidAsync("attachComposerAutoScroll", chatInput);
-            await resizeModule.InvokeVoidAsync("attachTranscriptCopyButtons", transcriptView);
+                assistantSplitter);
         }
 
-        if (activeRailTab == RailTab.CurrentTurn)
-        {
-            await resizeModule.InvokeVoidAsync("scrollElementToBottom", currentTurnBody);
-        }
-
+        await resizeModule.InvokeVoidAsync("attachComposerAutoScroll", chatInput);
+        await resizeModule.InvokeVoidAsync("attachTranscriptCopyButtons", transcriptView);
         await resizeModule.InvokeVoidAsync("scrollElementToBottom", transcriptView);
     }
 
@@ -669,11 +1109,5 @@
             {
             }
         }
-    }
-
-    private enum RailTab
-    {
-        AgentActions,
-        CurrentTurn
     }
 }

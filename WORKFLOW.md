@@ -98,7 +98,6 @@ Manual fallback:
 dotnet run --project .\CodexAppServerBlazor\CodexAppServerBlazor.csproj -- `
   --BlazorHost:Url=http://localhost:5205 `
   --Mcp:Url=http://localhost:6278 `
-  --AppInstance:Label=SelfHost `
   --Workspace:DefaultCwd=C:\CodexAppServerWinForms_corrected `
   --Workspace:PersistencePath=runtime/app-state/selected-workspace-selfhost.txt `
   --CodingServices:WatchedSolutionPath=C:\CodexAppServerWinForms_corrected\CodexAppServerWinForms_corrected.slnx
@@ -106,7 +105,6 @@ dotnet run --project .\CodexAppServerBlazor\CodexAppServerBlazor.csproj -- `
 dotnet run --project .\CodexAppServerBlazor\CodexAppServerBlazor.csproj -- `
   --BlazorHost:Url=http://localhost:5215 `
   --Mcp:Url=http://localhost:6289 `
-  --AppInstance:Label=Child `
   --Workspace:DefaultCwd=C:\SchemaStudioWebViewer1 `
   --Workspace:PersistencePath=runtime/app-state/selected-workspace-child.txt `
   --CodingServices:WatchedSolutionPath=C:\SchemaStudioWebViewer1\SchemaStudioWebViewer.sln

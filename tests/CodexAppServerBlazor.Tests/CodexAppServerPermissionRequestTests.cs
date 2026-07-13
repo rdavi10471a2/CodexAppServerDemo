@@ -560,6 +560,78 @@ public sealed class CodexAppServerPermissionRequestTests
     }
 
     [Fact]
+    public async Task RespondToServerRequestAsync_writes_elicitation_accept_response_with_content()
+    {
+        List<string> sentMessages = [];
+        CodexAppServerClient client = new((json, _) =>
+        {
+            sentMessages.Add(json);
+            return Task.CompletedTask;
+        });
+
+        JsonObject content = [];
+        content["updateNotes"] = true;
+
+        object response = PermissionRequestService.CreateApproveResponse(
+            "mcpServer/elicitation/request",
+            """
+            {"params":{"message":"Should I update notes?"}}
+            """,
+            PermissionApprovalScope.Turn,
+            content);
+        await client.RespondToServerRequestAsync(102, response);
+
+        JsonNode? message = JsonNode.Parse(Assert.Single(sentMessages));
+        Assert.Equal(102, message?["id"]?.GetValue<int>());
+        Assert.Equal("accept", message?["result"]?["action"]?.GetValue<string>());
+        Assert.True(message?["result"]?["content"]?["updateNotes"]?.GetValue<bool>());
+    }
+
+    [Fact]
+    public void Wrapped_operator_confirmation_tool_request_is_detected()
+    {
+        bool detected = PermissionRequestService.IsWrappedOperatorConfirmationToolRequest(
+            "mcpServer/elicitation/request",
+            """
+            {
+              "id": 1,
+              "method": "mcpServer/elicitation/request",
+              "params": {
+                "serverName": "harness",
+                "message": "Allow the harness MCP server to run tool \"request_operator_confirmation\"?",
+                "_meta": {
+                  "codex_approval_kind": "mcp_tool_call"
+                }
+              }
+            }
+            """);
+
+        Assert.True(detected);
+    }
+
+    [Fact]
+    public void Wrapped_non_operator_confirmation_tool_request_is_not_detected()
+    {
+        bool detected = PermissionRequestService.IsWrappedOperatorConfirmationToolRequest(
+            "mcpServer/elicitation/request",
+            """
+            {
+              "id": 1,
+              "method": "mcpServer/elicitation/request",
+              "params": {
+                "serverName": "harness",
+                "message": "Allow the harness MCP server to run tool \"get_current_task\"?",
+                "_meta": {
+                  "codex_approval_kind": "mcp_tool_call"
+                }
+              }
+            }
+            """);
+
+        Assert.False(detected);
+    }
+
+    [Fact]
     public async Task RespondToServerRequestAsync_writes_json_rpc_permission_denial()
     {
         List<string> sentMessages = [];

@@ -70,6 +70,6 @@ public sealed class TaskWorkflowContextServiceTests
             })
             .Build();
 
-        return new CodingServicesSettingsProvider(configuration);
+        return TestServiceFactory.CreateSettingsProvider(configuration, Directory.GetCurrentDirectory());
     }
 }

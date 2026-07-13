@@ -28,6 +28,7 @@
     <Compile Include="..\Mcp\HarnessWorkspaceReviewService.cs" Link="Shared\Mcp\HarnessWorkspaceReviewService.cs" />
     <Compile Include="..\Mcp\ReviewElicitation.cs" Link="Shared\Mcp\ReviewElicitation.cs" />
     <Compile Include="..\Mcp\McpHostFactory.cs" Link="Shared\Mcp\McpHostFactory.cs" />
+    <Compile Include="..\Mcp\ElicitationProbeMcpTools.cs" Link="Shared\Mcp\ElicitationProbeMcpTools.cs" />
     <Compile Include="..\Mcp\WorkspaceEditMcpTools.cs" Link="Shared\Mcp\WorkspaceEditMcpTools.cs" />
     <Compile Include="..\Mcp\WorkspaceReviewMcpTools.cs" Link="Shared\Mcp\WorkspaceReviewMcpTools.cs" />
     <Compile Include="..\Mcp\WorkspaceState.cs" Link="Shared\Mcp\WorkspaceState.cs" />
@@ -38,6 +39,12 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="docs\policy\CS-EditToolGuidance.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="docs\policy\CS-WorkedExamples.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="docs\policy\CS-DiagnosticPrompts.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>

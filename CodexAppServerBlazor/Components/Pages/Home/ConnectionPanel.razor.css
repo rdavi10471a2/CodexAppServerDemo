@@ -1,63 +1,163 @@
 .connection-panel {
-    flex: 0 0 320px;
-    width: 320px;
-    min-width: 260px;
-    max-width: 520px;
-    align-self: flex-start;
-    max-height: calc(98vh - 86px);
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    min-height: 0;
     overflow: auto;
-    border: 1px solid #c8d5df;
-    border-radius: 8px;
-    padding: 14px;
-    background: #ffffff;
-    box-shadow: 0 10px 24px rgba(30, 47, 65, .08);
-    resize: both;
+    padding: 4px;
+    background: transparent;
 }
 
-.panel-heading {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
+.connection-notes {
+    display: grid;
+    gap: 4px;
+}
+
+.panel-warning {
+    margin: 0;
+    color: #8a5b00;
+    font-size: .78rem;
+    font-weight: 700;
+    line-height: 1.35;
+}
+
+.panel-help {
+    margin: 0;
+    color: #607893;
+    font-size: .78rem;
+    line-height: 1.4;
+}
+
+.panel-help code {
+    font-size: .74rem;
+    color: #1b3654;
+    background: #f4f8fb;
+    padding: 1px 4px;
+    border-radius: 4px;
+    overflow-wrap: anywhere;
 }
 
 .panel-heading h2 {
     margin: 0;
     font-size: 1.05rem;
-    font-weight: 700;
+    font-weight: 800;
     letter-spacing: 0;
 }
 
 .eyebrow {
     display: block;
-    margin-bottom: 4px;
     color: #58708a;
     font-size: .73rem;
-    font-weight: 800;
-    letter-spacing: 0;
+    font-weight: 900;
+    letter-spacing: .04em;
     text-transform: uppercase;
+}
+
+.section-eyebrow,
+.token-summary span,
+.field span,
+.runtime-status-list span {
+    color: #607893;
+    font-size: .74rem;
+    font-weight: 900;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+
+.section-eyebrow {
+    display: block;
+}
+
+.connection-tabs {
+    min-height: 0;
+}
+
+.connection-tabs ::deep .rz-tabview-panels,
+.connection-tabs ::deep .rz-tabview-panel {
+    min-height: 0;
+}
+
+.connection-section {
+    display: grid;
+    gap: 8px;
+    border: 1px solid #d7e1ea;
+    border-radius: 12px;
+    padding: 10px;
+    background: #fbfdff;
+    align-content: start;
+}
+
+.connection-section-compact {
+    padding: 10px 12px;
+}
+
+.connection-section-log {
+    min-height: 0;
+    padding: 10px;
+}
+
+.section-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.section-header strong {
+    display: block;
+    margin-top: 2px;
+    color: #172335;
+    font-size: 1rem;
+    font-weight: 800;
+}
+
+.settings-panel-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+    gap: 10px;
+    align-items: start;
+}
+
+.settings-card {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+    border: 1px solid #dfe8f0;
+    border-radius: 10px;
+    padding: 12px;
+    background: #ffffff;
+    align-content: start;
+}
+
+.settings-card-header {
+    display: grid;
+    gap: 0;
+}
+
+.settings-grid,
+.settings-grid-single {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+}
+
+.settings-grid-two-column {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 12px;
 }
 
 .field {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
 }
 
-.field span,
-.summary-stack span {
-    color: #526a82;
-    font-size: .8rem;
-    font-weight: 800;
-}
-
-.settings-pair {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 10px;
+.settings-card-status {
+    align-content: start;
 }
 
 .actions {
@@ -68,7 +168,7 @@
 }
 
 .connection-actions {
-    flex-direction: column;
+    justify-content: flex-start;
 }
 
 .connection-actions .rz-button {
@@ -77,7 +177,7 @@
 
 .token-summary {
     display: grid;
-    gap: 8px;
+    gap: 6px;
     border: 1px solid #d7e1ea;
     border-radius: 6px;
     padding: 9px 10px;
@@ -85,17 +185,18 @@
 }
 
 .token-summary-header,
-.rate-row {
+.token-summary-inline {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.token-summary-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-}
-
-.token-summary span {
-    color: #526a82;
-    font-size: .74rem;
-    font-weight: 800;
 }
 
 .token-summary strong {
@@ -104,9 +205,15 @@
     font-weight: 800;
 }
 
+.token-summary-inline small {
+    color: #607893;
+    font-size: .78rem;
+    font-weight: 700;
+}
+
 .token-grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 6px;
 }
 
@@ -123,76 +230,51 @@
     display: block;
 }
 
-.rate-row {
-    border-top: 1px solid #e2ebf2;
-    padding-top: 7px;
-}
-
-.rate-row strong {
-    overflow: hidden;
-    text-align: right;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.summary-stack {
+.runtime-status-list {
     display: grid;
     gap: 8px;
-    margin-top: 2px;
 }
 
-.summary-stack div {
+.runtime-status-grid {
+    grid-template-columns: 1fr;
+}
+
+.runtime-status-list div {
     min-width: 0;
     border: 1px solid #d7e1ea;
     border-radius: 6px;
-    padding: 8px 10px;
+    padding: 7px 9px;
     background: #f7fafc;
 }
 
-.summary-stack strong {
+.runtime-status-list strong {
     display: block;
-    margin-top: 4px;
-    font-size: .9rem;
+    margin-top: 3px;
+    font-size: .86rem;
     overflow-wrap: anywhere;
 }
 
-.connection-help {
-    display: grid;
-    gap: 6px;
-    border: 1px solid #d7e1ea;
-    border-radius: 6px;
-    padding: 9px 10px;
-    background: #f7fafc;
-}
-
-.connection-help > span {
-    color: #526a82;
-    font-size: .74rem;
-    font-weight: 800;
-    text-transform: uppercase;
-}
-
-.connection-help p {
-    margin: 0;
-    color: #304358;
-    font-size: .78rem;
-    line-height: 1.35;
-}
-
-.connection-help strong {
-    color: #172335;
-}
-
-.connection-help code {
-    font-family: Consolas, "Cascadia Mono", monospace;
-    font-size: .76rem;
-}
-
 @media (max-width: 1100px) {
-    .connection-panel {
-        flex-basis: auto;
-        width: auto;
-        max-width: none;
-        resize: vertical;
+    .settings-panel-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .settings-card-combined {
+        grid-column: auto;
+    }
+
+    .runtime-status-grid,
+    .settings-grid-two-column,
+    .token-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+@media (max-width: 780px) {
+    .settings-panel-grid,
+    .runtime-status-grid,
+    .settings-grid-two-column,
+    .token-grid {
+        grid-template-columns: 1fr;
     }
 }

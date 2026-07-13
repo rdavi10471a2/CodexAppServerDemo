@@ -9,7 +9,7 @@ $watchedSolutionPath = Join-Path $repoRoot "CodexAppServerWinForms_corrected.sln
 dotnet run --project $projectPath -- `
   --BlazorHost:Url=http://localhost:5205 `
   --Mcp:Url=http://localhost:6278 `
-  --AppInstance:Label=SelfHost `
   --Workspace:DefaultCwd=$repoRoot `
   --Workspace:PersistencePath=runtime/app-state/selected-workspace-selfhost.txt `
+  --CodingServices:RuntimeRoot="$repoRoot\runtime" `
   --CodingServices:WatchedSolutionPath=$watchedSolutionPath

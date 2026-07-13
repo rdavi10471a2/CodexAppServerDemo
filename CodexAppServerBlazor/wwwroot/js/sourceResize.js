@@ -14,6 +14,10 @@ export function attachSourceSplitter(layout, sidebar, detail, splitter) {
         const delta = event.clientX - startX;
         const nextSidebar = Math.max(minSidebar, startSidebarWidth + delta);
         const nextDetail = Math.max(minDetail, startDetailWidth - delta);
+        sidebar.style.flex = `0 0 ${nextSidebar}px`;
+        detail.style.flex = `0 0 ${nextDetail}px`;
+        sidebar.style.flexBasis = `${nextSidebar}px`;
+        detail.style.flexBasis = `${nextDetail}px`;
         sidebar.style.width = `${nextSidebar}px`;
         detail.style.width = `${nextDetail}px`;
     }
@@ -123,14 +127,40 @@ export function attachAssistantSplitter(layout, transcript, composer, splitter) 
     }
 
     splitter.dataset.resizeAttached = "true";
+    splitter.dataset.userSized = splitter.dataset.userSized || "false";
 
     let startY = 0;
     let startComposerHeight = 0;
     let layoutHeight = 0;
     let splitterHeight = 12;
 
-    const minTranscript = 220;
-    const minComposer = 150;
+    const minTranscript = 120;
+    const minComposer = 156;
+    const maxComposerDefault = 188;
+
+    function applyAssistantLayout(defaultComposerHeight) {
+        layoutHeight = layout.getBoundingClientRect().height;
+        splitterHeight = Math.max(8, splitter.getBoundingClientRect().height || 12);
+        if (!layoutHeight || layoutHeight <= splitterHeight + minTranscript + minComposer) {
+            return;
+        }
+
+        const maxComposer = Math.max(minComposer, layoutHeight - splitterHeight - minTranscript);
+        const nextComposer = Math.min(maxComposer, Math.max(minComposer, defaultComposerHeight));
+        const nextTranscript = Math.max(minTranscript, layoutHeight - splitterHeight - nextComposer);
+        layout.style.gridTemplateRows = `${nextTranscript}px ${splitterHeight}px ${nextComposer}px`;
+    }
+
+    function applyDefaultLayout() {
+        const nextLayoutHeight = layout.getBoundingClientRect().height;
+        if (!nextLayoutHeight) {
+            return;
+        }
+
+        const proportionalComposer = Math.round(nextLayoutHeight * 0.18);
+        const desiredComposer = Math.min(maxComposerDefault, Math.max(minComposer, proportionalComposer));
+        applyAssistantLayout(desiredComposer);
+    }
 
     function onPointerMove(event) {
         const delta = event.clientY - startY;
@@ -154,12 +184,33 @@ export function attachAssistantSplitter(layout, transcript, composer, splitter) 
         layoutHeight = layout.getBoundingClientRect().height;
         splitterHeight = Math.max(8, splitter.getBoundingClientRect().height || 12);
         startComposerHeight = composer.getBoundingClientRect().height;
+        splitter.dataset.userSized = "true";
         splitter.classList.add("dragging");
         document.body.style.cursor = "row-resize";
         document.body.style.userSelect = "none";
         window.addEventListener("pointermove", onPointerMove);
         window.addEventListener("pointerup", onPointerUp);
     });
+
+    const resizeHandler = () => {
+        if (splitter.dataset.userSized === "true") {
+            const currentComposerHeight = composer.getBoundingClientRect().height;
+            if (currentComposerHeight > 0) {
+                applyAssistantLayout(currentComposerHeight);
+            }
+
+            return;
+        }
+
+        applyDefaultLayout();
+    };
+
+    if (!layout.__codingServicesAssistantResizeHandler) {
+        layout.__codingServicesAssistantResizeHandler = resizeHandler;
+        window.addEventListener("resize", resizeHandler);
+    }
+
+    applyDefaultLayout();
 }
 
 export function attachStreamSplitter(layout, history, stream, splitter) {

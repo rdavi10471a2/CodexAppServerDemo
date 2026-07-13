@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Coding Services Assistant Redesign</title>
+  <style>
+    :root {
+      --bg: #eef4f8;
+      --panel: #ffffff;
+      --panel-soft: #f7fbfe;
+      --line: #d8e3ee;
+      --line-strong: #c2d2e0;
+      --text: #1d2b3c;
+      --muted: #59708a;
+      --blue: #4f7cf7;
+      --blue-soft: #edf3ff;
+      --green: #278a52;
+      --green-soft: #ebf8f0;
+      --danger: #c44f5e;
+      --shadow: 0 18px 40px rgba(24, 42, 66, 0.14);
+      --radius: 16px;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at top left, #f7fbff 0, #eef4f8 38%, #e6edf5 100%);
+      font-family: "Segoe UI", Arial, sans-serif;
+      color: var(--text);
+    }
+
+    .frame {
+      width: 1600px;
+      height: 980px;
+      margin: 0 auto;
+      padding: 22px;
+    }
+
+    .app {
+      height: 100%;
+      display: grid;
+      grid-template-rows: 78px 1fr;
+      border: 1px solid #cfdae4;
+      border-radius: 22px;
+      overflow: hidden;
+      background: rgba(255,255,255,0.35);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(6px);
+    }
+
+    .header {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 18px;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(247, 251, 254, 0.92);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      font-weight: 800;
+      font-size: 1.7rem;
+    }
+
+    .logo {
+      width: 42px;
+      height: 42px;
+      display: grid;
+      place-items: center;
+      border-radius: 14px;
+      border: 1px solid #b9cce0;
+      background: #fff;
+      color: #4169e1;
+      font-weight: 900;
+      font-size: 0.9rem;
+      letter-spacing: 0.04em;
+    }
+
+    .workspace-strip {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      padding: 0 14px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+      font-size: 0.9rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .chip.path {
+      min-width: 0;
+      max-width: 680px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: var(--text);
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .run-meta {
+      color: var(--muted);
+      font-size: 0.92rem;
+      font-weight: 700;
+      margin-right: 6px;
+      white-space: nowrap;
+    }
+
+    .status-pill {
+      padding: 9px 14px;
+      border-radius: 999px;
+      border: 1px solid #9fd0b4;
+      background: var(--green-soft);
+      color: var(--green);
+      font-weight: 800;
+      font-size: 0.9rem;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 38px;
+      padding: 0 16px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      font-size: 0.9rem;
+      font-weight: 700;
+    }
+
+    .btn.primary {
+      border-color: #bcd0fb;
+      background: var(--blue);
+      color: #fff;
+    }
+
+    .main {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      padding: 18px;
+      gap: 14px;
+      background: rgba(255,255,255,0.46);
+    }
+
+    .tabs {
+      display: flex;
+      align-items: end;
+      gap: 6px;
+      padding-left: 4px;
+    }
+
+    .tab {
+      min-width: 98px;
+      padding: 14px 18px;
+      border: 1px solid var(--line);
+      border-bottom: none;
+      border-top-left-radius: 12px;
+      border-top-right-radius: 12px;
+      background: #e9eef5;
+      color: var(--muted);
+      font-weight: 800;
+      text-align: center;
+    }
+
+    .tab.active {
+      background: #fff;
+      color: var(--text);
+      box-shadow: inset 0 3px 0 var(--blue);
+    }
+
+    .assistant-surface {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: 1fr 12px 240px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255,255,255,0.72);
+      overflow: hidden;
+    }
+
+    .panel {
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--panel);
+      overflow: hidden;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel-soft);
+    }
+
+    .panel-title {
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .toolbar .btn {
+      min-height: 32px;
+      padding: 0 12px;
+      font-size: 0.83rem;
+    }
+
+    .transcript {
+      min-height: 0;
+      overflow: auto;
+      padding: 16px;
+      display: grid;
+      gap: 14px;
+      background: #fbfdff;
+    }
+
+    .message {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      background: #fff;
+    }
+
+    .message.user { background: #f7fbff; }
+
+    .message-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+
+    .message-body {
+      padding: 14px 16px;
+      font-size: 0.96rem;
+      line-height: 1.55;
+      white-space: pre-wrap;
+    }
+
+    .code-chip {
+      display: inline-block;
+      margin: 0 3px;
+      padding: 1px 6px;
+      border-radius: 6px;
+      background: #edf3f8;
+      font-family: Consolas, monospace;
+      font-size: 0.92em;
+    }
+
+    .splitter {
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      background: #e6edf5;
+      position: relative;
+    }
+
+    .splitter::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 88px;
+      height: 3px;
+      border-radius: 999px;
+      background: #8ca1b8;
+      transform: translate(-50%, -50%);
+    }
+
+    .composer {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      gap: 10px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+    }
+
+    .attach-row,
+    .mode-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .attach-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      padding: 0 12px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: var(--panel-soft);
+      color: var(--text);
+      font-weight: 700;
+      font-size: 0.86rem;
+    }
+
+    .mode-toggle {
+      display: inline-flex;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+      background: #fff;
+    }
+
+    .mode-toggle span {
+      padding: 8px 14px;
+      font-size: 0.86rem;
+      font-weight: 800;
+      color: var(--muted);
+      background: #fff;
+    }
+
+    .mode-toggle span.active {
+      background: var(--blue-soft);
+      color: var(--blue);
+      box-shadow: inset 0 -2px 0 var(--blue);
+    }
+
+    .compose-row {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 1fr 52px;
+      gap: 10px;
+    }
+
+    .input-box {
+      min-height: 0;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px 16px;
+      background: #fff;
+      color: #4e6278;
+      font-size: 0.96rem;
+      line-height: 1.45;
+      overflow: auto;
+    }
+
+    .send {
+      align-self: end;
+      height: 52px;
+      border-radius: 14px;
+      border: 1px solid #bcd0fb;
+      background: var(--blue);
+      color: #fff;
+      display: grid;
+      place-items: center;
+      font-size: 1.15rem;
+      font-weight: 900;
+    }
+
+    .scrim {
+      position: absolute;
+      inset: 0;
+      background: rgba(12, 22, 38, 0.2);
+    }
+
+    .modal {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 70%;
+      height: 55%;
+      transform: translate(-50%, -50%);
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      border: 1px solid var(--line-strong);
+      border-radius: 20px;
+      overflow: hidden;
+      background: #fff;
+      box-shadow: 0 24px 60px rgba(13, 26, 44, 0.28);
+    }
+
+    .modal-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line);
+      background: #f8fbff;
+    }
+
+    .modal-head h2 {
+      margin: 0;
+      font-size: 1.2rem;
+    }
+
+    .modal-body {
+      min-height: 0;
+      overflow: auto;
+      padding: 18px;
+      display: grid;
+      grid-template-columns: 1.25fr 1fr;
+      gap: 16px;
+      background: #fff;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 16px;
+      background: #fff;
+    }
+
+    .card h3 {
+      margin: 0 0 12px;
+      font-size: 0.84rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+    }
+
+    .summary {
+      display: grid;
+      gap: 10px;
+      font-size: 0.95rem;
+      line-height: 1.5;
+    }
+
+    .summary strong {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--text);
+    }
+
+    .summary code {
+      display: inline-block;
+      padding: 3px 6px;
+      border-radius: 6px;
+      background: #edf3f8;
+      font-family: Consolas, monospace;
+    }
+
+    .log-box {
+      min-height: 220px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+      background: #f9fbfd;
+      font-family: Consolas, monospace;
+      font-size: 0.84rem;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      overflow: auto;
+    }
+
+    .modal-foot {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      padding: 14px 18px;
+      border-top: 1px solid var(--line);
+      background: #fbfdff;
+    }
+
+    .btn.success {
+      background: #22a060;
+      border-color: #1d9156;
+      color: #fff;
+    }
+
+    .btn.warning {
+      background: #f5f8fc;
+      border-color: #d8e3ee;
+    }
+
+    .btn.danger {
+      background: #fff3f4;
+      border-color: #f1c8cf;
+      color: #8a3140;
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <div class="app">
+      <div class="header">
+        <div class="brand">
+          <div class="logo">CS</div>
+          <div>Coding Services</div>
+        </div>
+        <div class="workspace-strip">
+          <div class="chip">CWD</div>
+          <div class="chip path">C:\SchemaStudioWebViewer1</div>
+        </div>
+        <div class="header-actions">
+          <div class="run-meta">Run Started At : 2026-07-11 15:53:14</div>
+          <div class="status-pill">Running</div>
+          <div class="btn primary">Browse</div>
+          <div class="btn">Connection</div>
+        </div>
+      </div>
+
+      <div class="main">
+        <div class="tabs">
+          <div class="tab">Tasks</div>
+          <div class="tab active">Assistant</div>
+          <div class="tab">Source</div>
+          <div class="tab">Tests</div>
+        </div>
+
+        <div class="assistant-surface">
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Chat History</div>
+              <div class="toolbar">
+                <div class="btn">Copy</div>
+                <div class="btn">Pop Out</div>
+                <div class="btn">New Conversation</div>
+                <div class="btn primary">New Task</div>
+              </div>
+            </div>
+            <div class="transcript">
+              <div class="message user">
+                <div class="message-head">
+                  <span>You</span>
+                  <span>15:54:15</span>
+                </div>
+                <div class="message-body">Implement the current task.</div>
+              </div>
+
+              <div class="message">
+                <div class="message-head">
+                  <span>Codex</span>
+                  <span>16:02:49</span>
+                </div>
+                <div class="message-body">[15:54:51] Answered elicitation request #0; waiting for the agent to continue.
+[15:55:10] Answered elicitation request #3; waiting for the agent to continue.
+[16:02:31] Governed review session <span class="code-chip">edit-74001dd2...</span> completed; releasing the agent.
+
+Implemented the host-authoritative task in the Coding Services governed workflow.
+
+<span class="code-chip">Components/Layout/MainLayout.razor</span> no longer has the temporary header button.
+<span class="code-chip">Components/Pages/Home.razor</span> no longer uses the temporary accent styling.
+
+Verification passed with <span class="code-chip">dotnet build .\\SchemaStudioWebViewer.sln</span>, and the watched index was rebuilt.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="splitter"></div>
+
+          <div class="composer">
+            <div class="attach-row">
+              <div class="attach-pill">+ Attach</div>
+              <div class="attach-pill">No files attached</div>
+            </div>
+            <div class="mode-row">
+              <div class="mode-toggle">
+                <span>Discuss</span>
+                <span class="active">Work</span>
+              </div>
+              <div class="chip">Global runtime mode for the next turn</div>
+            </div>
+            <div class="compose-row">
+              <div class="input-box">Inspect the current workspace...</div>
+              <div class="send">➤</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="scrim"></div>
+        <div class="modal">
+          <div class="modal-head">
+            <h2>Agent Action Required</h2>
+            <div class="chip">1 pending request</div>
+          </div>
+          <div class="modal-body">
+            <div class="card">
+              <h3>Request Summary</h3>
+              <div class="summary">
+                <div>
+                  <strong>Action</strong>
+                  Governed review approval for the current edit session.
+                </div>
+                <div>
+                  <strong>MCP Method</strong>
+                  <code>stage_edit_session_for_review</code>
+                </div>
+                <div>
+                  <strong>Why</strong>
+                  The agent completed the file changes and is stopping at the required review boundary before merge.
+                </div>
+                <div>
+                  <strong>Scope</strong>
+                  <code>Components/Layout/MainLayout.razor</code>
+                  <br>
+                  <code>Components/Pages/Home.razor</code>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <h3>Current Turn Log</h3>
+              <div class="log-box">Governed review session queued.
+Pre-merge validation passed.
+Awaiting user decision before the agent may continue.
+
+This dialog is modal and readable.
+No side rail is required.
+The main transcript remains visible behind the overlay for context.</div>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <div class="btn success">Allow</div>
+            <div class="btn">Allow Session</div>
+            <div class="btn warning">Allow Always</div>
+            <div class="btn danger">Deny</div>
+            <div class="btn">Cancel Turn</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

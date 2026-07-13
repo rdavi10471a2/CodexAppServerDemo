@@ -1,0 +1,31 @@
+Coding Services repeatable-performance handoff
+
+Use this as the minimal seed for a fresh thread.
+
+Goal
+
+- Tighten Coding Services so governed edits are provably repeatable.
+- Keep watched-source mutation MCP-governed end to end.
+- Keep discovery fresh per turn and block stale runtime-artifact reasoning.
+- Preserve session-first multi-file review semantics.
+
+Known-good core behavior
+
+- `get_current_task` is the authoritative task read.
+- `refresh_file` establishes current-turn governed evidence.
+- Multi-file coherent work should stay under one shared edit session.
+- `stage_edit_session_for_review` is the required review gate.
+- Review acceptance happens through the governed in-app review flow.
+
+Current priorities
+
+1. Reduce prompt/policy smear and keep the workflow rules crisp.
+2. Improve assistant UI readability without weakening the governed tool path.
+3. Keep instrumentation strong enough to explain staging/review failures quickly.
+4. Prefer evidence from current-turn MCP refresh/build/reindex over transcript memory.
+
+Current watched-workspace test shape
+
+- Use paired add/remove tasks against small watched-source changes.
+- Prefer tiny C# governed edits for repeatable Roslyn-path testing.
+- Validate that runtime behavior, review gating, and final watched-source state all agree.
