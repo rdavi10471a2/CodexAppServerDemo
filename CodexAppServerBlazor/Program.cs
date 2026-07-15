@@ -36,6 +36,7 @@ public class Program
         builder.Services.AddSingleton<WorkspaceState>();
         builder.Services.AddSingleton<WorkspaceSelectionService>();
         builder.Services.AddSingleton<CodexConnectionService>();
+        builder.Services.AddSingleton<TurnUsageHistoryService>();
         builder.Services.AddSingleton<DirectoryBrowserService>();
         builder.Services.AddSingleton<ExternalBrowserLaunchService>();
         builder.Services.AddSingleton<CodingServicesSettingsProvider>();

@@ -14,7 +14,7 @@ public sealed class WorkflowPolicyTextRegressionTests
 
         Assert.Contains("The governed Coding Services tools for this session live on the harness MCP surface exposed by the host.", text, StringComparison.Ordinal);
         Assert.Contains("Do not claim that the harness edit surface is unavailable, read-only, or missing until that live discovery pass is complete.", text, StringComparison.Ordinal);
-        Assert.Contains("`tool_search` is a search aid, not a complete inventory primitive.", text, StringComparison.Ordinal);
+        Assert.Contains("`tool_search` is not a broad inventory primitive.", text, StringComparison.Ordinal);
         Assert.Contains("outside the current governed task", text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Discovery restarts fresh each Work turn", text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("A governed edit session is required for every watched-source change", text, StringComparison.Ordinal);
@@ -24,7 +24,7 @@ public sealed class WorkflowPolicyTextRegressionTests
         Assert.Contains("RPC against structured local code artifacts", text, StringComparison.Ordinal);
         Assert.Contains("Roslyn-backed semantic edit tools are the required default for reliable governed editing", text, StringComparison.Ordinal);
         Assert.Contains("Use `replace_text_in_file` for trivial single contiguous literal changes.", text, StringComparison.Ordinal);
-        Assert.Contains("destructive coordinate fallback", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("last-resort coordinate fallback", text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("If it is absent, continue by establishing the required governed edit session through the normal `refresh_file` / `new_file` path instead", text, StringComparison.Ordinal);
         Assert.Contains("truthful governed refusal", text, StringComparison.OrdinalIgnoreCase);
     }
@@ -61,7 +61,7 @@ public sealed class WorkflowPolicyTextRegressionTests
         string text = File.ReadAllText(examplesPath);
 
         Assert.Contains("Existing C# file, single contiguous replacement", text, StringComparison.Ordinal);
-        Assert.Contains("Existing C# file, multi-fragment edit inside one method", text, StringComparison.Ordinal);
+        Assert.Contains("Existing C# file, method rewrite through semantic selector", text, StringComparison.Ordinal);
         Assert.Contains("Razor or mixed-markup file", text, StringComparison.Ordinal);
         Assert.Contains("Brand-new watched file", text, StringComparison.Ordinal);
         Assert.Contains("submit_symbol", text, StringComparison.Ordinal);

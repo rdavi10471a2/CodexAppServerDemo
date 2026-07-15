@@ -9,8 +9,8 @@ namespace CodexAppServerBlazor.Mcp;
 public sealed class ElicitationProbeMcpTools
 {
     [McpServerTool]
-    [Description("Requests a strict yes/no answer from the operator through MCP elicitation and returns the action plus the boolean answer.")]
-    public static async Task<object> RequestOperatorConfirmation(
+    [Description("Requests a strict yes/no decision from the operator through MCP elicitation and returns the action plus the boolean answer. Use this for bounded governed operator decisions, not just confirmations.")]
+    public static async Task<object> RequestOperatorDecision(
         McpServer server,
         string question,
         string? detail,
@@ -61,10 +61,10 @@ public sealed class ElicitationProbeMcpTools
     }
 
     [McpServerTool]
-    [Description("Raises a simple yes/no elicitation so the host can test schema-driven agent questions.")]
-    public static async Task<object> ProbeNotesUpdateElicitation(McpServer server, CancellationToken cancellationToken)
+    [Description("Raises a simple yes/no operator-decision elicitation so the host can test schema-driven governed questions.")]
+    public static async Task<object> ProbeOperatorDecisionElicitation(McpServer server, CancellationToken cancellationToken)
     {
-        return await RequestOperatorConfirmation(
+        return await RequestOperatorDecision(
             server,
             "Should I update agent notes for this task outcome?",
             "Choose yes only when durable workflow memory changed.",

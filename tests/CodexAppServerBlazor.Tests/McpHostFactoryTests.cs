@@ -36,4 +36,15 @@ public sealed class McpHostFactoryTests
         Assert.Contains("Coordinate-based fallback only", tool.Description, StringComparison.Ordinal);
         Assert.Contains("destructive as a planning surface", tool.Description, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void GetHealthToolInventory_includes_request_operator_decision_from_static_tool_type()
+    {
+        McpHealthToolInventoryItem tool = Assert.Single(
+            McpHostFactory.GetHealthToolInventory(),
+            item => item.Name == "request_operator_decision");
+
+        Assert.Contains("strict yes/no decision", tool.Description, StringComparison.Ordinal);
+        Assert.Contains("bounded governed operator decisions", tool.Description, StringComparison.Ordinal);
+    }
 }

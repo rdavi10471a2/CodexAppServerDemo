@@ -105,7 +105,7 @@ public sealed class TaskWorkflowContextService : ITaskWorkflowContextService
         builder.AppendLine("- Keep solution index context volatile: refresh digest/MCP summaries when code structure matters; do not treat indexed summaries as durable task memory.");
         builder.AppendLine("- Runtime artifacts under the watched workspace, including runtime\\watched-solutions\\..., workflow\\history, working, staged, metadata, and task-memory, are not authoritative proof that source work is complete.");
         builder.AppendLine("- At turn completion, ask whether agent notes should be updated only if the outcome changes durable workflow memory.");
-        builder.AppendLine("- If request_operator_confirmation is exposed, use it for that notes question instead of asking freeform in chat.");
+        builder.AppendLine("- If request_operator_decision is exposed, use it for that notes question instead of asking freeform in chat.");
         builder.AppendLine("- When you ask that notes question without the tool, make it a tight yes/no prompt rather than an open-ended follow-up.");
         AppendNoteSection(builder, "User notes", activeTask.NotesMarkdownPath, repository.ReadNotes(activeTask.NotesMarkdownPath));
         AppendNoteSection(builder, "Agent notes", activeTask.AgentNotesMarkdownPath, repository.ReadNotes(activeTask.AgentNotesMarkdownPath));

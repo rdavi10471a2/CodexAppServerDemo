@@ -19,6 +19,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
     private readonly IWorkflowTurnContextComposer workflowTurnContextComposer;
     private readonly SessionBootstrapPolicyService sessionBootstrapPolicyService;
     private readonly GovernedReviewCoordinatorService? governedReviewCoordinator;
+    private readonly TurnUsageHistoryService? turnUsageHistoryService;
     private readonly PermissionRequestService permissionRequestService = new();
     private CodexAppServerClient? client;
     private string assistantText = string.Empty;
@@ -30,6 +31,11 @@ public sealed class CodexConnectionService : IAsyncDisposable
     private readonly List<CodexOutputEvent> toolEvents = [];
     private readonly List<string> rawLines = [];
     private WorkflowSessionState? workflowSessionState;
+    private WorkflowTurnMode? currentTurnMode;
+    private string? currentTurnActiveTaskId;
+    private bool currentTurnUsageRecorded;
+    private bool currentTurnOperatorDecisionRequested;
+    private bool currentTurnNotesUpdateQuestionRequested;
 
     public CodexConnectionService(
         IConfiguration configuration,
@@ -39,7 +45,8 @@ public sealed class CodexConnectionService : IAsyncDisposable
         SessionBootstrapPolicyService sessionBootstrapPolicyService,
         IWorkflowTurnContextComposer workflowTurnContextComposer,
         Func<CodexAppServerClient>? clientFactory = null,
-        GovernedReviewCoordinatorService? governedReviewCoordinator = null)
+        GovernedReviewCoordinatorService? governedReviewCoordinator = null,
+        TurnUsageHistoryService? turnUsageHistoryService = null)
     {
         this.configuration = configuration;
         this.clientFactory = clientFactory ?? (() => new CodexAppServerClient());
@@ -49,6 +56,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
         this.sessionBootstrapPolicyService = sessionBootstrapPolicyService;
         this.workflowTurnContextComposer = workflowTurnContextComposer;
         this.governedReviewCoordinator = governedReviewCoordinator;
+        this.turnUsageHistoryService = turnUsageHistoryService;
     }
 
     public event Action? Changed;
@@ -136,6 +144,11 @@ public sealed class CodexConnectionService : IAsyncDisposable
                 permissionRequestService.Clear();
                 isTurnRunning = false;
                 workflowSessionState = null;
+                currentTurnMode = null;
+                currentTurnActiveTaskId = null;
+                currentTurnUsageRecorded = false;
+                currentTurnOperatorDecisionRequested = false;
+                currentTurnNotesUpdateQuestionRequested = false;
             }
 
             workspaceState.SetCurrentEditSessionId(null);
@@ -250,6 +263,11 @@ public sealed class CodexConnectionService : IAsyncDisposable
             rawLines.Clear();
             permissionRequestService.Clear();
             workflowSessionState = null;
+            currentTurnMode = null;
+            currentTurnActiveTaskId = null;
+            currentTurnUsageRecorded = false;
+            currentTurnOperatorDecisionRequested = false;
+            currentTurnNotesUpdateQuestionRequested = false;
         }
 
         workspaceState.SetCurrentEditSessionId(null);
@@ -327,6 +345,14 @@ public sealed class CodexConnectionService : IAsyncDisposable
                 taskContext.Status);
 
             ClearTurnOutput();
+            lock (gate)
+            {
+                currentTurnMode = mode;
+                currentTurnActiveTaskId = taskContext.ActiveTaskId;
+                currentTurnUsageRecorded = false;
+                currentTurnOperatorDecisionRequested = false;
+                currentTurnNotesUpdateQuestionRequested = false;
+            }
             MarkTurnRunning();
             if (attachments is { Count: > 0 })
             {
@@ -532,6 +558,12 @@ public sealed class CodexConnectionService : IAsyncDisposable
             }
         }
 
+        if (e.EventType.Equals("turn/completed", StringComparison.OrdinalIgnoreCase)
+            || e.EventType.Equals("turn/failed", StringComparison.OrdinalIgnoreCase))
+        {
+            RecordTurnUsage(e);
+        }
+
         AddEvent(statusEvents, e.EventType, null, "codex", e.Summary);
     }
 
@@ -562,6 +594,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
 
         if (PermissionRequestService.IsWrappedOperatorConfirmationToolRequest(e.Method, e.RawJson))
         {
+            MarkOperatorDecisionRequested(e.RawJson);
             AddEvent(
                 statusEvents,
                 "PermissionRequest",
@@ -743,6 +776,75 @@ public sealed class CodexConnectionService : IAsyncDisposable
         }
 
         Changed?.Invoke();
+    }
+
+    private void MarkOperatorDecisionRequested(string rawJson)
+    {
+        lock (gate)
+        {
+            currentTurnOperatorDecisionRequested = true;
+            if (!string.IsNullOrWhiteSpace(rawJson)
+                && (rawJson.Contains("agent notes", StringComparison.OrdinalIgnoreCase)
+                    || rawJson.Contains("task notes", StringComparison.OrdinalIgnoreCase)
+                    || rawJson.Contains("durable workflow memory", StringComparison.OrdinalIgnoreCase)))
+            {
+                currentTurnNotesUpdateQuestionRequested = true;
+            }
+        }
+    }
+
+    private void RecordTurnUsage(StatusEvent e)
+    {
+        if (turnUsageHistoryService is null || string.IsNullOrWhiteSpace(workspaceState.RepoRoot))
+        {
+            return;
+        }
+
+        string? threadId;
+        string? turnId;
+        string? activeTaskId;
+        string? currentEditSessionId;
+        WorkflowTurnMode? mode;
+        CodexTelemetrySummary summary;
+        bool operatorDecisionRequested;
+        bool notesUpdateQuestionRequested;
+        bool shouldRecord;
+
+        lock (gate)
+        {
+            shouldRecord = !currentTurnUsageRecorded;
+            if (shouldRecord)
+            {
+                currentTurnUsageRecorded = true;
+            }
+
+            mode = currentTurnMode;
+            activeTaskId = currentTurnActiveTaskId;
+            summary = telemetrySummary;
+            operatorDecisionRequested = currentTurnOperatorDecisionRequested;
+            notesUpdateQuestionRequested = currentTurnNotesUpdateQuestionRequested;
+            threadId = client?.ThreadId;
+            turnId = client?.ActiveTurnId;
+            currentEditSessionId = workspaceState.CurrentEditSessionId;
+        }
+
+        if (!shouldRecord)
+        {
+            return;
+        }
+
+        turnUsageHistoryService.RecordTurn(
+            workspaceState.RepoRoot,
+            threadId,
+            turnId,
+            mode,
+            activeTaskId,
+            currentEditSessionId,
+            summary,
+            e.EventType,
+            e.Summary,
+            operatorDecisionRequested,
+            notesUpdateQuestionRequested);
     }
 
     private void AddEvent(List<CodexOutputEvent> target, string type, string? status, string source, string detail)
@@ -936,11 +1038,6 @@ public sealed record CodexTelemetrySummary(
     string? PlanType)
 {
     public static CodexTelemetrySummary Empty { get; } = new(null, null, null, null, null, null, null, null);
-
-    public double? ContextUsedPercent =>
-        InputTokens.HasValue && ModelContextWindow.HasValue && ModelContextWindow.Value > 0
-            ? InputTokens.Value * 100.0 / ModelContextWindow.Value
-            : null;
 
     public CodexTelemetrySummary Apply(TelemetryEvent e)
     {

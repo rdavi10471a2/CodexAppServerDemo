@@ -3,9 +3,12 @@ Coding Services host bootstrap doctrine
 Live tool surface first
 
 - The governed Coding Services tools for this session live on the harness MCP surface exposed by the host.
-- Before concluding that a governed task, discovery, edit, review, or operator-confirmation tool is missing, query the live callable tool surface for this session and read the current tool descriptions.
+- Before concluding that a governed task, discovery, edit, review, or operator-confirmation tool is missing, perform one broad live discovery pass for this session's harness MCP tool surface and read the current tool descriptions.
+- At the start of each governed Work turn, consult the harness health inventory at `http://localhost:6278/health` and treat its tool list as the authoritative broad inventory for the active harness MCP host.
 - Do not claim that the harness edit surface is unavailable, read-only, or missing until that live discovery pass is complete.
-- `tool_search` is a search aid, not a complete inventory primitive. Do not use one narrow or relevance-filtered `tool_search` result as proof that tools do not exist.
+- `tool_search` is not a broad inventory primitive. Use it only as a narrow follow-up to inspect or confirm details for a specific already-known tool before invoking it.
+- Do not infer tool absence from a partial, ranked, convenience, or query-filtered subset. If the first result looks incomplete, broaden discovery before reporting any tool family as absent.
+- The harness health inventory is the de facto truth source for broad tool inventory because it is emitted directly by the active harness MCP host registration.
 
 Session authority
 
@@ -40,14 +43,17 @@ Core doctrine
 Discovery and source truth
 
 - Discovery restarts fresh each Work turn. Do not skip straight to direct source reads, index summaries, or transcript memory just because earlier turns already identified likely files.
-- At the start of each Work turn, perform one broad live tool-surface discovery pass before choosing a governed mutation path. Do not treat a narrow or relevance-filtered `tool_search` result as a complete inventory of callable MCP methods.
+- At the start of each Work turn, perform one broad live tool-surface discovery pass before choosing a governed mutation path.
+- Use the harness health inventory as that broad discovery pass and treat it as the authoritative callable MCP inventory for the turn.
+- Do not treat a narrow or relevance-filtered `tool_search` result as a complete inventory of callable MCP methods.
 - If the first discovery pass was intentionally narrow, say that plainly and broaden discovery before concluding that a mutation family is missing.
+- Use `tool_search` only after that health-backed inventory step, and only to inspect or confirm details for a specific already-known tool before using it, not to determine whether a tool family exists.
 - Discovery proceeds in order: derive candidate file set from task, confirm the target through governed discovery, refresh into Working, then reason primarily from the refreshed Working candidate and governed structure tools.
 - Direct watched-source reads are support-only after target selection; they are not a normal substitute for governed discovery or post-refresh structure reads.
 - Runtime artifacts under `runtime\\watched-solutions\\...`, including `working`, `staged`, `workflow\\history`, `metadata`, and `task-memory`, are not authoritative proof that watched source is complete.
 - Before any "already implemented" conclusion, refresh every task file through the current turn's governed edit surface and report the evidence.
 - Read live MCP tool descriptions during discovery when selecting a governed path. Required arguments and workflow expectations such as `sessionId`, `containingType`, selector payloads, declared session membership, or file-creation inputs are part of the current-turn contract.
-- If the host exposes `request_operator_confirmation`, use it for bounded yes/no operator questions instead of asking those questions freeform in chat.
+- If the host exposes `request_operator_decision`, use it for bounded yes/no operator questions instead of asking those questions freeform in chat.
 
 Governed edit protocol
 
@@ -75,8 +81,10 @@ Governed edit protocol
 Governed review and freshness
 
 - Review is session-first. Stage the declared session with `stage_edit_session_for_review`, whether the session contains one file or many.
+- `stage_edit_session_for_review` performs and records pre-merge validation for the staged session before review launch.
 - If session staging fails, report the tooling failure. Do not fall back to ad hoc single-file staging.
 - Once staged review has launched, stop at the human review boundary unless the user explicitly instructs you to record the decision through MCP.
+- When summarizing a staged or accepted result, report the pre-merge validation outcome plainly in chat. If a build summary is available, include it explicitly instead of leaving it hidden in staged metadata.
 - The authoritative review boundary is the in-app governed review flow. Review URLs are diagnostic fallback only.
 - After accepted review decisions, treat the governed post-accept build/digest/index refresh as the normal freshness path.
 - Run an explicit rebuild/reindex only when that accept-time refresh failed, was deferred, or the user is deliberately doing a recovery/diagnostic pass.

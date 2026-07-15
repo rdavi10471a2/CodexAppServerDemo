@@ -37,23 +37,5 @@ public sealed class CodexTelemetrySummaryTests
         Assert.Equal(34, summary.PrimaryUsedPercent);
         Assert.Equal(37, summary.SecondaryUsedPercent);
         Assert.Equal("prolite", summary.PlanType);
-        Assert.Equal(25.0, summary.ContextUsedPercent);
-    }
-
-    [Fact]
-    public void ContextUsedPercent_is_empty_without_a_valid_window()
-    {
-        CodexTelemetrySummary summary = CodexTelemetrySummary.Empty.Apply(new TelemetryEvent(
-            InputTokens: 25_000,
-            CachedInputTokens: null,
-            OutputTokens: null,
-            ReasoningOutputTokens: null,
-            ModelContextWindow: 0,
-            PrimaryUsedPercent: null,
-            SecondaryUsedPercent: null,
-            PlanType: null,
-            Summary: "tokens"));
-
-        Assert.Null(summary.ContextUsedPercent);
     }
 }

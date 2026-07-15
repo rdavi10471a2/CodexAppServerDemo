@@ -3,9 +3,12 @@
 ## Live Tool Surface First
 
 - The governed Coding Services tools for a watched-workspace session live on the harness MCP surface exposed by the host.
-- Before claiming that governed task, discovery, edit, review, or operator-confirmation tools are unavailable, query the live callable tool surface for the current session and read the current tool descriptions.
+- Before claiming that governed task, discovery, edit, review, or operator-confirmation tools are unavailable, perform one broad live discovery pass for the current session's harness MCP tool surface and read the current tool descriptions.
+- At the start of each governed Work turn, consult the harness health inventory at `http://localhost:6278/health` and treat its tool list as the authoritative broad inventory for the active harness MCP host.
 - Do not claim that the harness edit surface is missing or that the session is effectively read-only until that live discovery pass is complete.
-- `tool_search` is a search aid, not a complete inventory primitive. Do not treat one narrow or relevance-filtered `tool_search` result as proof that a governed tool does not exist.
+- `tool_search` is not a broad inventory primitive. Use it only as a narrow follow-up to inspect or confirm details for a specific already-known tool before invoking it.
+- Do not infer tool absence from a partial, ranked, convenience, or query-filtered subset. If the first result looks incomplete, broaden discovery before making any statement about missing tools.
+- The harness health inventory is the de facto truth source for broad harness tool inventory because it is emitted directly by the active MCP host registration.
 
 ## Workspace Model
 
@@ -27,6 +30,7 @@
 - Reason in the cloud; edit locally. (Discover and plan through MCP/context first; compose watched-source changes only through governed local Working/edit tools.)
 - Treat governed editing as RPC against typed local artifacts, not as freeform file manipulation. Pick the smallest governed operation that matches the intended semantic unit of change.
 - Preferred order is: discovery, proposal, edit/diff, compile, reindex.
+- When governed validation or review runs, report the validation/build result plainly in chat instead of leaving it implicit in staged metadata.
 - Keep changes small, explicit, and easy to verify.
 - Prefer MCP/index-backed discovery over broad shell/text search when the needed workspace context is available there.
 - Direct watched-source reads are support-only after target selection; they are not a normal substitute for governed discovery or post-refresh structure reads.
@@ -59,14 +63,18 @@
 - Before claiming a task is already implemented, produce fresh governed refresh evidence for each task file in the current turn.
 - Runtime workflow artifacts under `runtime\watched-solutions\...` are not authoritative proof that watched source is already correct.
 - After `refresh_file` or `new_file`, treat the governed Working candidate plus governed structure tools as the primary local context source for the turn. Reason primarily from the refreshed Working candidate and governed structure tools. Do not fall back to broad watched-source reads or shell search unless the governed discovery surface is genuinely insufficient for the next step.
-- When asking whether task or agent notes should be updated, prefer `request_operator_confirmation` when it is exposed so the operator can answer through a governed structured yes/no prompt.
+- When asking whether task or agent notes should be updated, prefer `request_operator_decision` when it is exposed so the operator can answer through a governed structured yes/no prompt.
 
 ## MCP And Tooling
 
 - The governed edit tools exist to let the agent reason from compact cloud context while composing watched-source changes locally through the harness-owned workflow.
 - The long-term target in this repo is MCP-first workspace discovery and MCP-first governed edits.
 - Prefer exposed workspace MCP tools over generic fallback mechanics when capabilities overlap.
-- At the start of each governed Work turn, do one broad live tool-surface discovery pass before choosing the mutation path. Do not treat one narrow or relevance-filtered `tool_search` result as a complete callable inventory.
+- At the start of each governed Work turn, do one broad live tool-surface discovery pass before choosing the mutation path.
+- Use the harness health inventory as that broad discovery pass and treat it as the authoritative callable inventory for the turn.
+- If the first discovery pass was narrow, ranked, or filtered, broaden it before making any claim that a governed tool family is missing.
+- Do not treat one narrow or relevance-filtered `tool_search` result as a complete callable inventory.
+- Use `tool_search` only after that health-backed inventory step, and only to inspect or confirm details for a specific already-known tool before using it, not to determine whether a tool family exists.
 - Discovery should narrow in phases: derive the candidate file set from the task, confirm the target through governed discovery, then refresh into Working before deeper reasoning or mutation.
 - For governed non-C# text files such as `.razor`, prefer `refresh_file` followed by `replace_text_in_file`; use `replace_span_in_file` only as the last governed text-edit choice when the safer text replacement path cannot express the change cleanly.
 - For governed C# files, prefer Roslyn or symbol-aware MCP edits when the tool surface supports the intended change.
@@ -82,7 +90,7 @@
 - Once the target file has been refreshed and governed structure tools such as `get_file_outline`, `get_source_map`, or `get_symbol` are available, prefer those over direct shell reads of watched source.
 - Do not use `apply_patch` or other generic write paths for governed Razor/text edits when the harness exposes `replace_text_in_file` or `replace_span_in_file`.
 - Do not use generic direct-write fallbacks against watched source when a governed MCP mutation path exists.
-- If the host exposes `request_operator_confirmation`, use it for bounded yes/no operator questions instead of asking those questions freeform in chat.
+- If the host exposes `request_operator_decision`, use it for bounded yes/no operator questions instead of asking those questions freeform in chat.
 - If the required MCP method does not exist yet, say so plainly and use the best available fallback.
 - When a shell or tool action requires runtime approval, prefer the formal approval flow over conversational permission text alone.
 - If a tool or command is denied, cancelled, sandboxed, or fails after approval, treat that as an execution result and continue with the best viable fallback unless the user must choose.

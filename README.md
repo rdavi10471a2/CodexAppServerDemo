@@ -216,10 +216,10 @@ For existing C# source, Roslyn-backed semantic edit tools are the required defau
 
 ### Operator Elicitation Tools
 
-- `request_operator_confirmation`
-  Requests a strict yes/no answer from the operator through MCP elicitation.
-- `probe_notes_update_elicitation`
-  Raises a simple yes/no elicitation for host testing.
+- `request_operator_decision`
+  Requests a strict yes/no decision from the operator through MCP elicitation for bounded governed questions.
+- `probe_operator_decision_elicitation`
+  Raises a simple yes/no operator-decision elicitation for host testing.
 
 ## Tooling Defaults
 

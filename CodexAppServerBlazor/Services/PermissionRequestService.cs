@@ -163,7 +163,8 @@ public sealed class PermissionRequestService
                 toolName = ExtractToolNameFromPrompt(prompt);
             }
 
-            return string.Equals(toolName, "request_operator_confirmation", StringComparison.OrdinalIgnoreCase);
+            return string.Equals(toolName, "request_operator_decision", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(toolName, "request_operator_confirmation", StringComparison.OrdinalIgnoreCase);
         }
         catch (JsonException)
         {

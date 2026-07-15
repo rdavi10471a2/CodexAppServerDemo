@@ -1,11 +1,15 @@
 Coding Services worked examples
 
-Use these examples as the preferred workflow shape when the live tool surface supports them. Keep the doctrine in the bootstrap policy and the ranked choices in the edit-tool guidance; use this file for concrete tool patterns.
+Use these examples as a compact cookbook. Keep doctrine in the bootstrap policy and ranking in the edit-tool guidance; use this file for concrete tool moves so the agent does not spend reasoning budget reconstructing the workflow.
 
 1. Existing C# file, single contiguous replacement
 
-Use this when one literal or one contiguous fragment changes and the replacement is unique.
+Use when:
+- one literal or one contiguous fragment changes
+- the replacement is unique in the already-selected refreshed file
+- semantic block replacement would be broader than needed
 
+Calls:
 1. `get_current_task`
 2. `get_workspace`
 3. `get_watched_solution_digest`
@@ -13,82 +17,209 @@ Use this when one literal or one contiguous fragment changes and the replacement
 5. Inspect the refreshed Working candidate through governed structure tools first; if needed, do one narrow read of the already-selected file.
 6. `replace_text_in_file(watchedFilePath, oldText, newText, expectedMatches: 1, expectedWorkingHash: ...)`
 7. `stage_edit_session_for_review(sessionId)`
-8. Stop at the in-app review boundary.
+8. Report the pre-merge validation/build result in chat.
+9. Stop at the in-app review boundary.
 
-Why this is preferred:
-- one contiguous unique replacement
+Why this tool:
 - smaller than replacing a whole symbol
 - safer than coordinate spans when the change is purely textual
 
-2. Existing C# file, multi-fragment edit inside one method
+Avoid:
+- using this for multi-fragment edits inside one method
+- using this when the target text is not unique
 
-Use this when two or more edits are intended inside the same method, property, constructor, or type.
+2. Existing C# file, method rewrite through semantic selector
 
+Use when:
+- two or more edits are intended inside the same method, property, constructor, or type
+- the task is really one symbol rewrite, not one literal replacement
+
+Calls:
 1. `get_current_task`
 2. `refresh_file(watchedFilePath)`
-3. `get_file_outline(watchedFilePath)` and, when needed, `get_source_map(...)` or `get_symbol(watchedFilePath, symbolSelectorJson)`
-4. Build the target symbol identity from file, containing type, and member.
-5. `submit_symbol(watchedFilePath, symbolSelectorJson, code)`
-6. `stage_edit_session_for_review(sessionId)`
-7. Stop at the in-app review boundary.
+3. `get_file_outline(watchedFilePath)`
+4. `get_source_map(path: watchedFilePath, mode: "selector")`
+5. Build `symbolSelectorJson`. Prefer:
+   - `{"stableSymbolKey":"<stable key from get_source_map>"}`
+   - fallback for a no-parameter method:
+     `{"containingType":"Unused10","memberKind":"method","name":"AppendRandomAlphaNumericCharacters","parameterTypes":[]}`
+6. `get_symbol(watchedFilePath, symbolSelectorJson)` to confirm the current body before replacing it
+7. `submit_symbol(watchedFilePath, symbolSelectorJson, code)`
+8. `stage_edit_session_for_review(sessionId)`
+9. Report the pre-merge validation/build result in chat.
+10. Stop at the in-app review boundary.
 
-Why this is preferred:
+Why this tool:
 - the intended change spans more than one fragment
-- later edits should still target stable symbol structure
+- later edits still target stable symbol structure
 - this avoids chaining fragile coordinate edits through a mutating file
 
-3. Existing C# file, remove one member
+Avoid:
+- falling back to `replace_span_in_file` just because coordinates feel exact
+- guessing selector payloads before doing one bounded `get_source_map(..., mode: "selector")` pass
 
-Use this when the task is deleting a property, method, constructor, field, or nested type.
+3. Existing C# file, remove one member semantically
 
+Use when:
+- deleting a property, method, constructor, field, or nested type
+
+Calls:
 1. `get_current_task`
 2. `refresh_file(watchedFilePath)`
-3. `get_file_outline(watchedFilePath)` or `get_symbol(...)` if the selector is unclear
-4. `remove_symbol(watchedFilePath, symbolSelectorJson)`
-5. `stage_edit_session_for_review(sessionId)`
-6. Stop at the in-app review boundary.
+3. `get_file_outline(watchedFilePath)` or `get_source_map(path: watchedFilePath, mode: "selector")`
+4. Build `symbolSelectorJson`. Prefer:
+   - `{"stableSymbolKey":"<stable key from get_source_map>"}`
+   - fallback property selector:
+     `{"containingType":"HelpSubject","memberKind":"property","name":"WorkflowProbeEnabled"}`
+5. `remove_symbol(watchedFilePath, symbolSelectorJson)`
+6. `stage_edit_session_for_review(sessionId)`
+7. Report the pre-merge validation/build result in chat.
+8. Stop at the in-app review boundary.
 
-4. Razor or mixed-markup file
+Why this tool:
+- deletion is a semantic operation, not a text-search exercise
+- merge review stays cleaner than ad hoc line removal
 
-Use index-first discovery, then governed text mutation.
+Avoid:
+- deleting symbol bodies with multiple text replacements
+- using span coordinates as the default removal path
 
-1. `get_current_task`
-2. `get_watched_solution_digest`
-3. Use the index/discovery surface to confirm the target file and nearby references.
-4. `refresh_file(watchedFilePath)`
-5. If the question is about literal markup, visible text, or placement, narrow text search against the already-selected file is allowed fallback.
-6. Prefer `replace_text_in_file` for one clean textual replacement.
-7. Use `replace_span_in_file` only when neither symbol-aware nor clean text replacement can express the change safely, and treat it as a destructive coordinate fallback.
-8. `stage_edit_session_for_review(sessionId)`
-9. Stop at the in-app review boundary.
+4. Brand-new watched file with full file body
 
-5. Brand-new watched file
+Use when:
+- the watched file does not exist yet
+- the intended output is a complete file body
+- whole-file authoring is the natural unit of change
 
+Calls:
 1. `get_current_task`
 2. Establish or reuse the coherent governed edit session id for the task.
 3. `new_file(watchedFilePath, sessionId)`
 4. `submit_file(watchedFilePath, content, ...)`
 5. If this new file is part of a larger coherent multi-file change, use `add_file_to_session(sessionId, watchedFilePath)` for normal growth, or `declare_session_files(sessionId, [...])` only after every declared file has already been bootstrapped into that same session.
 6. `stage_edit_session_for_review(sessionId)`
+7. Report the pre-merge validation/build result in chat.
+8. Stop at the in-app review boundary.
+
+Why this tool:
+- `submit_file` replaces the entire governed Working candidate body for that path
+- `submit_file` does not need `sessionId`; the path is already bound to the session by `new_file` or `refresh_file`
+
+Avoid:
+- trying to create a brand-new file through text replacement
+- assuming `submit_file` can author a file that was never bootstrapped with `new_file`
+
+5. Razor or mixed-markup file, text-first path
+
+Use when:
+- editing literal markup, visible text, attribute values, or placement in `.razor`
+- the task is not a clean Roslyn symbol operation
+
+Calls:
+1. `get_current_task`
+2. `get_watched_solution_digest`
+3. Use the index/discovery surface to confirm the target file and nearby references.
+4. `refresh_file(watchedFilePath)`
+5. If the question is about literal markup, visible text, or placement, narrow text search against the already-selected file is allowed fallback.
+6. Prefer `replace_text_in_file` for one clean textual replacement.
+7. Use `replace_span_in_file` only when neither symbol-aware nor clean text replacement can express the change safely.
+8. `stage_edit_session_for_review(sessionId)`
+9. Report the pre-merge validation/build result in chat.
+10. Stop at the in-app review boundary.
+
+Why this tool:
+- mixed Razor markup is usually better expressed as bounded text replacement
+- the index still helps find the right file before mutation starts
+
+Avoid:
+- broad shell search before using the governed discovery surface
+- treating span replacement as the normal path
+
+6. Split Razor component across `.razor`, `.razor.css`, and `.razor.cs`
+
+Use when:
+- the task adds or updates a UI component with separated markup, style, and behavior
+- one coherent change spans Razor, CSS, and C# files
+
+Calls:
+1. `get_current_task`
+2. Bootstrap the first file with `new_file(firstPath, sessionId)` or `refresh_file(firstPath)`
+3. Carry forward the first `EditSessionId`
+4. Bootstrap the related files with `new_file(nextPath, sessionId)` or `refresh_file(nextPath, sessionId)`
+5. `add_file_to_session(sessionId, watchedFilePath)` as each related file joins the same coherent change
+6. Apply governed mutations:
+   - markup in `Component.razor`
+   - styling in `Component.razor.css`
+   - behavior in `Component.razor.cs`
+7. `stage_edit_session_for_review(sessionId)`
+8. Report the pre-merge validation/build result in chat.
+9. Stop at the in-app review boundary.
+
+Why this tool:
+- keeps one shared session across the actual change set
+- reinforces split-file best practice instead of collapsing styles or code back into markup
+
+Avoid:
+- silently splitting one UI task into multiple review sessions
+- using `declare_session_files` as the default way to grow the session
+
+7. Coordinate span replacement as fallback only
+
+Use when:
+- neither semantic edits nor one clean text replacement can express the change safely
+- coordinates were generated from the current Working candidate immediately before the edit
+
+Calls:
+1. `get_current_task`
+2. `refresh_file(watchedFilePath)`
+3. Regenerate coordinates from the current Working candidate
+4. `replace_span_in_file(watchedFilePath, startLine, startColumn, endLine, endColumn, newText, expectedWorkingHash: ..., expectedOldTextHash: ... or expectedOldText: ...)`
+5. `stage_edit_session_for_review(sessionId)`
+6. Report the pre-merge validation/build result in chat.
 7. Stop at the in-app review boundary.
 
-6. Multi-file coherent change
+Why this tool:
+- it is the governed fallback for precise coordinate replacement when safer tools cannot express the change
 
+Avoid:
+- planning multiple later edits on top of stale coordinates
+- trusting old spans after the file has already changed
+
+8. Multi-file coherent change with incremental session growth
+
+Use when:
+- the full file set is not known at the first file
+- the task grows naturally as discovery continues
+
+Calls:
 1. `get_current_task`
-2. `refresh_file(firstFile)`
+2. `refresh_file(firstFile)` or `new_file(firstFile, sessionId)`
 3. Carry forward the first `EditSessionId`
 4. `refresh_file(secondFile, sessionId)` or `new_file(secondFile, sessionId)`
 5. `add_file_to_session(sessionId, secondFile)` when the coherent change grows incrementally
-6. `declare_session_files(sessionId, [...])` only when intentionally replacing the declared set with a known full list
-7. Apply governed mutations under that one session
+6. Repeat for additional files
+7. Use `declare_session_files(sessionId, [...])` only when intentionally replacing the declared set with a known full list
 8. `stage_edit_session_for_review(sessionId)`
-9. Stop at the in-app review boundary.
+9. Report the pre-merge validation/build result in chat.
+10. Stop at the in-app review boundary.
 
-7. Fallback rule when Roslyn selector shape is unclear
+Why this tool:
+- matches how real governed work often discovers one more required file during execution
+- keeps review session-first without forcing bulk declaration too early
+
+Avoid:
+- treating `declare_session_files` as the normal session-growth move
+- launching per-file review sessions for one coherent task
+
+9. Fallback rule when Roslyn selector shape is unclear
 
 If the target C# symbol is known but the exact selector payload contract is still unclear after bounded governed discovery:
 
 - say plainly that symbol identity is known
 - say plainly that the selector payload contract is still unclear
+- prefer one more bounded selector-discovery step through `get_source_map(path: watchedFilePath, mode: "selector")` before abandoning semantic edits
+- remember that the real selector schema is:
+  `{"containingNamespace": "...", "containingType": "...", "memberKind": "...", "name": "...", "parameterTypes": ["..."], "arity": 0, "stableSymbolKey": "..."}`
+- prefer the smallest payload that uniquely identifies the symbol; in practice that is usually `stableSymbolKey` alone, or `containingType + memberKind + name + parameterTypes`
 - use `replace_text_in_file` only when the intended change is one contiguous unique replacement
 - do not jump to `replace_span_in_file` just because coordinates feel more exact

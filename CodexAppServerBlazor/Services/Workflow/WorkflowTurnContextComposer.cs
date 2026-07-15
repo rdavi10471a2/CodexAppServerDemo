@@ -72,8 +72,8 @@ public sealed class WorkflowTurnContextComposer : IWorkflowTurnContextComposer
             prompt.AppendLine("- In Work mode, if a task file has not gone through current-turn refresh_file or new_file, you must treat its state as unverified for completion purposes.");
             prompt.AppendLine("- In Work mode, report an 'already implemented' outcome only after the current turn has produced governed evidence for each relevant task file, including EditSessionId, watchedFilePath, workingFilePath, and classification.");
             prompt.AppendLine("- In Work mode, if classification is unchanged after refresh_file, that means the watched source and the fresh working candidate match for this turn. That is the only governed basis for a no-op conclusion.");
-            prompt.AppendLine("- If the host exposes request_operator_confirmation, use it for bounded yes/no operator questions instead of asking those questions freeform in chat.");
-            prompt.AppendLine("- If you ask whether task or agent notes should be updated, prefer request_operator_confirmation when available; otherwise phrase it as a strict yes/no question unless the user asked for broader discussion.");
+            prompt.AppendLine("- If the host exposes request_operator_decision, use it for bounded yes/no operator questions instead of asking those questions freeform in chat.");
+            prompt.AppendLine("- If you ask whether task or agent notes should be updated, prefer request_operator_decision when available; otherwise phrase it as a strict yes/no question unless the user asked for broader discussion.");
         }
         else
         {

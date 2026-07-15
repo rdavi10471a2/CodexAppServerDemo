@@ -101,7 +101,6 @@
                         <div class="token-summary-header">
                             <span>Tokens</span>
                             <div class="token-summary-inline">
-                                <strong>@FormatContextPercent()</strong>
                                 <small>@FormatRateSummary()</small>
                             </div>
                         </div>
@@ -305,14 +304,6 @@
         .Replace("https://", string.Empty, StringComparison.OrdinalIgnoreCase);
 
     private string McpHealthUrl => $"{McpEndpointUrl}/health";
-
-    private string FormatContextPercent()
-    {
-        double? percent = Snapshot.TelemetrySummary.ContextUsedPercent;
-        return percent.HasValue
-            ? $"{percent.Value:0.0}% window"
-            : "waiting";
-    }
 
     private static string FormatNumber(int? value)
     {

@@ -101,7 +101,7 @@ public static class McpHostFactory
         List<McpHealthToolInventoryItem> tools = [];
         foreach (Type toolType in RegisteredToolTypes)
         {
-            foreach (MethodInfo method in toolType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
+            foreach (MethodInfo method in toolType.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.DeclaredOnly)
                          .Where(method => method.GetCustomAttribute<McpServerToolAttribute>() is not null)
                          .OrderBy(method => method.MetadataToken))
             {

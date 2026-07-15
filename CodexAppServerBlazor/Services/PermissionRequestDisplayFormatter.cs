@@ -216,7 +216,8 @@ public static class PermissionRequestDisplayFormatter
         string tool = GetStringValue(meta["tool_name"])
             ?? ExtractToolNameFromPrompt(prompt)
             ?? "unknown_tool";
-        if (string.Equals(tool, "request_operator_confirmation", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(tool, "request_operator_decision", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(tool, "request_operator_confirmation", StringComparison.OrdinalIgnoreCase))
         {
             return BuildOperatorConfirmationApproval(request, server, tool, prompt, schema);
         }
