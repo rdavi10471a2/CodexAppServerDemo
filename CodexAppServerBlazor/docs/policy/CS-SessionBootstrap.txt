@@ -4,7 +4,7 @@ Live tool surface first
 
 - The governed Coding Services tools for this session live on the harness MCP surface exposed by the host.
 - Before concluding that a governed task, discovery, edit, review, or operator-confirmation tool is missing, perform one broad live discovery pass for this session's harness MCP tool surface and read the current tool descriptions.
-- At the start of each governed Work turn, consult the harness health inventory at `http://localhost:6278/health` and treat its tool list as the authoritative broad inventory for the active harness MCP host.
+- At the start of each governed Work turn, consult the harness health inventory at `http://localhost:6289/health` and treat its tool list as the authoritative broad inventory for the active harness MCP host.
 - Do not claim that the harness edit surface is unavailable, read-only, or missing until that live discovery pass is complete.
 - `tool_search` is not a broad inventory primitive. Use it only as a narrow follow-up to inspect or confirm details for a specific already-known tool before invoking it.
 - Do not infer tool absence from a partial, ranked, convenience, or query-filtered subset. If the first result looks incomplete, broaden discovery before reporting any tool family as absent.

@@ -83,34 +83,26 @@ dotnet build .\CodexAppServerWinForms_corrected.slnx
 dotnet run --project .\CodexAppServerBlazor\CodexAppServerBlazor.csproj
 ```
 
-Dual-instance pinned launch:
+Pinned launch:
 
-Prefer the scripts first:
+Prefer the script first:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\Start-CodingServices-SelfHost.ps1
-powershell -ExecutionPolicy Bypass -File .\scripts\Start-CodingServices-Child.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\Start-CodingServices.ps1
 ```
 
 Manual fallback:
 
 ```powershell
 dotnet run --project .\CodexAppServerBlazor\CodexAppServerBlazor.csproj -- `
-  --BlazorHost:Url=http://localhost:5205 `
-  --Mcp:Url=http://localhost:6278 `
-  --Workspace:DefaultCwd=C:\CodexAppServerWinForms_corrected `
-  --Workspace:PersistencePath=runtime/app-state/selected-workspace-selfhost.txt `
-  --CodingServices:WatchedSolutionPath=C:\CodexAppServerWinForms_corrected\CodexAppServerWinForms_corrected.slnx
-
-dotnet run --project .\CodexAppServerBlazor\CodexAppServerBlazor.csproj -- `
   --BlazorHost:Url=http://localhost:5215 `
   --Mcp:Url=http://localhost:6289 `
   --Workspace:DefaultCwd=C:\SchemaStudioWebViewer1 `
-  --Workspace:PersistencePath=runtime/app-state/selected-workspace-child.txt `
+  --Workspace:PersistencePath=runtime/app-state/selected-workspace.txt `
   --CodingServices:WatchedSolutionPath=C:\SchemaStudioWebViewer1\SchemaStudioWebViewer.sln
 ```
 
-When running multiple instances, always pin `CodingServices:WatchedSolutionPath` explicitly on the command line instead of relying on fallback solution discovery.
+Always pin `CodingServices:WatchedSolutionPath` explicitly on the command line instead of relying on fallback solution discovery.
 
 ## Manual Smoke Check
 

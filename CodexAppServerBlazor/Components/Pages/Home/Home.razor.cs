@@ -7,6 +7,7 @@ using CodexAppServerBlazor.AICodingServices.Workflow;
 using CodexAppServerBlazor.AICodingServices.Core;
 using CodexAppServerBlazor.AICodingServices.Data;
 using CodexAppServerBlazor.Components.Pages.Home.Tasks;
+using CodexAppServerBlazor.Components.Pages.Home.MergeReviewDialog;
 using MergeReviewDialogComponent = CodexAppServerBlazor.Components.Pages.Home.MergeReviewDialog.MergeReviewDialog;
 using Markdig;
 using Markdig.Extensions.MediaLinks;
@@ -85,13 +86,15 @@ public partial class Home : IDisposable, IAsyncDisposable
     private bool reviewDialogOpen;
     private bool reviewLaunchCheckInProgress;
     private bool reviewLaunchProcessing;
+    private bool reviewApplyInProgress;
+    private string reviewApplyTitle = "Applying review decision";
+    private string reviewApplyDetail = "Updating source, rebuilding review state, and waiting for reindex if needed.";
     private PendingReviewLaunchState? pendingReviewLaunch;
     private StagedReviewPageModel? validationGateModel;
     private int validationGatePendingCount;
     private TaskCompletionSource<bool>? validationGateCompletion;
     private string? reviewDialogSessionId;
-    private TaskCompletionSource<bool>? reviewDialogCompletion;
-    private bool reviewDialogNotesUpdateRequested;
+    private TaskCompletionSource<MergeReviewDecision?>? reviewDialogCompletion;
     private int assistantViewVersion;
     private ElementReference controlGrid;
     private ElementReference workPanel;
@@ -354,7 +357,7 @@ public partial class Home : IDisposable, IAsyncDisposable
         validationGateModel = null;
         validationGatePendingCount = 0;
 
-        reviewDialogCompletion?.TrySetResult(true);
+        reviewDialogCompletion?.TrySetResult(null);
         reviewDialogCompletion = null;
         reviewDialogSessionId = null;
 
@@ -1499,7 +1502,12 @@ public partial class Home : IDisposable, IAsyncDisposable
                 "opening-modal",
                 "home",
                 $"Opening staged review dialog for edit session '{launch.SessionId}' with {launch.PendingCount} pending item(s).");
-            await OpenStagedReviewDialogAsync(launch.SessionId);
+            MergeReviewDecision? decision = await OpenStagedReviewDialogAsync(launch.SessionId);
+
+            if (decision is not null)
+            {
+                await ExecuteReviewDecisionAsync(launch, decision);
+            }
 
             IReadOnlyList<StagedReviewQueueItem> remainingReviews = StagedReviewPageService.ListPending(repoRoot)
                 .Where(review => review.SessionId.Equals(launch.SessionId, StringComparison.Ordinal))
@@ -1526,30 +1534,16 @@ public partial class Home : IDisposable, IAsyncDisposable
                     $"Cleaned {cleanedArtifacts} resolved artifact(s) for completed edit session '{launch.SessionId}'.");
             }
 
-            bool taskNotesUpdated = false;
-            if (remainingReviews.Count == 0 && reviewDialogNotesUpdateRequested)
-            {
-                taskNotesUpdated = TryApplyAcceptedReviewTaskNotesUpdate(
-                    repoRoot,
-                    launch.SessionId,
-                    model.RelativePath,
-                    model.PreMergeValidationIsError);
-            }
-
             GovernedReviewCoordinator.Complete(
                 launch.SessionId,
                 new GovernedReviewResolution(
                     launch.SessionId,
                     Completed: remainingReviews.Count == 0,
-                    AcceptedWithOverride: model.PreMergeValidationIsError,
+                    AcceptedWithOverride: decision?.ForceApproveValidation == true,
                     RemainingPendingCount: remainingReviews.Count,
                     Message: remainingReviews.Count == 0
                         ? $"Governed review completed for edit session '{launch.SessionId}'."
-                        : $"Governed review dialog closed before edit session '{launch.SessionId}' was fully resolved. {remainingReviews.Count} staged item(s) remain pending.",
-                    NotesUpdateRequested: false,
-                    UserNotesPath: taskNotesUpdated ? TryGetActiveTaskNoteTargets(repoRoot).UserNotesPath : null,
-                    AgentNotesPath: taskNotesUpdated ? TryGetActiveTaskNoteTargets(repoRoot).AgentNotesPath : null,
-                    NotesInstruction: null));
+                        : $"Governed review dialog closed before edit session '{launch.SessionId}' was fully resolved. {remainingReviews.Count} staged item(s) remain pending."));
         }
         catch (Exception ex)
         {
@@ -1593,7 +1587,7 @@ public partial class Home : IDisposable, IAsyncDisposable
         await InvokeAsync(StateHasChanged);
     }
 
-    private async Task OpenStagedReviewDialogAsync(string sessionId)
+    private async Task<MergeReviewDecision?> OpenStagedReviewDialogAsync(string sessionId)
     {
         AddDebugEvent(
             "ReviewDialog",
@@ -1601,8 +1595,7 @@ public partial class Home : IDisposable, IAsyncDisposable
             "home",
             $"Opening staged review dialog for session '{sessionId}'.");
         reviewDialogSessionId = sessionId;
-        reviewDialogNotesUpdateRequested = false;
-        reviewDialogCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        reviewDialogCompletion = new TaskCompletionSource<MergeReviewDecision?>(TaskCreationOptions.RunContinuationsAsynchronously);
         await InvokeAsync(StateHasChanged);
 
         AddDebugEvent(
@@ -1618,9 +1611,10 @@ public partial class Home : IDisposable, IAsyncDisposable
             "awaiting-close",
             "home",
             $"Awaiting staged review dialog completion for session '{sessionId}'.");
+        MergeReviewDecision? decision = null;
         if (reviewDialogCompletion is not null)
         {
-            await reviewDialogCompletion.Task;
+            decision = await reviewDialogCompletion.Task;
         }
 
         AddDebugEvent(
@@ -1628,22 +1622,74 @@ public partial class Home : IDisposable, IAsyncDisposable
             "await-complete",
             "home",
             $"Staged review dialog completion returned for session '{sessionId}'.");
+        return decision;
     }
 
-    private async Task HandleStagedReviewDialogClosedAsync(bool notesUpdateRequested)
+    private async Task HandleStagedReviewDialogClosedAsync()
     {
         AddDebugEvent(
             "ReviewDialog",
             "close-callback",
             "home",
             $"Staged review dialog requested close for session '{reviewDialogSessionId ?? "<none>"}'.");
-        reviewDialogNotesUpdateRequested = notesUpdateRequested;
-        TaskCompletionSource<bool>? completion = reviewDialogCompletion;
+        TaskCompletionSource<MergeReviewDecision?>? completion = reviewDialogCompletion;
         reviewDialogSessionId = null;
         reviewDialogCompletion = null;
-        completion?.TrySetResult(true);
+        completion?.TrySetResult(null);
         DialogService.Close();
         await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task HandleStagedReviewDecisionRequestedAsync(MergeReviewDecision decision)
+    {
+        AddDebugEvent(
+            "ReviewDialog",
+            decision.IsAccept ? "decision-accept" : "decision-reject",
+            "home",
+            $"Review dialog decision requested for session '{reviewDialogSessionId ?? "<none>"}'. Record={decision.StagedRecordId}; ForceApproveValidation={decision.ForceApproveValidation}.");
+        TaskCompletionSource<MergeReviewDecision?>? completion = reviewDialogCompletion;
+        reviewDialogSessionId = null;
+        reviewDialogCompletion = null;
+        completion?.TrySetResult(decision);
+        DialogService.Close();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ExecuteReviewDecisionAsync(PendingReviewLaunchState launch, MergeReviewDecision decision)
+    {
+        reviewApplyTitle = decision.IsAccept
+            ? "Applying accepted review"
+            : "Applying rejected review";
+        reviewApplyDetail = decision.IsAccept
+            ? "Updating watched source, rebuilding index, and refreshing governed review state."
+            : "Recording the rejection and refreshing governed review state.";
+        reviewApplyInProgress = true;
+        await InvokeAsync(StateHasChanged);
+        await Task.Yield();
+
+        try
+        {
+            AddDebugEvent(
+                "ReviewApply",
+                "start",
+                "home",
+                $"Applying {(decision.IsAccept ? "accept" : "reject")} for session '{launch.SessionId}'. Record={decision.StagedRecordId}; ForceApproveValidation={decision.ForceApproveValidation}.");
+
+            StagedReviewPageActionResult result = await Task.Run(() => decision.IsAccept
+                ? StagedReviewPageService.Accept(repoRoot, decision.StagedRecordId, decision.ForceApproveValidation)
+                : StagedReviewPageService.Reject(repoRoot, decision.StagedRecordId));
+
+            AddDebugEvent(
+                "ReviewApply",
+                "complete",
+                "home",
+                $"Review apply finished for session '{launch.SessionId}'. Record={decision.StagedRecordId}; IsAccept={decision.IsAccept}; Message={result.Message}");
+        }
+        finally
+        {
+            reviewApplyInProgress = false;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private Task HandleStagedReviewTraceAsync(string traceMessage)
@@ -2259,7 +2305,7 @@ public partial class Home : IDisposable, IAsyncDisposable
     {
         if (isDisposed)
         {
-            reviewDialogCompletion?.TrySetResult(true);
+            reviewDialogCompletion?.TrySetResult(null);
             return;
         }
 
@@ -2271,9 +2317,9 @@ public partial class Home : IDisposable, IAsyncDisposable
                 {
                     [nameof(MergeReviewDialogComponent.WorkspaceRoot)] = repoRoot,
                     [nameof(MergeReviewDialogComponent.SessionId)] = sessionId,
-                    [nameof(MergeReviewDialogComponent.AutoCloseWhenComplete)] = true,
                     [nameof(MergeReviewDialogComponent.TraceEventRaised)] = EventCallback.Factory.Create<string>(this, HandleStagedReviewTraceAsync),
-                    [nameof(MergeReviewDialogComponent.CloseRequested)] = EventCallback.Factory.Create<bool>(this, HandleStagedReviewDialogClosedAsync)
+                    [nameof(MergeReviewDialogComponent.CloseRequested)] = EventCallback.Factory.Create(this, HandleStagedReviewDialogClosedAsync),
+                    [nameof(MergeReviewDialogComponent.DecisionRequested)] = EventCallback.Factory.Create<MergeReviewDecision>(this, HandleStagedReviewDecisionRequestedAsync)
                 },
                 new DialogOptions
                 {
@@ -2293,143 +2339,9 @@ public partial class Home : IDisposable, IAsyncDisposable
                 "open-error",
                 "home",
                 $"Staged review dialog open failed for session '{sessionId}': {ex.Message}");
-            reviewDialogCompletion?.TrySetResult(true);
+            reviewDialogCompletion?.TrySetResult(null);
         }
     }
-
-    private (string? UserNotesPath, string? AgentNotesPath) TryGetActiveTaskNoteTargets(string workspaceRoot)
-    {
-        try
-        {
-            ActiveTaskNotesContext? context = TryGetActiveTaskNotesContext(workspaceRoot);
-            WorkflowTaskRow? activeTask = context?.Task;
-            return (activeTask?.NotesMarkdownPath, activeTask?.AgentNotesMarkdownPath);
-        }
-        catch
-        {
-            return (null, null);
-        }
-    }
-
-    private bool TryApplyAcceptedReviewTaskNotesUpdate(
-        string workspaceRoot,
-        string sessionId,
-        string relativePath,
-        bool acceptedWithOverride)
-    {
-        try
-        {
-            ActiveTaskNotesContext? context = TryGetActiveTaskNotesContext(workspaceRoot);
-            if (context?.Task is null)
-            {
-                NotificationService.Notify(new NotificationMessage
-                {
-                    Severity = NotificationSeverity.Warning,
-                    Summary = "Task notes update skipped",
-                    Detail = "No active task was available for the accepted review notes update.",
-                    Duration = 5000
-                });
-                return false;
-            }
-
-            string existingNotes = context.Repository.ReadNotes(context.Task.NotesMarkdownPath);
-            string updateBlock = BuildAcceptedReviewTaskNotesUpdate(
-                context.Task,
-                sessionId,
-                relativePath,
-                acceptedWithOverride);
-            string updatedNotes = AppendTaskNotesBlock(existingNotes, updateBlock);
-            WorkflowTaskRow updatedTask = context.Repository.UpdateNotes(context.Task.Id, updatedNotes);
-
-            NotificationService.Notify(new NotificationMessage
-            {
-                Severity = NotificationSeverity.Success,
-                Summary = "Task notes updated",
-                Detail = $"Updated task notes for {context.Task.ShortName} after accepted governed review.",
-                Duration = 4000
-            });
-            AddDebugEvent(
-                "TaskNotes",
-                "updated",
-                "home",
-                $"Updated task notes for '{context.Task.ShortName}' after accepted governed review session '{sessionId}'. NotesPath='{updatedTask.NotesMarkdownPath ?? "<none>"}'.");
-            return true;
-        }
-        catch (Exception ex)
-        {
-            NotificationService.Notify(new NotificationMessage
-            {
-                Severity = NotificationSeverity.Warning,
-                Summary = "Task notes update failed",
-                Detail = ex.Message,
-                Duration = 7000
-            });
-            AddDebugEvent(
-                "TaskNotes",
-                "error",
-                "home",
-                $"Failed to update task notes after accepted governed review session '{sessionId}': {ex.Message}");
-            return false;
-        }
-    }
-
-    private ActiveTaskNotesContext? TryGetActiveTaskNotesContext(string workspaceRoot)
-    {
-        try
-        {
-            CodingServicesSettings settings = SettingsProvider.GetSettings(workspaceRoot);
-            WorkflowTaskBoardRepository repository = new(
-                SystemDataPaths.GetDefaultPlanningDatabasePath(settings),
-                SystemDataPaths.GetDefaultTaskMemoryRoot(settings));
-            WorkflowTaskBoardSnapshot snapshot = repository.LoadSnapshot();
-            WorkflowTaskRow? activeTask = snapshot.Tasks.FirstOrDefault(task =>
-                string.Equals(task.StateCode, "Active", StringComparison.OrdinalIgnoreCase)
-                && !task.IsArchived);
-            return activeTask is null ? null : new ActiveTaskNotesContext(repository, activeTask);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static string BuildAcceptedReviewTaskNotesUpdate(
-        WorkflowTaskRow task,
-        string sessionId,
-        string relativePath,
-        bool acceptedWithOverride)
-    {
-        StringBuilder builder = new();
-        builder.AppendLine("## Latest accepted governed review");
-        builder.AppendLine();
-        builder.AppendLine($"- Updated: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-        builder.AppendLine($"- Task: {task.ShortName}");
-        if (!string.IsNullOrWhiteSpace(relativePath))
-        {
-            builder.AppendLine($"- File: `{relativePath}`");
-        }
-
-        builder.AppendLine($"- Edit session: `{sessionId}`");
-        builder.AppendLine(acceptedWithOverride
-            ? "- Outcome: accepted with validation override."
-            : "- Outcome: accepted and pre-merge validation passed.");
-        builder.AppendLine();
-        builder.AppendLine("The watched source has been updated to reflect this accepted review.");
-        return builder.ToString().TrimEnd();
-    }
-
-    private static string AppendTaskNotesBlock(string existingNotes, string updateBlock)
-    {
-        string trimmedExisting = (existingNotes ?? string.Empty).TrimEnd();
-        if (string.IsNullOrWhiteSpace(trimmedExisting))
-        {
-            return updateBlock + Environment.NewLine;
-        }
-
-        return trimmedExisting + Environment.NewLine + Environment.NewLine + updateBlock + Environment.NewLine;
-    }
-
-    private sealed record ActiveTaskNotesContext(WorkflowTaskBoardRepository Repository, WorkflowTaskRow Task);
 
     private sealed record PendingReviewLaunchState(string SessionId, int PendingCount);
 

@@ -10,7 +10,7 @@ Tool families
 Discovery rules
 
 - At the start of a governed Work turn, do one broad live discovery pass for the harness MCP tool surface before selecting specific mutation tools.
-- At the start of a governed Work turn, consult `http://localhost:6278/health` and treat its tool list as that broad discovery pass and as the authoritative callable tool inventory for the turn.
+- At the start of a governed Work turn, consult `http://localhost:6289/health` and treat its tool list as that broad discovery pass and as the authoritative callable tool inventory for the turn.
 - Do not infer tool absence from a partial, ranked, convenience, or query-filtered subset; broaden discovery first.
 - Use `tool_search` only after that health-backed inventory step, and only to inspect or confirm details for a specific already-known tool before using it, not to determine whether a tool family exists.
 - Prefer `get_workspace`, `get_watched_solution_digest`, `get_watched_solution_summary`, `get_test_project_summary`, and `get_current_task` before broad fallback search.
@@ -56,4 +56,3 @@ Freshness and stop rules
 - If no governed mutation path is available for the requested change, say so plainly and stop rather than faking completion or silently bypassing governance.
 - After accepted review decisions, use the governed post-accept build/digest/index refresh as the normal way to restore freshness.
 - Do not add a second explicit rebuild/reindex by default after accept unless the post-accept refresh failed, was deferred, or the user explicitly wants a recovery/diagnostic rebuild.
-- When asking whether task or agent notes should be updated, prefer `request_operator_decision` when it is exposed so the operator can answer through a governed structured yes/no prompt.

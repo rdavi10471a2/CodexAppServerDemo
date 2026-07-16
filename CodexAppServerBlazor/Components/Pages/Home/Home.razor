@@ -245,3 +245,14 @@
         </div>
     </div>
 }
+
+@if (reviewApplyInProgress)
+{
+    <div class="screen-busy-overlay" role="status" aria-live="polite" aria-label="Applying review decision">
+        <div class="screen-busy-card">
+            <div class="screen-busy-spinner" aria-hidden="true"></div>
+            <strong>@reviewApplyTitle</strong>
+            <span>@reviewApplyDetail</span>
+        </div>
+    </div>
+}

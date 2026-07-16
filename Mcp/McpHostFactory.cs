@@ -8,7 +8,7 @@ namespace CodexAppServerBlazor.Mcp;
 
 public static class McpHostFactory
 {
-    public const string DefaultLocalMcpUrl = "http://localhost:6278";
+    public const string DefaultLocalMcpUrl = "http://localhost:6289";
     public const string HealthPath = "/health";
     private static readonly Type[] RegisteredToolTypes =
     [

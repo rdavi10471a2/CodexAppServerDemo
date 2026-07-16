@@ -1,0 +1,2 @@
+C:\CodexAppServerWinForms_corrected\.artifacts\altobj\Debug\net10.0\EmbeddedAttribute.cs
+C:\CodexAppServerWinForms_corrected\.artifacts\altobj\Debug\net10.0\ValidatableTypeAttribute.cs

@@ -4,7 +4,7 @@
 
 - The governed Coding Services tools for a watched-workspace session live on the harness MCP surface exposed by the host.
 - Before claiming that governed task, discovery, edit, review, or operator-confirmation tools are unavailable, perform one broad live discovery pass for the current session's harness MCP tool surface and read the current tool descriptions.
-- At the start of each governed Work turn, consult the harness health inventory at `http://localhost:6278/health` and treat its tool list as the authoritative broad inventory for the active harness MCP host.
+- At the start of each governed Work turn, consult the harness health inventory at `http://localhost:6289/health` and treat its tool list as the authoritative broad inventory for the active harness MCP host.
 - Do not claim that the harness edit surface is missing or that the session is effectively read-only until that live discovery pass is complete.
 - `tool_search` is not a broad inventory primitive. Use it only as a narrow follow-up to inspect or confirm details for a specific already-known tool before invoking it.
 - Do not infer tool absence from a partial, ranked, convenience, or query-filtered subset. If the first result looks incomplete, broaden discovery before making any statement about missing tools.
@@ -63,7 +63,6 @@
 - Before claiming a task is already implemented, produce fresh governed refresh evidence for each task file in the current turn.
 - Runtime workflow artifacts under `runtime\watched-solutions\...` are not authoritative proof that watched source is already correct.
 - After `refresh_file` or `new_file`, treat the governed Working candidate plus governed structure tools as the primary local context source for the turn. Reason primarily from the refreshed Working candidate and governed structure tools. Do not fall back to broad watched-source reads or shell search unless the governed discovery surface is genuinely insufficient for the next step.
-- When asking whether task or agent notes should be updated, prefer `request_operator_decision` when it is exposed so the operator can answer through a governed structured yes/no prompt.
 
 ## MCP And Tooling
 
@@ -128,16 +127,14 @@ dotnet build .\CodexAppServerWinForms_corrected.slnx
 dotnet run --project .\CodexAppServerBlazor\CodexAppServerBlazor.csproj
 ```
 
-For repeatable dual-instance runs, prefer the pinned scripts under `scripts/`:
+For repeatable app runs, prefer the pinned script under `scripts/`:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\Start-CodingServices-SelfHost.ps1
-powershell -ExecutionPolicy Bypass -File .\scripts\Start-CodingServices-Child.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\Start-CodingServices.ps1
 ```
 
-- SelfHost should pin `C:\CodexAppServerWinForms_corrected\CodexAppServerWinForms_corrected.slnx`.
-- Child should pin the watched solution for the selected external workspace explicitly with `--CodingServices:WatchedSolutionPath=...`.
-- Do not rely on fallback solution discovery when restarting or testing the child instance.
+- Pin the watched solution for the selected external workspace explicitly with `--CodingServices:WatchedSolutionPath=...`.
+- Do not rely on fallback solution discovery when restarting or testing the app.
 
 - If you change turn construction, verify it remains CWD/workspace based.
 - If you change UI behavior, rebuild and restart the Blazor app before claiming the change is visible.

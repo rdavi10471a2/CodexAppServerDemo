@@ -37,7 +37,6 @@ public sealed class CodexConnectionService : IAsyncDisposable
     private string? currentTurnId;
     private bool currentTurnUsageRecorded;
     private bool currentTurnOperatorDecisionRequested;
-    private bool currentTurnNotesUpdateQuestionRequested;
 
     public CodexConnectionService(
         IConfiguration configuration,
@@ -161,7 +160,6 @@ public sealed class CodexConnectionService : IAsyncDisposable
                 currentTurnId = null;
                 currentTurnUsageRecorded = false;
                 currentTurnOperatorDecisionRequested = false;
-                currentTurnNotesUpdateQuestionRequested = false;
                 telemetrySummary = CodexTelemetrySummary.Empty;
             }
 
@@ -282,7 +280,6 @@ public sealed class CodexConnectionService : IAsyncDisposable
             currentTurnId = null;
             currentTurnUsageRecorded = false;
             currentTurnOperatorDecisionRequested = false;
-            currentTurnNotesUpdateQuestionRequested = false;
             telemetrySummary = CodexTelemetrySummary.Empty;
         }
 
@@ -368,7 +365,6 @@ public sealed class CodexConnectionService : IAsyncDisposable
                 currentTurnId = null;
                 currentTurnUsageRecorded = false;
                 currentTurnOperatorDecisionRequested = false;
-                currentTurnNotesUpdateQuestionRequested = false;
                 telemetrySummary = telemetrySummary.ResetCurrentTurn();
             }
             MarkTurnRunning();
@@ -707,17 +703,8 @@ public sealed class CodexConnectionService : IAsyncDisposable
                     PreMergeValidationIsError: false,
                     PreMergeValidationForceApproved: false));
 
-            JsonObject content = new();
-            if (resolution.NotesUpdateRequested)
-            {
-                content["notesUpdateRequested"] = true;
-                content["userNotesPath"] = resolution.UserNotesPath;
-                content["agentNotesPath"] = resolution.AgentNotesPath;
-                content["notesInstruction"] = resolution.NotesInstruction;
-            }
-
             response = resolution.Completed
-                ? PermissionRequestService.CreateApproveResponse(e.Method, e.RawJson, PermissionApprovalScope.Turn, content)
+                ? PermissionRequestService.CreateApproveResponse(e.Method, e.RawJson, PermissionApprovalScope.Turn, new JsonObject())
                 : PermissionRequestService.CreateDenyResponse(e.Method, cancelTurn: false);
             AddCurrentTurnNotice(resolution.Completed
                 ? $"Governed review session '{sessionId}' completed; releasing the agent."
@@ -838,13 +825,6 @@ public sealed class CodexConnectionService : IAsyncDisposable
         lock (gate)
         {
             currentTurnOperatorDecisionRequested = true;
-            if (!string.IsNullOrWhiteSpace(rawJson)
-                && (rawJson.Contains("agent notes", StringComparison.OrdinalIgnoreCase)
-                    || rawJson.Contains("task notes", StringComparison.OrdinalIgnoreCase)
-                    || rawJson.Contains("durable workflow memory", StringComparison.OrdinalIgnoreCase)))
-            {
-                currentTurnNotesUpdateQuestionRequested = true;
-            }
         }
     }
 
@@ -862,7 +842,6 @@ public sealed class CodexConnectionService : IAsyncDisposable
         WorkflowTurnMode? mode;
         CodexTelemetrySummary summary;
         bool operatorDecisionRequested;
-        bool notesUpdateQuestionRequested;
         bool shouldRecord;
 
         lock (gate)
@@ -877,7 +856,6 @@ public sealed class CodexConnectionService : IAsyncDisposable
             activeTaskId = currentTurnActiveTaskId;
             summary = telemetrySummary;
             operatorDecisionRequested = currentTurnOperatorDecisionRequested;
-            notesUpdateQuestionRequested = currentTurnNotesUpdateQuestionRequested;
             threadId = client?.ThreadId;
             turnId = currentTurnId ?? client?.ActiveTurnId;
             currentEditSessionId = workspaceState.CurrentEditSessionId;
@@ -899,7 +877,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
             e.EventType,
             e.Summary,
             operatorDecisionRequested,
-            notesUpdateQuestionRequested);
+            false);
     }
 
     private void AddEvent(List<CodexOutputEvent> target, string type, string? status, string source, string detail)

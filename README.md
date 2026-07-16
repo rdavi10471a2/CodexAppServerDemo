@@ -24,57 +24,49 @@ dotnet build .\CodexAppServerWinForms_corrected.slnx
 dotnet run --project .\CodexAppServerBlazor\CodexAppServerBlazor.csproj
 ```
 
-## Dual Instance Launch
+## Pinned Launch
 
-Prefer the pinned launch scripts instead of retyping command lines:
+Prefer the pinned launch script instead of retyping command lines:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\Start-CodingServices-SelfHost.ps1
-powershell -ExecutionPolicy Bypass -File .\scripts\Start-CodingServices-Child.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\Start-CodingServices.ps1
 ```
 
-Or start both:
+The script accepts overrides when targeting a different watched project:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\Start-CodingServices-DualInstance.ps1
-```
-
-The child script accepts overrides when targeting a different watched project:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\Start-CodingServices-Child.ps1 `
+powershell -ExecutionPolicy Bypass -File .\scripts\Start-CodingServices.ps1 `
   -WorkspaceRoot C:\SchemaStudioWebViewer1 `
   -WatchedSolutionPath C:\SchemaStudioWebViewer1\SchemaStudioWebViewer.sln
 ```
 
 Important:
 
-- Always pin `CodingServices:WatchedSolutionPath` explicitly for non-self-host runs.
-- Do not rely on fallback solution discovery when running multiple instances.
-- `5205/6278` are reserved for SelfHost.
-- `5215/6289` are reserved for Child by convention in this repo.
+- Always pin `CodingServices:WatchedSolutionPath` explicitly.
+- Do not rely on fallback solution discovery.
+- `5215/6289` are the canonical app and MCP ports in this repo.
 
 The default app and MCP ports are configured in `CodexAppServerBlazor/appsettings.json`:
 
 ```json
 "BlazorHost": {
-  "Url": "http://localhost:5205"
+  "Url": "http://localhost:5215"
 },
 "Mcp": {
-  "Url": "http://localhost:6278"
+  "Url": "http://localhost:6289"
 }
 ```
 
 Open:
 
 ```text
-http://localhost:5205/
+http://localhost:5215/
 ```
 
 MCP health:
 
 ```text
-http://localhost:6278/health
+http://localhost:6289/health
 ```
 
 ## Governed Workflow Model

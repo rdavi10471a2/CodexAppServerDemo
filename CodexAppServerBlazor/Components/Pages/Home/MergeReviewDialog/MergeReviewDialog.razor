@@ -6,17 +6,6 @@
 @inject IStagedReviewPageService StagedReviewPageService
 
 <div class="diff-modal">
-    @if (actionBusy)
-    {
-        <div class="diff-modal-busy-overlay" role="status" aria-live="polite" aria-busy="true">
-            <div class="diff-modal-busy-card">
-                <div class="diff-modal-busy-spinner"></div>
-                <strong>Applying review decision</strong>
-                <span>Updating source, rebuilding review state, and waiting for reindex if needed.</span>
-            </div>
-        </div>
-    }
-
     <div class="diff-modal-header">
         <div>
             <p>@DialogSubtitle</p>
@@ -158,31 +147,22 @@
                     </div>
                 </section>
 
-                <div class="diff-modal-notes-option">
-                    <label class="diff-modal-notes-checkbox">
-                        <input type="checkbox"
-                               @bind="updateTaskNotesRequested"
-                               disabled="@actionBusy" />
-                        <span>Update task notes on accept</span>
-                    </label>
-                </div>
-
                 <div class="diff-modal-detail-actions">
                     <button class="diff-modal-primary-action"
                             type="button"
-                            disabled="@(!CanAcceptNormally || actionBusy)"
+                            disabled="@(!CanAcceptNormally)"
                             @onclick="AcceptSelectedAsync">
                         Accept Proposed
                     </button>
                     <button class="diff-modal-warning-action"
                             type="button"
-                            disabled="@(!CanForceAccept || actionBusy)"
+                            disabled="@(!CanForceAccept)"
                             @onclick="AcceptSelectedWithOverrideAsync">
                         Accept With Validation Override
                     </button>
                     <button class="diff-modal-danger-action"
                             type="button"
-                            disabled="@(selectedModel.IsDecided || actionBusy)"
+                            disabled="@(selectedModel.IsDecided)"
                             @onclick="RejectSelectedAsync">
                         Reject
                     </button>
@@ -192,19 +172,12 @@
     </div>
 </div>
 
-@implements IAsyncDisposable
-
 @code {
     private IReadOnlyList<StagedReviewQueueItem> pendingItems = [];
     private StagedReviewPageModel? selectedModel;
     private SideBySideDiffModel? diffModel;
     private string? selectedRecordId;
     private string? errorMessage;
-    private bool actionBusy;
-    private bool updateTaskNotesRequested;
-    private bool acceptedWithNotesUpdateRequested;
-    private CancellationTokenSource? sessionMonitorCts;
-    private Task? sessionMonitorTask;
 
     private bool UseSessionFlow => !string.IsNullOrWhiteSpace(SessionId);
     private string DialogTitle => UseSessionFlow ? "Merge Review" : "Merge Review Queue";
@@ -227,18 +200,17 @@
     public string? SessionId { get; set; }
 
     [Parameter]
-    public bool AutoCloseWhenComplete { get; set; } = true;
-
-    [Parameter]
     public EventCallback<string> TraceEventRaised { get; set; }
 
     [Parameter]
-    public EventCallback<bool> CloseRequested { get; set; }
+    public EventCallback CloseRequested { get; set; }
+
+    [Parameter]
+    public EventCallback<MergeReviewDecision> DecisionRequested { get; set; }
 
     protected override void OnParametersSet()
     {
         LoadReview(preserveSelection: false);
-        EnsureSessionMonitor();
     }
 
     private Task RefreshReview()
@@ -257,7 +229,7 @@
             $"Operator requested dialog close. SessionId={SessionId ?? "<none>"}; SelectedRecordId={selectedRecordId ?? "<none>"}; PendingCount={pendingItems.Count}.");
         if (CloseRequested.HasDelegate)
         {
-            return CloseRequested.InvokeAsync(false);
+            return CloseRequested.InvokeAsync();
         }
 
         DialogService.Close();
@@ -292,162 +264,61 @@
         return AcceptSelectedCoreAsync(forceApproveValidation: true);
     }
 
-    private async Task AcceptSelectedCoreAsync(bool forceApproveValidation)
+    private Task AcceptSelectedCoreAsync(bool forceApproveValidation)
     {
-        if (string.IsNullOrWhiteSpace(selectedRecordId) || actionBusy)
+        if (string.IsNullOrWhiteSpace(selectedRecordId))
         {
-            await TraceAsync(
+            return TraceAsync(
                 "accept-skip",
-                $"Accept skipped. SelectedRecordId={selectedRecordId ?? "<none>"}; ActionBusy={actionBusy}; ForceApproveValidation={forceApproveValidation}.");
-            return;
+                $"Accept skipped. SelectedRecordId={selectedRecordId ?? "<none>"}; ForceApproveValidation={forceApproveValidation}.");
         }
 
-        actionBusy = true;
-        try
+        _ = TraceAsync(
+            "accept-click",
+            $"Accept requested. SessionId={SessionId ?? "<none>"}; SelectedRecordId={selectedRecordId}; ForceApproveValidation={forceApproveValidation}; PendingCount={pendingItems.Count}.");
+
+        if (DecisionRequested.HasDelegate)
         {
-            await InvokeAsync(StateHasChanged);
-            await Task.Yield();
-            await TraceAsync(
-                "accept-click",
-                $"Accept requested. SessionId={SessionId ?? "<none>"}; SelectedRecordId={selectedRecordId}; ForceApproveValidation={forceApproveValidation}; PendingCount={pendingItems.Count}.");
-            StagedReviewPageActionResult result = await Task.Run(
-                () => StagedReviewPageService.Accept(WorkspaceRoot, selectedRecordId, forceApproveValidation));
-            if (updateTaskNotesRequested)
-            {
-                acceptedWithNotesUpdateRequested = true;
-            }
-            errorMessage = result.Message;
-            await LoadNextStateAsync();
+            return DecisionRequested.InvokeAsync(new MergeReviewDecision(
+                selectedRecordId,
+                IsAccept: true,
+                ForceApproveValidation: forceApproveValidation));
         }
-        catch (Exception ex)
-        {
-            errorMessage = ex.Message;
-            await TraceAsync(
-                "accept-error",
-                $"Accept failed. SelectedRecordId={selectedRecordId ?? "<none>"}; ForceApproveValidation={forceApproveValidation}; Error={ex.Message}");
-        }
-        finally
-        {
-            actionBusy = false;
-            await InvokeAsync(StateHasChanged);
-        }
+
+        DialogService.Close(new MergeReviewDecision(
+            selectedRecordId,
+            IsAccept: true,
+            ForceApproveValidation: forceApproveValidation));
+        return Task.CompletedTask;
     }
 
     private async Task RejectSelectedAsync()
     {
-        if (string.IsNullOrWhiteSpace(selectedRecordId) || actionBusy)
+        if (string.IsNullOrWhiteSpace(selectedRecordId))
         {
             await TraceAsync(
                 "reject-skip",
-                $"Reject skipped. SelectedRecordId={selectedRecordId ?? "<none>"}; ActionBusy={actionBusy}.");
+                $"Reject skipped. SelectedRecordId={selectedRecordId ?? "<none>"}.");
             return;
         }
 
-        actionBusy = true;
-        try
+        await TraceAsync(
+            "reject-click",
+            $"Reject requested. SessionId={SessionId ?? "<none>"}; SelectedRecordId={selectedRecordId}; PendingCount={pendingItems.Count}.");
+        if (DecisionRequested.HasDelegate)
         {
-            await InvokeAsync(StateHasChanged);
-            await Task.Yield();
-            await TraceAsync(
-                "reject-click",
-                $"Reject requested. SessionId={SessionId ?? "<none>"}; SelectedRecordId={selectedRecordId}; PendingCount={pendingItems.Count}.");
-            StagedReviewPageActionResult result = await Task.Run(
-                () => StagedReviewPageService.Reject(WorkspaceRoot, selectedRecordId));
-            errorMessage = result.Message;
-            await LoadNextStateAsync();
+            await DecisionRequested.InvokeAsync(new MergeReviewDecision(
+                selectedRecordId,
+                IsAccept: false,
+                ForceApproveValidation: false));
         }
-        catch (Exception ex)
+        else
         {
-            errorMessage = ex.Message;
-            await TraceAsync(
-                "reject-error",
-                $"Reject failed. SelectedRecordId={selectedRecordId ?? "<none>"}; Error={ex.Message}");
+            DialogService.Close(new MergeReviewDecision(
+                selectedRecordId,
+                IsAccept: false,
+                ForceApproveValidation: false));
         }
-        finally
-        {
-            actionBusy = false;
-            await InvokeAsync(StateHasChanged);
-        }
-    }
-
-    private async Task LoadNextStateAsync()
-    {
-        LoadReview(preserveSelection: false);
-        bool sessionComplete = UseSessionFlow && (selectedModel?.IsSessionComplete ?? false);
-        await InvokeAsync(StateHasChanged);
-        if (sessionComplete && AutoCloseWhenComplete)
-        {
-            await ForceCloseDialogAsync();
-        }
-    }
-
-    private Task ForceCloseDialogAsync()
-    {
-        if (CloseRequested.HasDelegate)
-        {
-            return CloseRequested.InvokeAsync(acceptedWithNotesUpdateRequested);
-        }
-
-        DialogService.Close();
-        return Task.CompletedTask;
-    }
-
-    private void EnsureSessionMonitor()
-    {
-        if (!UseSessionFlow)
-        {
-            StopSessionMonitor();
-            return;
-        }
-
-        if (sessionMonitorTask is not null)
-        {
-            return;
-        }
-
-        sessionMonitorCts = new CancellationTokenSource();
-        sessionMonitorTask = MonitorSessionAsync(sessionMonitorCts.Token);
-    }
-
-    private void StopSessionMonitor()
-    {
-        CancellationTokenSource? cts = sessionMonitorCts;
-        sessionMonitorCts = null;
-        sessionMonitorTask = null;
-        cts?.Cancel();
-        cts?.Dispose();
-    }
-
-    private async Task MonitorSessionAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            using PeriodicTimer timer = new(TimeSpan.FromSeconds(1));
-            while (await timer.WaitForNextTickAsync(cancellationToken))
-            {
-                await InvokeAsync(async () =>
-                {
-                    LoadReview(preserveSelection: true);
-                    await StateHasChangedAsync();
-
-                    if (UseSessionFlow
-                        && AutoCloseWhenComplete
-                        && (selectedModel?.IsSessionComplete ?? false))
-                    {
-                        await ForceCloseDialogAsync();
-                    }
-                });
-            }
-        }
-        catch (OperationCanceledException)
-        {
-        }
-    }
-
-    private Task StateHasChangedAsync()
-    {
-        StateHasChanged();
-        return Task.CompletedTask;
     }
 
     private void LoadReview(bool preserveSelection)
@@ -525,11 +396,5 @@
             ChangeType.Modified => "modified",
             _ => "unchanged"
         };
-    }
-
-    public ValueTask DisposeAsync()
-    {
-        StopSessionMonitor();
-        return ValueTask.CompletedTask;
     }
 }

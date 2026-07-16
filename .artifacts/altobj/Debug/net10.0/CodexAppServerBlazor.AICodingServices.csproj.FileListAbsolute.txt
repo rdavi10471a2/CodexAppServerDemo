@@ -1,0 +1,6 @@
+C:\CodexAppServerWinForms_corrected\.artifacts\altobj\Debug\net10.0\CodexAppServerBlazor.AICodingServices.csproj.AssemblyReference.cache
+C:\CodexAppServerWinForms_corrected\.artifacts\altobj\Debug\net10.0\CodexAppServerBlazor.AICodingServices.GeneratedMSBuildEditorConfig.editorconfig
+C:\CodexAppServerWinForms_corrected\.artifacts\altobj\Debug\net10.0\CodexAppServerBlazor.AICodingServices.AssemblyInfoInputs.cache
+C:\CodexAppServerWinForms_corrected\.artifacts\altobj\Debug\net10.0\CodexAppServerBlazor.AICodingServices.AssemblyInfo.cs
+C:\CodexAppServerWinForms_corrected\.artifacts\altobj\Debug\net10.0\CodexAppServerBlazor.AICodingServices.csproj.CoreCompileInputs.cache
+C:\CodexAppServerWinForms_corrected\.artifacts\altobj\Debug\net10.0\CodexAppServerBlazor.AICodingServices.sourcelink.json

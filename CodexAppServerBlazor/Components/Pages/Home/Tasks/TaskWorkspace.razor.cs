@@ -8,6 +8,7 @@ public partial class TaskWorkspace : ComponentBase
 {
     private static readonly MarkdownPipeline MarkdownPipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions()
+        .UseSoftlineBreakAsHardlineBreak()
         .DisableHtml()
         .Build();
 
@@ -17,7 +18,7 @@ public partial class TaskWorkspace : ComponentBase
     private string newComment = string.Empty;
     private string selectedPane = "Task";
     private string selectedStateCode = string.Empty;
-    private string? loadedTaskId;
+    private string? loadedTaskStateKey;
 
     [Parameter]
     public TaskBoardTaskDetailViewModel? Task { get; set; }
@@ -47,7 +48,7 @@ public partial class TaskWorkspace : ComponentBase
     {
         if (Task is null)
         {
-            loadedTaskId = null;
+            loadedTaskStateKey = null;
             taskName = string.Empty;
             taskDescription = string.Empty;
             notesMarkdown = string.Empty;
@@ -55,12 +56,14 @@ public partial class TaskWorkspace : ComponentBase
             return;
         }
 
-        if (loadedTaskId is not null && loadedTaskId.Equals(Task.Id, StringComparison.Ordinal))
+        string stateKey = BuildTaskStateKey(Task);
+        if (loadedTaskStateKey is not null
+            && loadedTaskStateKey.Equals(stateKey, StringComparison.Ordinal))
         {
             return;
         }
 
-        loadedTaskId = Task.Id;
+        loadedTaskStateKey = stateKey;
         taskName = Task.Name;
         taskDescription = Task.Description;
         notesMarkdown = Task.NotesMarkdown;
@@ -130,5 +133,18 @@ public partial class TaskWorkspace : ComponentBase
         }
 
         return Markdown.ToHtml(markdown, MarkdownPipeline);
+    }
+
+    private static string BuildTaskStateKey(TaskBoardTaskDetailViewModel task)
+    {
+        return string.Join(
+            "|",
+            task.Id,
+            task.Name,
+            task.Description,
+            task.StateCode,
+            task.UpdatedLabel,
+            task.NotesMarkdown,
+            task.AgentNotesMarkdown);
     }
 }

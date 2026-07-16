@@ -143,10 +143,10 @@ public sealed class CodingServicesSettingsProviderTests
     }
 
     [Theory]
-    [InlineData(null, "http://localhost:6278")]
-    [InlineData(" http://localhost:6278/ ", "http://localhost:6278")]
-    [InlineData("http://127.0.0.1:6278", "http://127.0.0.1:6278")]
-    [InlineData("http://[::1]:6278", "http://[::1]:6278")]
+    [InlineData(null, "http://localhost:6289")]
+    [InlineData(" http://localhost:6289/ ", "http://localhost:6289")]
+    [InlineData("http://127.0.0.1:6289", "http://127.0.0.1:6289")]
+    [InlineData("http://[::1]:6289", "http://[::1]:6289")]
     public void NormalizeLocalUrl_accepts_loopback_urls(string? configuredUrl, string expectedUrl)
     {
         string normalizedUrl = McpHostFactory.NormalizeLocalUrl(configuredUrl, McpHostFactory.DefaultLocalMcpUrl);
@@ -155,11 +155,11 @@ public sealed class CodingServicesSettingsProviderTests
     }
 
     [Theory]
-    [InlineData("http://0.0.0.0:6278")]
-    [InlineData("http://192.168.1.10:6278")]
-    [InlineData("http://example.com:6278")]
-    [InlineData("ftp://localhost:6278")]
-    [InlineData("http://localhost:6278/mcp")]
+    [InlineData("http://0.0.0.0:6289")]
+    [InlineData("http://192.168.1.10:6289")]
+    [InlineData("http://example.com:6289")]
+    [InlineData("ftp://localhost:6289")]
+    [InlineData("http://localhost:6289/mcp")]
     public void NormalizeLocalUrl_rejects_nonlocal_or_invalid_urls(string configuredUrl)
     {
         Assert.Throws<InvalidOperationException>(() =>

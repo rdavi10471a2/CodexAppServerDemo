@@ -14,6 +14,6 @@ dotnet run --project $projectPath -- `
   --BlazorHost:Url=http://localhost:5215 `
   --Mcp:Url=http://localhost:6289 `
   --Workspace:DefaultCwd=$WorkspaceRoot `
-  --Workspace:PersistencePath=runtime/app-state/selected-workspace-child.txt `
+  --Workspace:PersistencePath=runtime/app-state/selected-workspace.txt `
   --CodingServices:RuntimeRoot="$repoRoot\runtime" `
   --CodingServices:WatchedSolutionPath=$WatchedSolutionPath

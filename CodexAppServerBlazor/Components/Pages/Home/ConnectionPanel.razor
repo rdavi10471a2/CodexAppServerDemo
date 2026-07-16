@@ -339,10 +339,10 @@
     {
         get
         {
-            if (string.IsNullOrWhiteSpace(McpUrl))
-            {
-                return "http://localhost:6278";
-            }
+              if (string.IsNullOrWhiteSpace(McpUrl))
+              {
+                return "http://localhost:6289";
+              }
 
             return McpUrl.Trim().TrimEnd('/');
         }

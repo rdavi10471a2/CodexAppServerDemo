@@ -63,19 +63,17 @@ public sealed class WorkflowTaskBoardRepository
             {
                 taskNumber = GetNextTaskNumber(connection, transaction);
                 string stateCode = HasAnyActiveTask(connection, transaction) ? "Proposed" : "Active";
-                string? notesPath = null;
-                if (!string.IsNullOrWhiteSpace(notesMarkdown))
-                {
-                    notesPath = GetTaskNotesPath(taskId, taskNumber, slug, TaskNoteKind.User);
-                    File.WriteAllText(notesPath, notesMarkdown);
-                }
+                string notesPath = GetTaskNotesPath(taskId, taskNumber, slug, TaskNoteKind.User);
+                string agentNotesPath = GetTaskNotesPath(taskId, taskNumber, slug, TaskNoteKind.Agent);
+                File.WriteAllText(notesPath, notesMarkdown ?? string.Empty);
+                File.WriteAllText(agentNotesPath, string.Empty);
 
                 using (SqliteCommand command = connection.CreateCommand())
                 {
                     command.Transaction = transaction;
                     command.CommandText = """
-                        insert into workflow_tasks(id, task_number, name, description, short_name, slug, state_code, notes_markdown_path, created_at, updated_at, activated_at)
-                        values ($id, $taskNumber, $name, $description, $shortName, $slug, $stateCode, $notesMarkdownPath, $createdAt, $updatedAt, $activatedAt);
+                        insert into workflow_tasks(id, task_number, name, description, short_name, slug, state_code, notes_markdown_path, agent_notes_markdown_path, created_at, updated_at, activated_at)
+                        values ($id, $taskNumber, $name, $description, $shortName, $slug, $stateCode, $notesMarkdownPath, $agentNotesMarkdownPath, $createdAt, $updatedAt, $activatedAt);
                         """;
                     command.Parameters.AddWithValue("$id", taskId);
                     command.Parameters.AddWithValue("$taskNumber", taskNumber);
@@ -84,7 +82,8 @@ public sealed class WorkflowTaskBoardRepository
                     command.Parameters.AddWithValue("$shortName", normalizedShortName);
                     command.Parameters.AddWithValue("$slug", slug);
                     command.Parameters.AddWithValue("$stateCode", stateCode);
-                    AddNullable(command, "$notesMarkdownPath", notesPath);
+                    command.Parameters.AddWithValue("$notesMarkdownPath", notesPath);
+                    command.Parameters.AddWithValue("$agentNotesMarkdownPath", agentNotesPath);
                     command.Parameters.AddWithValue("$createdAt", now);
                     command.Parameters.AddWithValue("$updatedAt", now);
                     if (stateCode.Equals("Active", StringComparison.Ordinal))
@@ -100,6 +99,8 @@ public sealed class WorkflowTaskBoardRepository
                 }
 
                 InsertEvent(connection, taskId, "Created", "Task created.", null, now, transaction);
+                InsertEvent(connection, taskId, "NotesUpdated", "Task notes initialized.", null, now, transaction);
+                InsertEvent(connection, taskId, "AgentNotesUpdated", "Agent notes initialized.", null, now, transaction);
                 transaction.Commit();
             }
 
@@ -126,6 +127,7 @@ public sealed class WorkflowTaskBoardRepository
                 string shortName = NormalizeShortName("InitializeWorkflow", name, taskId);
                 string slug = CreateSlug(shortName, taskId);
                 string notesPath = GetTaskNotesPath(taskId, taskNumber, slug, TaskNoteKind.User);
+                string agentNotesPath = GetTaskNotesPath(taskId, taskNumber, slug, TaskNoteKind.Agent);
                 File.WriteAllText(
                     notesPath,
                     """
@@ -135,13 +137,14 @@ public sealed class WorkflowTaskBoardRepository
 
                     Use it to shape the task-driven workflow, current-task context loading, and task memory update loop.
                     """);
+                File.WriteAllText(agentNotesPath, string.Empty);
 
                 using (SqliteCommand command = connection.CreateCommand())
                 {
                     command.Transaction = transaction;
                     command.CommandText = """
-                        insert into workflow_tasks(id, task_number, name, description, short_name, slug, state_code, notes_markdown_path, created_at, updated_at, activated_at)
-                        values ($id, $taskNumber, $name, $description, $shortName, $slug, 'Active', $notesMarkdownPath, $createdAt, $updatedAt, $activatedAt);
+                        insert into workflow_tasks(id, task_number, name, description, short_name, slug, state_code, notes_markdown_path, agent_notes_markdown_path, created_at, updated_at, activated_at)
+                        values ($id, $taskNumber, $name, $description, $shortName, $slug, 'Active', $notesMarkdownPath, $agentNotesMarkdownPath, $createdAt, $updatedAt, $activatedAt);
                         """;
                     command.Parameters.AddWithValue("$id", taskId);
                     command.Parameters.AddWithValue("$taskNumber", taskNumber);
@@ -150,6 +153,7 @@ public sealed class WorkflowTaskBoardRepository
                     command.Parameters.AddWithValue("$shortName", shortName);
                     command.Parameters.AddWithValue("$slug", slug);
                     command.Parameters.AddWithValue("$notesMarkdownPath", notesPath);
+                    command.Parameters.AddWithValue("$agentNotesMarkdownPath", agentNotesPath);
                     command.Parameters.AddWithValue("$createdAt", now);
                     command.Parameters.AddWithValue("$updatedAt", now);
                     command.Parameters.AddWithValue("$activatedAt", now);
