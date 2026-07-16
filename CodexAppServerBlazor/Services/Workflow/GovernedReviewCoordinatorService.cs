@@ -155,7 +155,11 @@ public sealed record GovernedReviewResolution(
     bool Completed,
     bool AcceptedWithOverride,
     int RemainingPendingCount,
-    string Message);
+    string Message,
+    bool NotesUpdateRequested = false,
+    string? UserNotesPath = null,
+    string? AgentNotesPath = null,
+    string? NotesInstruction = null);
 
 public sealed record GovernedReviewPendingRequest(
     GovernedReviewRequest Request,

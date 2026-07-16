@@ -184,6 +184,10 @@
     background: #fbfdff;
 }
 
+.token-summary-stack {
+    gap: 10px;
+}
+
 .token-summary-header,
 .token-summary-inline {
     display: flex;
@@ -211,9 +215,17 @@
     font-weight: 700;
 }
 
+.token-summary-subtitle {
+    color: #607893;
+    font-size: .72rem;
+    font-weight: 900;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+}
+
 .token-grid {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 6px;
 }
 
@@ -228,6 +240,26 @@
 .token-grid strong,
 .token-grid span {
     display: block;
+}
+
+.token-files {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.token-files small {
+    color: #607893;
+    font-size: .78rem;
+}
+
+.token-files code {
+    color: #1b3654;
+    background: #eef4f8;
+    border: 1px solid #d7e1ea;
+    border-radius: 999px;
+    padding: 3px 8px;
+    font-size: .74rem;
 }
 
 .runtime-status-list {

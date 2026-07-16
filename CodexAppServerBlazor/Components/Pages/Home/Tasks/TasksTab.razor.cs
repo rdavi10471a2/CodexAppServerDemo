@@ -203,16 +203,6 @@ public partial class TasksTab : ComponentBase, IAsyncDisposable
         await Task.CompletedTask;
     }
 
-    private async Task AddFile(TaskFileAddRequest request)
-    {
-        Execute(() =>
-        {
-            TaskBoardViewService.AddFile(WorkspaceRoot, request.TaskId, request.RelativePath, request.Intent, request.FileRole);
-            Load(request.TaskId);
-        });
-        await Task.CompletedTask;
-    }
-
     private async Task AddComment(string message)
     {
         if (model.SelectedTask is null)

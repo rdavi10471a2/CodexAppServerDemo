@@ -119,6 +119,15 @@
     background: #f8fbfd;
 }
 
+.assistant-inline-checkbox {
+    align-items: center;
+    display: flex;
+    gap: 8px;
+    color: #526a82;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
 .transcript-task-field {
     display: grid;
     gap: 6px;
@@ -515,6 +524,19 @@
     color: #526a82;
     font-size: .8rem;
     font-weight: 700;
+}
+
+.assistant-inline-checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #526a82;
+    font-size: .8rem;
+    font-weight: 700;
+}
+
+.assistant-inline-checkbox input[type="checkbox"] {
+    margin: 0;
 }
 
 .mode-toggle-warning {

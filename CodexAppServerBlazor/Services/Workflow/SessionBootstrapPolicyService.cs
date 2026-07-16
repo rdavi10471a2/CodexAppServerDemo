@@ -11,9 +11,10 @@ public sealed class SessionBootstrapPolicyService
         this.hostEnvironment = hostEnvironment;
     }
 
-    public SessionBootstrapPolicy LoadPolicy()
+    public SessionBootstrapPolicy LoadPolicy(WorkflowTurnMode mode)
     {
         string? bootstrapPath = configuration["WorkflowPolicy:SessionBootstrapPath"];
+        string? editGuidancePath = configuration["WorkflowPolicy:EditToolGuidancePath"];
         string? workedExamplesPath = configuration["WorkflowPolicy:WorkedExamplesPath"];
         string? hostAgentsPath = configuration["WorkflowPolicy:HostAgentsPath"];
 
@@ -25,6 +26,10 @@ public sealed class SessionBootstrapPolicyService
             workedExamplesPath,
             defaultRelativePath: Path.Combine("docs", "policy", "CS-WorkedExamples.txt"),
             label: "worked examples");
+        LoadedPolicyText editGuidance = LoadOptionalText(
+            editGuidancePath,
+            defaultRelativePath: Path.Combine("docs", "policy", "CS-EditToolGuidance.txt"),
+            label: "edit tool guidance");
         LoadedPolicyText hostAgents = LoadOptionalText(
             hostAgentsPath,
             defaultRelativePath: Path.Combine("..", "AGENTS.md"),
@@ -58,7 +63,9 @@ public sealed class SessionBootstrapPolicyService
 
         if (!string.IsNullOrWhiteSpace(bootstrap.Text))
         {
-            sections.Add(bootstrap.Text);
+            sections.Add(mode == WorkflowTurnMode.Work
+                ? bootstrap.Text
+                : BuildDiscussBootstrap(bootstrap.Text));
             if (!string.IsNullOrWhiteSpace(bootstrap.SourcePath))
             {
                 sourcePaths.Add(bootstrap.SourcePath);
@@ -71,7 +78,22 @@ public sealed class SessionBootstrapPolicyService
             statusParts.Add(bootstrap.Status);
         }
 
-        if (!string.IsNullOrWhiteSpace(workedExamples.Text))
+        if (mode == WorkflowTurnMode.Work && !string.IsNullOrWhiteSpace(editGuidance.Text))
+        {
+            sections.Add("Coding Services edit-tool guidance:" + Environment.NewLine + Environment.NewLine + editGuidance.Text);
+            if (!string.IsNullOrWhiteSpace(editGuidance.SourcePath))
+            {
+                sourcePaths.Add(editGuidance.SourcePath);
+            }
+
+            statusParts.Add("Edit tool guidance loaded.");
+        }
+        else if (mode == WorkflowTurnMode.Work)
+        {
+            statusParts.Add(editGuidance.Status);
+        }
+
+        if (mode == WorkflowTurnMode.Work && !string.IsNullOrWhiteSpace(workedExamples.Text))
         {
             sections.Add("Coding Services worked examples:" + Environment.NewLine + Environment.NewLine + workedExamples.Text);
             if (!string.IsNullOrWhiteSpace(workedExamples.SourcePath))
@@ -81,7 +103,7 @@ public sealed class SessionBootstrapPolicyService
 
             statusParts.Add("Worked examples loaded.");
         }
-        else
+        else if (mode == WorkflowTurnMode.Work)
         {
             statusParts.Add(workedExamples.Status);
         }
@@ -97,6 +119,22 @@ public sealed class SessionBootstrapPolicyService
             : string.Join(" ", statusParts.Where(part => !string.IsNullOrWhiteSpace(part)));
 
         return new SessionBootstrapPolicy(sourcePath, prompt, status);
+    }
+
+    private static string BuildDiscussBootstrap(string bootstrapText)
+    {
+        string discoveryOnly = TakeSectionPrefix(bootstrapText, "Governed edit protocol");
+        return discoveryOnly
+            + Environment.NewLine + Environment.NewLine
+            + "Discuss-mode constraint" + Environment.NewLine + Environment.NewLine
+            + "- This is a Discuss turn. Keep the context focused on workspace authority, live discovery, and review/reporting context." + Environment.NewLine
+            + "- Do not rely on edit-tool cookbooks, mutation ranking, or review-decision mechanics unless the user explicitly switches to implementation work.";
+    }
+
+    private static string TakeSectionPrefix(string text, string stopHeading)
+    {
+        int stopIndex = text.IndexOf(stopHeading, StringComparison.Ordinal);
+        return stopIndex <= 0 ? text : text[..stopIndex].TrimEnd();
     }
 
     private LoadedPolicyText LoadOptionalText(string? configuredPath, string? defaultRelativePath, string label)

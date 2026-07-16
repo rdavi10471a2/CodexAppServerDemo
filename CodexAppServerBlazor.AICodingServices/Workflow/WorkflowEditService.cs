@@ -2,6 +2,7 @@ using CodexAppServerBlazor.AICodingServices.Core;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace CodexAppServerBlazor.AICodingServices.Workflow;
 
@@ -522,7 +523,7 @@ public sealed class WorkflowEditService
         }
 
         string workingText = File.ReadAllText(manifest.WorkingFilePath);
-        string lineEnding = DetectDominantLineEnding(workingText);
+        string lineEnding = ResolvePreferredLineEnding(fullWatchedPath);
         string normalizedOldText = NormalizeLineEndingsForFile(oldText, lineEnding);
         string normalizedNewText = NormalizeLineEndingsForFile(newText, lineEnding);
         int matchCount = CountOccurrences(workingText, oldText);
@@ -654,7 +655,7 @@ public sealed class WorkflowEditService
             throw new InvalidOperationException("Extracted old span text hash did not match expectedOldTextHash.");
         }
 
-        string lineEnding = DetectDominantLineEnding(text);
+        string lineEnding = ResolvePreferredLineEnding(fullWatchedPath);
         string updatedText = text[..startIndex] + NormalizeLineEndingsForFile(newText, lineEnding) + text[endIndex..];
         return WriteCandidateContent(fullWatchedPath, manifest, updatedText, manifestJson, validateOverlay);
     }
@@ -732,12 +733,7 @@ public sealed class WorkflowEditService
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(manifest.WorkingFilePath) ?? ".");
-        string existingText = File.Exists(manifest.WorkingFilePath)
-            ? File.ReadAllText(manifest.WorkingFilePath)
-            : string.Empty;
-        string lineEnding = string.IsNullOrEmpty(existingText)
-            ? DetectDominantLineEnding(content)
-            : DetectDominantLineEnding(existingText);
+        string lineEnding = ResolvePreferredLineEnding(fullWatchedPath);
         File.WriteAllText(manifest.WorkingFilePath, NormalizeLineEndingsForFile(content, lineEnding));
 
         EditOverlayValidationResult overlayValidation = validateOverlay
@@ -1581,6 +1577,145 @@ public sealed class WorkflowEditService
         string withoutCrLf = text.Replace("\r\n", string.Empty, StringComparison.Ordinal);
         int lfOnlyCount = CountOccurrences(withoutCrLf, "\n");
         return crlfCount >= lfOnlyCount ? "\r\n" : "\n";
+    }
+
+    private static string ResolvePreferredLineEnding(string watchedFilePath)
+    {
+        string? configured = TryResolveEditorConfigEndOfLine(watchedFilePath);
+        return configured?.ToLowerInvariant() switch
+        {
+            "lf" => "\n",
+            "cr" => "\r",
+            "crlf" => "\r\n",
+            _ => "\r\n"
+        };
+    }
+
+    private static string? TryResolveEditorConfigEndOfLine(string watchedFilePath)
+    {
+        string fullPath = Path.GetFullPath(watchedFilePath);
+        DirectoryInfo? current = new FileInfo(fullPath).Directory;
+        if (current is null)
+        {
+            return null;
+        }
+
+        List<string> configPaths = [];
+        while (current is not null)
+        {
+            string configPath = Path.Combine(current.FullName, ".editorconfig");
+            if (File.Exists(configPath))
+            {
+                configPaths.Add(configPath);
+                if (EditorConfigDeclaresRoot(configPath))
+                {
+                    break;
+                }
+            }
+
+            current = current.Parent;
+        }
+
+        configPaths.Reverse();
+        string? endOfLine = null;
+        foreach (string configPath in configPaths)
+        {
+            endOfLine = ApplyEditorConfigEndOfLine(configPath, fullPath, endOfLine);
+        }
+
+        return endOfLine;
+    }
+
+    private static bool EditorConfigDeclaresRoot(string configPath)
+    {
+        foreach (string rawLine in File.ReadLines(configPath))
+        {
+            string line = rawLine.Trim();
+            if (string.IsNullOrEmpty(line) || line.StartsWith('#') || line.StartsWith(';'))
+            {
+                continue;
+            }
+
+            if (line.StartsWith('['))
+            {
+                return false;
+            }
+
+            int equalsIndex = line.IndexOf('=');
+            if (equalsIndex < 0)
+            {
+                continue;
+            }
+
+            string key = line[..equalsIndex].Trim();
+            string value = line[(equalsIndex + 1)..].Trim();
+            if (key.Equals("root", StringComparison.OrdinalIgnoreCase))
+            {
+                return value.Equals("true", StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        return false;
+    }
+
+    private static string? ApplyEditorConfigEndOfLine(string configPath, string fullPath, string? currentValue)
+    {
+        string configDirectory = Path.GetDirectoryName(configPath) ?? Path.GetDirectoryName(fullPath) ?? ".";
+        string relativePath = Path.GetRelativePath(configDirectory, fullPath).Replace('\\', '/');
+        string fileName = Path.GetFileName(fullPath);
+        string? activePattern = null;
+        string? value = currentValue;
+
+        foreach (string rawLine in File.ReadLines(configPath))
+        {
+            string line = rawLine.Trim();
+            if (string.IsNullOrEmpty(line) || line.StartsWith('#') || line.StartsWith(';'))
+            {
+                continue;
+            }
+
+            if (line.StartsWith('[') && line.EndsWith(']'))
+            {
+                activePattern = line[1..^1].Trim();
+                continue;
+            }
+
+            if (activePattern is null || !MatchesEditorConfigPattern(activePattern, relativePath, fileName))
+            {
+                continue;
+            }
+
+            int equalsIndex = line.IndexOf('=');
+            if (equalsIndex < 0)
+            {
+                continue;
+            }
+
+            string key = line[..equalsIndex].Trim();
+            string propertyValue = line[(equalsIndex + 1)..].Trim();
+            if (key.Equals("end_of_line", StringComparison.OrdinalIgnoreCase))
+            {
+                value = propertyValue;
+            }
+        }
+
+        return value;
+    }
+
+    private static bool MatchesEditorConfigPattern(string pattern, string relativePath, string fileName)
+    {
+        pattern = pattern.Replace('\\', '/');
+        return MatchesWildcard(pattern, relativePath)
+            || MatchesWildcard(pattern, fileName);
+    }
+
+    private static bool MatchesWildcard(string pattern, string candidate)
+    {
+        string regexPattern = "^" + Regex.Escape(pattern)
+            .Replace(@"\*\*", ".*", StringComparison.Ordinal)
+            .Replace(@"\*", @"[^/]*", StringComparison.Ordinal)
+            .Replace(@"\?", ".", StringComparison.Ordinal) + "$";
+        return Regex.IsMatch(candidate.Replace('\\', '/'), regexPattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     }
 
     private static string NormalizeLineEndingsForFile(string text, string lineEnding)

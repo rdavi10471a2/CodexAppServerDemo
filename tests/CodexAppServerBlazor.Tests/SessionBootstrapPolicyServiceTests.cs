@@ -22,8 +22,13 @@ public sealed class SessionBootstrapPolicyServiceTests
             bootstrapPath,
             """
             Bootstrap rule.
+            
+            Governed edit protocol
+            
             - In Work mode, treat the selected workspace source tree as MCP-governed write-only.
             """);
+        string editGuidancePath = Path.Combine(contentRoot, "CS-EditToolGuidance.txt");
+        File.WriteAllText(editGuidancePath, "Edit guidance.");
         string examplesPath = Path.Combine(contentRoot, "CS-WorkedExamples.txt");
         File.WriteAllText(
             examplesPath,
@@ -36,6 +41,7 @@ public sealed class SessionBootstrapPolicyServiceTests
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["WorkflowPolicy:SessionBootstrapPath"] = "CS-SessionBootstrap.txt",
+                ["WorkflowPolicy:EditToolGuidancePath"] = "CS-EditToolGuidance.txt",
                 ["WorkflowPolicy:WorkedExamplesPath"] = "CS-WorkedExamples.txt"
             })
             .Build();
@@ -44,18 +50,21 @@ public sealed class SessionBootstrapPolicyServiceTests
             configuration,
             new HostingEnvironmentStub(contentRoot));
 
-        SessionBootstrapPolicy policy = service.LoadPolicy();
+        SessionBootstrapPolicy policy = service.LoadPolicy(WorkflowTurnMode.Work);
 
         Assert.NotNull(policy.PromptText);
         Assert.Contains("Effective Coding Services host governance for this session:", policy.PromptText, StringComparison.Ordinal);
         Assert.Contains("Coding Services host AGENTS.md policy:", policy.PromptText, StringComparison.Ordinal);
         Assert.Contains("Host rule.", policy.PromptText, StringComparison.Ordinal);
         Assert.Contains("Bootstrap rule.", policy.PromptText, StringComparison.Ordinal);
+        Assert.Contains("Coding Services edit-tool guidance:", policy.PromptText, StringComparison.Ordinal);
+        Assert.Contains("Edit guidance.", policy.PromptText, StringComparison.Ordinal);
         Assert.Contains("Coding Services worked examples:", policy.PromptText, StringComparison.Ordinal);
         Assert.Contains("Example rule.", policy.PromptText, StringComparison.Ordinal);
         Assert.Contains("MCP-governed write-only", policy.PromptText, StringComparison.Ordinal);
         Assert.Contains(hostAgentsPath, policy.SourcePath, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(bootstrapPath, policy.SourcePath, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(editGuidancePath, policy.SourcePath, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(examplesPath, policy.SourcePath, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -77,7 +86,7 @@ public sealed class SessionBootstrapPolicyServiceTests
             configuration,
             new HostingEnvironmentStub(contentRoot));
 
-        SessionBootstrapPolicy policy = service.LoadPolicy();
+        SessionBootstrapPolicy policy = service.LoadPolicy(WorkflowTurnMode.Discuss);
 
         Assert.NotNull(policy.PromptText);
         Assert.Contains("active session policy", policy.PromptText, StringComparison.OrdinalIgnoreCase);

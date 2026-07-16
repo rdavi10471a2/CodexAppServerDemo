@@ -345,7 +345,7 @@ public sealed class WorkflowTaskBoardViewServiceTests
     }
 
     [Fact]
-    public void GetBoard_uses_distinct_task_database_per_selected_workspace_without_local_solution()
+    public void GetBoard_uses_host_runtime_task_database_when_selected_workspace_has_no_local_solution()
     {
         using TemporaryRepository configuredRepository = TemporaryRepository.Create();
         using TemporaryRepository firstWorkspace = TemporaryRepository.CreateWithoutSolution();
@@ -365,13 +365,13 @@ public sealed class WorkflowTaskBoardViewServiceTests
         TaskBoardViewModel firstBoard = service.GetBoard(firstWorkspace.RootPath, null);
         TaskBoardViewModel secondBoard = service.GetBoard(secondWorkspace.RootPath, null);
 
-        Assert.NotEqual(firstBoard.DatabasePath, secondBoard.DatabasePath);
+        Assert.Equal(firstBoard.DatabasePath, secondBoard.DatabasePath);
         Assert.StartsWith(
-            Path.Combine(firstWorkspace.RootPath, "runtime"),
+            Path.Combine(configuredRepository.RootPath, "runtime"),
             firstBoard.DatabasePath,
             StringComparison.OrdinalIgnoreCase);
         Assert.StartsWith(
-            Path.Combine(secondWorkspace.RootPath, "runtime"),
+            Path.Combine(configuredRepository.RootPath, "runtime"),
             secondBoard.DatabasePath,
             StringComparison.OrdinalIgnoreCase);
     }

@@ -5,32 +5,31 @@
 @inject DialogService DialogService
 @inject IStagedReviewPageService StagedReviewPageService
 
-<div class="staged-review-dialog">
+<div class="diff-modal">
     @if (actionBusy)
     {
-        <div class="staged-review-busy-overlay" role="status" aria-live="polite" aria-busy="true">
-            <div class="staged-review-busy-card">
-                <div class="staged-review-busy-spinner"></div>
+        <div class="diff-modal-busy-overlay" role="status" aria-live="polite" aria-busy="true">
+            <div class="diff-modal-busy-card">
+                <div class="diff-modal-busy-spinner"></div>
                 <strong>Applying review decision</strong>
                 <span>Updating source, rebuilding review state, and waiting for reindex if needed.</span>
             </div>
         </div>
     }
 
-    <div class="staged-review-dialog-header">
+    <div class="diff-modal-header">
         <div>
-            <h3>@DialogTitle</h3>
             <p>@DialogSubtitle</p>
         </div>
-        <div class="staged-review-dialog-actions">
-            <button class="staged-review-secondary-action"
+        <div class="diff-modal-header-actions">
+            <button class="diff-modal-secondary-action"
                     type="button"
                     @onclick="RefreshReview">
                 Refresh
             </button>
             @if (CanCloseDialog)
             {
-                <button class="staged-review-secondary-action"
+                <button class="diff-modal-secondary-action"
                         type="button"
                         @onclick="CloseDialogAsync">
                     Close
@@ -41,36 +40,36 @@
 
     @if (!string.IsNullOrWhiteSpace(errorMessage))
     {
-        <div class="staged-review-error">@errorMessage</div>
+        <div class="diff-modal-error">@errorMessage</div>
     }
 
     @if (selectedModel is not null && selectedModel.PreMergeValidationIsError && !selectedModel.PreMergeValidationForceApproved)
     {
-        <div class="staged-review-warning">
+        <div class="diff-modal-warning">
             <strong>Pre-merge validation failed.</strong>
             <span>Normal accept is disabled for this staged record. Use <em>Accept With Validation Override</em> only if you want to merge despite that failure.</span>
         </div>
     }
 
-    <div class="staged-review-dialog-layout @(UseSessionFlow ? "single-record" : string.Empty)">
+    <div class="diff-modal-layout @(UseSessionFlow ? "single-record" : string.Empty)">
         @if (!UseSessionFlow)
         {
-            <aside class="staged-review-queue">
-                <div class="staged-review-queue-header">
+            <aside class="diff-modal-queue">
+                <div class="diff-modal-queue-header">
                     <strong>Pending</strong>
                     <span>@pendingItems.Count item(s)</span>
                 </div>
 
                 @if (pendingItems.Count == 0)
                 {
-                    <div class="staged-review-empty">No pending staged edits.</div>
+                    <div class="diff-modal-empty">No pending staged edits.</div>
                 }
                 else
                 {
-                    <div class="staged-review-queue-list">
+                    <div class="diff-modal-queue-list">
                         @foreach (StagedReviewQueueItem item in pendingItems)
                         {
-                            <button class="staged-review-queue-item @(selectedRecordId == item.StagedRecordId ? "active" : string.Empty)"
+                            <button class="diff-modal-queue-item @(selectedRecordId == item.StagedRecordId ? "active" : string.Empty)"
                                     type="button"
                                     @onclick="@(() => SelectRecord(item.StagedRecordId))">
                                 <strong>@item.RelativePath</strong>
@@ -83,24 +82,25 @@
             </aside>
         }
 
-        <section class="staged-review-detail @(UseSessionFlow ? "staged-review-detail-full" : string.Empty)">
+        <section class="diff-modal-detail @(UseSessionFlow ? "diff-modal-detail-full" : string.Empty)">
             @if (selectedModel is null)
             {
-                <div class="staged-review-empty">Select a staged candidate to inspect it.</div>
+                <div class="diff-modal-empty">Select a staged candidate to inspect it.</div>
             }
             else if (selectedModel.IsSessionComplete)
             {
-                <div class="staged-review-complete">
+                <div class="diff-modal-complete">
                     <strong>Review complete.</strong>
                     <span>All staged review items for this edit session have been resolved.</span>
                 </div>
             }
             else
             {
-                <div class="staged-review-meta">
+                <div class="diff-modal-meta">
                     <div>
                         <span class="eyebrow">Record</span>
                         <strong>@selectedModel.RelativePath</strong>
+                        <small>@selectedModel.WatchedFilePath</small>
                     </div>
                     <div>
                         <span class="eyebrow">Status</span>
@@ -116,44 +116,71 @@
                     </div>
                 </div>
 
-                <section class="staged-review-diff-shell" aria-label="Side by side staged review">
-                    <div class="staged-review-diff-header">
-                        <strong>Proposed Candidate</strong>
-                    </div>
-                    <div class="staged-review-diff-header">
-                        <strong>Current Source</strong>
+                <section class="diff-viewer-shell" aria-label="Experimental side by side staged review">
+                    <div class="diff-viewer-header">
+                        <div class="left-header">
+                            <div class="diff-viewer-header-copy">
+                                <h5>Edit Candidate</h5>
+                                <small>@selectedModel.ProposedPath</small>
+                            </div>
+                        </div>
+                        <div class="right-header">
+                            <div class="diff-viewer-header-copy">
+                                <h5>Current Source</h5>
+                                <small>@selectedModel.CurrentPath</small>
+                            </div>
+                        </div>
                     </div>
 
-                    @for (int index = 0; index < LineCount; index++)
-                    {
-                        DiffPiece? proposedLine = GetProposedLine(index);
-                        DiffPiece? currentLine = GetCurrentLine(index);
+                    <div class="diff-viewer-content">
+                        @if (diffModel is not null)
+                        {
+                            <div class="left-panel">
+                                @foreach (DiffPiece line in diffModel.NewText.Lines)
+                                {
+                                    <div class="line @GetLineClass(line.Type)">
+                                        <span class="line-number">@(line.Position?.ToString() ?? string.Empty)</span>
+                                        <span class="line-content">@line.Text</span>
+                                    </div>
+                                }
+                            </div>
 
-                        <div class="staged-review-diff-line proposed @GetLineClass(proposedLine)">
-                            <span class="staged-review-line-number">@GetLineNumber(proposedLine)</span>
-                            <code>@GetLineText(proposedLine)</code>
-                        </div>
-                        <div class="staged-review-diff-line current @GetLineClass(currentLine)">
-                            <span class="staged-review-line-number">@GetLineNumber(currentLine)</span>
-                            <code>@GetLineText(currentLine)</code>
-                        </div>
-                    }
+                            <div class="right-panel">
+                                @foreach (DiffPiece line in diffModel.OldText.Lines)
+                                {
+                                    <div class="line @GetLineClass(line.Type)">
+                                        <span class="line-number">@(line.Position?.ToString() ?? string.Empty)</span>
+                                        <span class="line-content">@line.Text</span>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
                 </section>
 
-                <div class="staged-review-detail-actions">
-                    <button class="staged-review-primary-action"
+                <div class="diff-modal-notes-option">
+                    <label class="diff-modal-notes-checkbox">
+                        <input type="checkbox"
+                               @bind="updateTaskNotesRequested"
+                               disabled="@actionBusy" />
+                        <span>Update task notes on accept</span>
+                    </label>
+                </div>
+
+                <div class="diff-modal-detail-actions">
+                    <button class="diff-modal-primary-action"
                             type="button"
                             disabled="@(!CanAcceptNormally || actionBusy)"
                             @onclick="AcceptSelectedAsync">
                         Accept Proposed
                     </button>
-                    <button class="staged-review-warning-action"
+                    <button class="diff-modal-warning-action"
                             type="button"
                             disabled="@(!CanForceAccept || actionBusy)"
                             @onclick="AcceptSelectedWithOverrideAsync">
                         Accept With Validation Override
                     </button>
-                    <button class="staged-review-danger-action"
+                    <button class="diff-modal-danger-action"
                             type="button"
                             disabled="@(selectedModel.IsDecided || actionBusy)"
                             @onclick="RejectSelectedAsync">
@@ -174,14 +201,15 @@
     private string? selectedRecordId;
     private string? errorMessage;
     private bool actionBusy;
+    private bool updateTaskNotesRequested;
+    private bool acceptedWithNotesUpdateRequested;
     private CancellationTokenSource? sessionMonitorCts;
     private Task? sessionMonitorTask;
 
-    private int LineCount => Math.Max(diffModel?.NewText.Lines.Count ?? 0, diffModel?.OldText.Lines.Count ?? 0);
     private bool UseSessionFlow => !string.IsNullOrWhiteSpace(SessionId);
     private string DialogTitle => UseSessionFlow ? "Merge Review" : "Merge Review Queue";
     private string DialogSubtitle => UseSessionFlow
-        ? "Review this edit session in order. It advances through each staged file; close any time to stop reviewing (unresolved files stay pending and the governed review is declined)."
+        ? "Review this edit session in order using the side-by-side merge layout."
         : "Review staged candidates before they become source truth.";
     private bool CanAcceptNormally => selectedModel is not null
         && !selectedModel.IsDecided
@@ -190,9 +218,6 @@
         && !selectedModel.IsDecided
         && selectedModel.PreMergeValidationIsError
         && !selectedModel.PreMergeValidationForceApproved;
-    // The operator can always close/cancel the review. Closing before the queue drains leaves the remaining
-    // staged items pending; the governed review gate treats that as a decline and releases the agent. A
-    // non-closable modal traps the operator when accepts stall, which is exactly the failure this avoids.
     private bool CanCloseDialog => true;
 
     [Parameter]
@@ -208,7 +233,7 @@
     public EventCallback<string> TraceEventRaised { get; set; }
 
     [Parameter]
-    public EventCallback CloseRequested { get; set; }
+    public EventCallback<bool> CloseRequested { get; set; }
 
     protected override void OnParametersSet()
     {
@@ -232,7 +257,7 @@
             $"Operator requested dialog close. SessionId={SessionId ?? "<none>"}; SelectedRecordId={selectedRecordId ?? "<none>"}; PendingCount={pendingItems.Count}.");
         if (CloseRequested.HasDelegate)
         {
-            return CloseRequested.InvokeAsync();
+            return CloseRequested.InvokeAsync(false);
         }
 
         DialogService.Close();
@@ -285,18 +310,13 @@
             await TraceAsync(
                 "accept-click",
                 $"Accept requested. SessionId={SessionId ?? "<none>"}; SelectedRecordId={selectedRecordId}; ForceApproveValidation={forceApproveValidation}; PendingCount={pendingItems.Count}.");
-            await TraceAsync(
-                "accept-before-service",
-                $"Calling StagedReviewPageService.Accept for {selectedRecordId}.");
             StagedReviewPageActionResult result = await Task.Run(
                 () => StagedReviewPageService.Accept(WorkspaceRoot, selectedRecordId, forceApproveValidation));
-            await TraceAsync(
-                "accept-after-service",
-                $"StagedReviewPageService.Accept returned for {selectedRecordId}. Message={result.Message}");
+            if (updateTaskNotesRequested)
+            {
+                acceptedWithNotesUpdateRequested = true;
+            }
             errorMessage = result.Message;
-            await TraceAsync(
-                "accept-result",
-                $"Accept completed. SelectedRecordId={selectedRecordId}; Message={result.Message}");
             await LoadNextStateAsync();
         }
         catch (Exception ex)
@@ -331,18 +351,9 @@
             await TraceAsync(
                 "reject-click",
                 $"Reject requested. SessionId={SessionId ?? "<none>"}; SelectedRecordId={selectedRecordId}; PendingCount={pendingItems.Count}.");
-            await TraceAsync(
-                "reject-before-service",
-                $"Calling StagedReviewPageService.Reject for {selectedRecordId}.");
             StagedReviewPageActionResult result = await Task.Run(
                 () => StagedReviewPageService.Reject(WorkspaceRoot, selectedRecordId));
-            await TraceAsync(
-                "reject-after-service",
-                $"StagedReviewPageService.Reject returned for {selectedRecordId}. Message={result.Message}");
             errorMessage = result.Message;
-            await TraceAsync(
-                "reject-result",
-                $"Reject completed. SelectedRecordId={selectedRecordId}; Message={result.Message}");
             await LoadNextStateAsync();
         }
         catch (Exception ex)
@@ -363,9 +374,6 @@
     {
         LoadReview(preserveSelection: false);
         bool sessionComplete = UseSessionFlow && (selectedModel?.IsSessionComplete ?? false);
-        await TraceAsync(
-            "load-next-state",
-            $"Reloaded review state. SessionId={SessionId ?? "<none>"}; SelectedRecordId={selectedRecordId ?? "<none>"}; PendingCount={pendingItems.Count}; SessionComplete={sessionComplete}; AutoCloseWhenComplete={AutoCloseWhenComplete}.");
         await InvokeAsync(StateHasChanged);
         if (sessionComplete && AutoCloseWhenComplete)
         {
@@ -375,12 +383,9 @@
 
     private Task ForceCloseDialogAsync()
     {
-        _ = TraceAsync(
-            "force-close",
-            $"Dialog force-close requested. SessionId={SessionId ?? "<none>"}; PendingCount={pendingItems.Count}; AutoCloseWhenComplete={AutoCloseWhenComplete}.");
         if (CloseRequested.HasDelegate)
         {
-            return CloseRequested.InvokeAsync();
+            return CloseRequested.InvokeAsync(acceptedWithNotesUpdateRequested);
         }
 
         DialogService.Close();
@@ -456,9 +461,6 @@
             {
                 selectedModel = StagedReviewPageService.LoadNextForSession(WorkspaceRoot, SessionId!);
                 selectedRecordId = selectedModel.IsSessionComplete ? null : selectedModel.StagedRecordId;
-                _ = TraceAsync(
-                    "load-review-session",
-                    $"Loaded session review state. SessionId={SessionId}; PendingCount={pendingItems.Count}; SelectedRecordId={selectedRecordId ?? "<complete>"}; SessionComplete={selectedModel.IsSessionComplete}.");
                 BuildDiff();
                 return;
             }
@@ -478,9 +480,6 @@
 
             selectedModel = StagedReviewPageService.Load(WorkspaceRoot, recordIdToLoad);
             selectedRecordId = recordIdToLoad;
-            _ = TraceAsync(
-                "load-review-record",
-                $"Loaded staged record review. SelectedRecordId={selectedRecordId}; PendingCount={pendingItems.Count}.");
             BuildDiff();
         }
         catch (Exception ex)
@@ -489,9 +488,6 @@
             selectedModel = null;
             selectedRecordId = null;
             errorMessage = ex.Message;
-            _ = TraceAsync(
-                "load-review-error",
-                $"Loading review state failed. SessionId={SessionId ?? "<none>"}; Error={ex.Message}");
             BuildDiff();
         }
     }
@@ -514,57 +510,19 @@
     private void BuildDiff()
     {
         SideBySideDiffBuilder builder = new(new Differ());
-        diffModel = builder.BuildDiffModel(selectedModel?.CurrentText ?? string.Empty, selectedModel?.ProposedText ?? string.Empty);
+        diffModel = builder.BuildDiffModel(
+            selectedModel?.CurrentText ?? string.Empty,
+            selectedModel?.ProposedText ?? string.Empty,
+            ignoreWhitespace: false);
     }
 
-    private DiffPiece? GetProposedLine(int index)
+    private static string GetLineClass(ChangeType changeType)
     {
-        if (diffModel is null || index >= diffModel.NewText.Lines.Count)
-        {
-            return null;
-        }
-
-        return diffModel.NewText.Lines[index];
-    }
-
-    private DiffPiece? GetCurrentLine(int index)
-    {
-        if (diffModel is null || index >= diffModel.OldText.Lines.Count)
-        {
-            return null;
-        }
-
-        return diffModel.OldText.Lines[index];
-    }
-
-    private static string GetLineNumber(DiffPiece? piece)
-    {
-        if (piece is null || piece.Position is null)
-        {
-            return string.Empty;
-        }
-
-        return piece.Position.Value.ToString();
-    }
-
-    private static string GetLineText(DiffPiece? piece)
-    {
-        return piece?.Text ?? string.Empty;
-    }
-
-    private static string GetLineClass(DiffPiece? piece)
-    {
-        if (piece is null)
-        {
-            return "imaginary";
-        }
-
-        return piece.Type switch
+        return changeType switch
         {
             ChangeType.Inserted => "inserted",
             ChangeType.Deleted => "deleted",
             ChangeType.Modified => "modified",
-            ChangeType.Imaginary => "imaginary",
             _ => "unchanged"
         };
     }

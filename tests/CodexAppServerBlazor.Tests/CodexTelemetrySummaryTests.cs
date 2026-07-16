@@ -9,33 +9,34 @@ public sealed class CodexTelemetrySummaryTests
     {
         CodexTelemetrySummary summary = CodexTelemetrySummary.Empty
             .Apply(new TelemetryEvent(
-                InputTokens: 25_000,
-                CachedInputTokens: 20_000,
-                OutputTokens: 500,
-                ReasoningOutputTokens: 50,
+                TurnUsage: new TelemetryUsage(25_000, 20_000, 500, 50, 25_550),
+                SessionUsage: new TelemetryUsage(25_000, 20_000, 500, 50, 25_550),
                 ModelContextWindow: 100_000,
                 PrimaryUsedPercent: null,
                 SecondaryUsedPercent: null,
                 PlanType: null,
+                TurnId: "turn-1",
                 Summary: "tokens"))
             .Apply(new TelemetryEvent(
-                InputTokens: null,
-                CachedInputTokens: null,
-                OutputTokens: null,
-                ReasoningOutputTokens: null,
+                TurnUsage: null,
+                SessionUsage: null,
                 ModelContextWindow: null,
                 PrimaryUsedPercent: 34,
                 SecondaryUsedPercent: 37,
                 PlanType: "prolite",
+                TurnId: null,
                 Summary: "rate"));
 
-        Assert.Equal(25_000, summary.InputTokens);
-        Assert.Equal(20_000, summary.CachedInputTokens);
-        Assert.Equal(500, summary.OutputTokens);
-        Assert.Equal(50, summary.ReasoningOutputTokens);
-        Assert.Equal(100_000, summary.ModelContextWindow);
-        Assert.Equal(34, summary.PrimaryUsedPercent);
-        Assert.Equal(37, summary.SecondaryUsedPercent);
-        Assert.Equal("prolite", summary.PlanType);
+        Assert.Equal(25_000, summary.CurrentTurn.InputTokens);
+        Assert.Equal(20_000, summary.CurrentTurn.CachedInputTokens);
+        Assert.Equal(500, summary.CurrentTurn.OutputTokens);
+        Assert.Equal(50, summary.CurrentTurn.ReasoningOutputTokens);
+        Assert.Equal(25_550, summary.CurrentTurn.TotalTokens);
+        Assert.Equal(100_000, summary.CurrentTurn.ModelContextWindow);
+        Assert.Equal(25_000, summary.SessionTotal.InputTokens);
+        Assert.Equal(34, summary.RateLimits.PrimaryUsedPercent);
+        Assert.Equal(37, summary.RateLimits.SecondaryUsedPercent);
+        Assert.Equal("prolite", summary.RateLimits.PlanType);
+        Assert.Equal("turn-1", summary.LastTurnId);
     }
 }

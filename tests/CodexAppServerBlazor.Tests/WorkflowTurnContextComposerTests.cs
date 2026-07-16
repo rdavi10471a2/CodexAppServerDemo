@@ -59,6 +59,7 @@ public sealed class WorkflowTurnContextComposerTests
         WorkflowSessionState sessionState = new("C:\\Work", WorkflowTurnMode.Work)
         {
             HasAttachedSessionBootstrap = true,
+            SessionBootstrapMode = WorkflowTurnMode.Work,
             HasAttachedWorkspaceContext = true
         };
 
@@ -82,6 +83,7 @@ public sealed class WorkflowTurnContextComposerTests
         Assert.Contains("do not use shell search, broad task-memory scans, or fallback repo scans", envelope.Prompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("direct watched-source reads, get_edit_session_state by itself", envelope.Prompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("EditSessionId, watchedFilePath, workingFilePath, and classification", envelope.Prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("After an accepted governed task review, ask whether the task notes should be updated", envelope.Prompt, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Host bootstrap.", envelope.Prompt, StringComparison.Ordinal);
         Assert.DoesNotContain("Indexed workspace context.", envelope.Prompt, StringComparison.Ordinal);
         Assert.Contains("- Work", envelope.Prompt, StringComparison.Ordinal);

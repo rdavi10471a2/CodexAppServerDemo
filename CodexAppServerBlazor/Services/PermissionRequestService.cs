@@ -172,6 +172,52 @@ public sealed class PermissionRequestService
         }
     }
 
+    public static bool IsWrappedMcpToolRequest(string method, string rawJson)
+    {
+        if (!IsElicitationRequest(method))
+        {
+            return false;
+        }
+
+        try
+        {
+            JsonNode? request = JsonNode.Parse(rawJson);
+            JsonNode? parameters = request?["params"];
+            JsonNode? meta = parameters?["_meta"];
+            return string.Equals(
+                GetStringValue(meta?["codex_approval_kind"]),
+                "mcp_tool_call",
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    public static string? TryGetWrappedMcpToolName(string rawJson)
+    {
+        try
+        {
+            JsonNode? request = JsonNode.Parse(rawJson);
+            JsonNode? parameters = request?["params"];
+            JsonNode? meta = parameters?["_meta"];
+
+            string? toolName = GetStringValue(meta?["tool_name"]);
+            if (!string.IsNullOrWhiteSpace(toolName))
+            {
+                return toolName;
+            }
+
+            string? prompt = GetStringValue(parameters?["message"]) ?? GetStringValue(parameters?["prompt"]);
+            return ExtractToolNameFromPrompt(prompt);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     public static object CreateDenyResponse(string method, bool cancelTurn)
     {
         if (IsElicitationRequest(method))

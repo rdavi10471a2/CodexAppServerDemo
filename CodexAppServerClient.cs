@@ -627,8 +627,9 @@ public sealed class CodexAppServerClient : IAsyncDisposable
 
             case "turn/completed":
             case "turn/failed":
-                ActiveTurnId = null;
+                TryCaptureActiveTurnId(node);
                 Status?.Invoke(new StatusEvent(method, Compact(node)));
+                ActiveTurnId = null;
                 break;
 
             case "remoteControl/status/changed":
@@ -841,28 +842,27 @@ public sealed class CodexAppServerClient : IAsyncDisposable
     private void EmitTokenTelemetry(JsonNode node)
     {
         var usage = node["params"]?["tokenUsage"];
+        var last = usage?["last"];
         var total = usage?["total"];
 
-        var input = total?["inputTokens"]?.GetValue<int>();
-        var cached = total?["cachedInputTokens"]?.GetValue<int>();
-        var output = total?["outputTokens"]?.GetValue<int>();
-        var reasoning = total?["reasoningOutputTokens"]?.GetValue<int>();
+        TelemetryUsage? turnUsage = ReadTelemetryUsage(last);
+        TelemetryUsage? sessionUsage = ReadTelemetryUsage(total);
         var window = usage?["modelContextWindow"]?.GetValue<int>();
+        string? turnId = node["params"]?["turnId"]?.GetValue<string>();
 
-        var pct = input.HasValue && window.HasValue && window > 0
-            ? $" ({(input.Value * 100.0 / window.Value):0.0}% of window)"
+        var pct = turnUsage?.InputTokens.HasValue == true && window.HasValue && window > 0
+            ? $" ({(turnUsage.InputTokens.Value * 100.0 / window.Value):0.0}% of window)"
             : string.Empty;
 
         Telemetry?.Invoke(new TelemetryEvent(
-            input,
-            cached,
-            output,
-            reasoning,
+            turnUsage,
+            sessionUsage,
             window,
             null,
             null,
             null,
-            $"Tokens: input {input:N0}, cached {cached:N0}, output {output:N0}, reasoning {reasoning:N0}, window {window:N0}{pct}"));
+            turnId,
+            $"Tokens: turn input {FormatNumber(turnUsage?.InputTokens)}, cached {FormatNumber(turnUsage?.CachedInputTokens)}, output {FormatNumber(turnUsage?.OutputTokens)}, reasoning {FormatNumber(turnUsage?.ReasoningOutputTokens)}; session input {FormatNumber(sessionUsage?.InputTokens)}, cached {FormatNumber(sessionUsage?.CachedInputTokens)}, output {FormatNumber(sessionUsage?.OutputTokens)}, reasoning {FormatNumber(sessionUsage?.ReasoningOutputTokens)}, window {FormatNumber(window)}{pct}"));
     }
 
     private void EmitRateTelemetry(JsonNode node)
@@ -876,12 +876,31 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             null,
             null,
             null,
-            null,
-            null,
             primary,
             secondary,
             plan,
+            null,
             $"Rate limits: primary {primary}%, secondary {secondary}%, plan {plan}"));
+    }
+
+    private static TelemetryUsage? ReadTelemetryUsage(JsonNode? usage)
+    {
+        if (usage is null)
+        {
+            return null;
+        }
+
+        return new TelemetryUsage(
+            usage["inputTokens"]?.GetValue<int>(),
+            usage["cachedInputTokens"]?.GetValue<int>(),
+            usage["outputTokens"]?.GetValue<int>(),
+            usage["reasoningOutputTokens"]?.GetValue<int>(),
+            usage["totalTokens"]?.GetValue<int>());
+    }
+
+    private static string FormatNumber(int? value)
+    {
+        return value.HasValue ? value.Value.ToString("N0") : "-";
     }
 
     private static string Compact(JsonNode node)

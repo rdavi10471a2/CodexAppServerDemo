@@ -2,15 +2,21 @@ namespace CodexAppServerBlazor;
 
 public sealed record AssistantTextEvent(string Text, bool IsFinal);
 
-public sealed record TelemetryEvent(
+public sealed record TelemetryUsage(
     int? InputTokens,
     int? CachedInputTokens,
     int? OutputTokens,
     int? ReasoningOutputTokens,
+    int? TotalTokens);
+
+public sealed record TelemetryEvent(
+    TelemetryUsage? TurnUsage,
+    TelemetryUsage? SessionUsage,
     int? ModelContextWindow,
     int? PrimaryUsedPercent,
     int? SecondaryUsedPercent,
     string? PlanType,
+    string? TurnId,
     string Summary);
 
 public sealed record ToolEvent(

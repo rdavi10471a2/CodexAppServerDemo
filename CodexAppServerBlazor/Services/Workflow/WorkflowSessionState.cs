@@ -17,5 +17,7 @@ public sealed class WorkflowSessionState
 
     public bool HasAttachedSessionBootstrap { get; set; }
 
+    public WorkflowTurnMode? SessionBootstrapMode { get; set; }
+
     public bool HasAttachedWorkspaceContext { get; set; }
 }

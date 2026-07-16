@@ -51,6 +51,13 @@
                         @onclick="@(() => ChangeTurnMode(WorkflowTurnMode.Work))">Work</button>
             </div>
             <span class="mode-toggle-note">Global runtime mode for the next turn.</span>
+            <label class="assistant-inline-checkbox">
+                <input type="checkbox"
+                       checked="@AutoApproveTrustedMcpToolRequests"
+                       @onchange="OnAutoApproveTrustedMcpToolRequestsChanged"
+                       disabled="@Busy" />
+                <span>Auto-approve trusted local MCP actions</span>
+            </label>
             @if (HasPendingRequests)
             {
                 <span class="mode-toggle-warning">Action required before the agent can continue.</span>
@@ -431,6 +438,12 @@
     public EventCallback<WorkflowTurnMode> TurnModeChanged { get; set; }
 
     [Parameter]
+    public bool AutoApproveTrustedMcpToolRequests { get; set; }
+
+    [Parameter]
+    public EventCallback<bool> AutoApproveTrustedMcpToolRequestsChanged { get; set; }
+
+    [Parameter]
     public IReadOnlyList<CodexPermissionRequest> PermissionRequests { get; set; } = [];
 
     [Parameter]
@@ -565,6 +578,12 @@
     {
         isCreateTaskPanelVisible = false;
         taskTitleDraft = string.Empty;
+    }
+
+    private Task OnAutoApproveTrustedMcpToolRequestsChanged(ChangeEventArgs args)
+    {
+        bool enabled = args.Value is bool boolValue && boolValue;
+        return AutoApproveTrustedMcpToolRequestsChanged.InvokeAsync(enabled);
     }
 
     private string GetPendingHeaderText()

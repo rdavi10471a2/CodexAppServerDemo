@@ -14,9 +14,6 @@ public partial class TaskWorkspace : ComponentBase
     private string taskName = string.Empty;
     private string taskDescription = string.Empty;
     private string notesMarkdown = string.Empty;
-    private string newFilePath = string.Empty;
-    private string newFileIntent = string.Empty;
-    private string newFileRole = string.Empty;
     private string newComment = string.Empty;
     private string selectedPane = "Task";
     private string selectedStateCode = string.Empty;
@@ -36,9 +33,6 @@ public partial class TaskWorkspace : ComponentBase
 
     [Parameter]
     public EventCallback<string> OnSaveNotes { get; set; }
-
-    [Parameter]
-    public EventCallback<TaskFileAddRequest> OnAddFile { get; set; }
 
     [Parameter]
     public EventCallback<string> OnAddComment { get; set; }
@@ -71,9 +65,6 @@ public partial class TaskWorkspace : ComponentBase
         taskDescription = Task.Description;
         notesMarkdown = Task.NotesMarkdown;
         selectedStateCode = Task.IsArchived ? "Archived" : Task.StateCode;
-        newFilePath = string.Empty;
-        newFileIntent = string.Empty;
-        newFileRole = string.Empty;
         newComment = string.Empty;
     }
 
@@ -98,19 +89,6 @@ public partial class TaskWorkspace : ComponentBase
         }
 
         await OnSaveNotes.InvokeAsync(notesMarkdown);
-    }
-
-    private async Task AddFile()
-    {
-        if (Task is null || string.IsNullOrWhiteSpace(newFilePath))
-        {
-            return;
-        }
-
-        await OnAddFile.InvokeAsync(new TaskFileAddRequest(Task.Id, newFilePath, newFileIntent, newFileRole));
-        newFilePath = string.Empty;
-        newFileIntent = string.Empty;
-        newFileRole = string.Empty;
     }
 
     private async Task AddComment()

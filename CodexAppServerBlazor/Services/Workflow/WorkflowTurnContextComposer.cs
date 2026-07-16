@@ -19,7 +19,9 @@ public sealed class WorkflowTurnContextComposer : IWorkflowTurnContextComposer
             throw new InvalidOperationException("Cannot start a Work turn without active task context. " + taskContext.Status);
         }
 
-        bool includeSessionBootstrap = !sessionState.HasAttachedSessionBootstrap && sessionBootstrapPolicy.HasPrompt;
+        bool includeSessionBootstrap =
+            sessionBootstrapPolicy.HasPrompt
+            && (!sessionState.HasAttachedSessionBootstrap || sessionState.SessionBootstrapMode != mode);
         bool includeWorkspaceContext = !sessionState.HasAttachedWorkspaceContext && workspaceContext.HasPrompt;
 
         StringBuilder prompt = new();
@@ -65,20 +67,19 @@ public sealed class WorkflowTurnContextComposer : IWorkflowTurnContextComposer
             prompt.AppendLine("- Keep durable workflow memory in task notes/files/events; treat the solution index as a volatile lookup surface.");
             prompt.AppendLine("- If Coding Services attached context names workspace MCP discovery tools, attempt that governed MCP path before claiming the discovery surface is unavailable.");
             prompt.AppendLine("- In Work mode, do not use shell search, broad task-memory scans, or fallback repo scans before the required governed MCP/task path unless the required MCP/tool path fails.");
-            prompt.AppendLine("- In Work mode, never claim that the assigned task is already implemented or already complete until the current turn has refreshed every task file through the governed edit path and reported the resulting edit-session evidence.");
+            prompt.AppendLine("- In Work mode, derive the candidate file set through governed discovery, then refresh the chosen files through the governed edit path before concluding the task is already implemented.");
             prompt.AppendLine("- In Work mode, direct watched-source reads, get_edit_session_state by itself, prior turn transcript text, previous runtime output, and remembered code shape are diagnostic hints only. They are not completion evidence.");
             prompt.AppendLine("- In Work mode, do not read or cite runtime artifact folders such as runtime\\watched-solutions\\..., workflow\\history, working, staged, metadata, or task-memory as proof that a watched-source task is already complete. Those folders are workflow artifacts, not authoritative watched-source evidence.");
-            prompt.AppendLine("- In Work mode, when task files are supplied by the host task context, treat them as the initial refresh targets for the current turn unless the user explicitly narrows scope.");
-            prompt.AppendLine("- In Work mode, if a task file has not gone through current-turn refresh_file or new_file, you must treat its state as unverified for completion purposes.");
-            prompt.AppendLine("- In Work mode, report an 'already implemented' outcome only after the current turn has produced governed evidence for each relevant task file, including EditSessionId, watchedFilePath, workingFilePath, and classification.");
-            prompt.AppendLine("- In Work mode, if classification is unchanged after refresh_file, that means the watched source and the fresh working candidate match for this turn. That is the only governed basis for a no-op conclusion.");
-            prompt.AppendLine("- If the host exposes request_operator_decision, use it for bounded yes/no operator questions instead of asking those questions freeform in chat.");
-            prompt.AppendLine("- If you ask whether task or agent notes should be updated, prefer request_operator_decision when available; otherwise phrase it as a strict yes/no question unless the user asked for broader discussion.");
+            prompt.AppendLine("- In Work mode, once an edit session exists, its declared file set is the authoritative changed-file set for review and telemetry.");
+            prompt.AppendLine("- In Work mode, if a chosen file has not gone through current-turn refresh_file or new_file, you must treat its state as unverified for completion purposes.");
+            prompt.AppendLine("- In Work mode, report an 'already implemented' outcome only after the current turn has produced governed evidence for each relevant refreshed file, including EditSessionId, watchedFilePath, workingFilePath, and classification.");
+            prompt.AppendLine("- In Work mode, if classification is unchanged after refresh_file, that means the watched source and the fresh working candidate match for this turn. That is the governed basis for a no-op conclusion for that file.");
         }
         else
         {
             prompt.AppendLine("- Treat this as discussion/planning/review by default unless the user explicitly asks for code changes.");
             prompt.AppendLine("- Do not assume durable task context is loaded for this turn.");
+            prompt.AppendLine("- Discuss mode is discovery-first. Do not load or rely on governed edit cookbook details unless the user explicitly switches to implementation work.");
             prompt.AppendLine("- If code structure matters, refresh digest or MCP summaries rather than relying on stale transcript context.");
         }
 

@@ -97,29 +97,75 @@
 
             <RadzenTabsItem Text="Telemetry">
                 <section class="connection-section connection-section-compact" aria-label="Token summary">
-                    <section class="token-summary">
+                    <section class="token-summary token-summary-stack">
                         <div class="token-summary-header">
-                            <span>Tokens</span>
+                            <span>Telemetry</span>
                             <div class="token-summary-inline">
                                 <small>@FormatRateSummary()</small>
                             </div>
                         </div>
+                        <div class="token-summary-subtitle">Current turn</div>
                         <div class="token-grid">
                             <div>
                                 <span>Input</span>
-                                <strong>@FormatNumber(Snapshot.TelemetrySummary.InputTokens)</strong>
+                                <strong>@FormatNumber(Snapshot.TelemetrySummary.CurrentTurn.InputTokens)</strong>
                             </div>
                             <div>
                                 <span>Cached</span>
-                                <strong>@FormatNumber(Snapshot.TelemetrySummary.CachedInputTokens)</strong>
+                                <strong>@FormatNumber(Snapshot.TelemetrySummary.CurrentTurn.CachedInputTokens)</strong>
                             </div>
                             <div>
                                 <span>Output</span>
-                                <strong>@FormatNumber(Snapshot.TelemetrySummary.OutputTokens)</strong>
+                                <strong>@FormatNumber(Snapshot.TelemetrySummary.CurrentTurn.OutputTokens)</strong>
                             </div>
                             <div>
                                 <span>Reasoning</span>
-                                <strong>@FormatNumber(Snapshot.TelemetrySummary.ReasoningOutputTokens)</strong>
+                                <strong>@FormatNumber(Snapshot.TelemetrySummary.CurrentTurn.ReasoningOutputTokens)</strong>
+                            </div>
+                            <div>
+                                <span>Total</span>
+                                <strong>@FormatNumber(Snapshot.TelemetrySummary.CurrentTurn.TotalTokens)</strong>
+                            </div>
+                            <div>
+                                <span>Window</span>
+                                <strong>@FormatNumber(Snapshot.TelemetrySummary.CurrentTurn.ModelContextWindow)</strong>
+                            </div>
+                        </div>
+                        <div class="token-summary-subtitle">Declared edit files</div>
+                        <div class="token-files">
+                            @if (CurrentDeclaredEditFiles.Count == 0)
+                            {
+                                <small>No declared edit-session files.</small>
+                            }
+                            else
+                            {
+                                @foreach (string path in CurrentDeclaredEditFiles)
+                                {
+                                    <code>@path</code>
+                                }
+                            }
+                        </div>
+                        <div class="token-summary-subtitle">Session total</div>
+                        <div class="token-grid">
+                            <div>
+                                <span>Input</span>
+                                <strong>@FormatNumber(Snapshot.TelemetrySummary.SessionTotal.InputTokens)</strong>
+                            </div>
+                            <div>
+                                <span>Cached</span>
+                                <strong>@FormatNumber(Snapshot.TelemetrySummary.SessionTotal.CachedInputTokens)</strong>
+                            </div>
+                            <div>
+                                <span>Output</span>
+                                <strong>@FormatNumber(Snapshot.TelemetrySummary.SessionTotal.OutputTokens)</strong>
+                            </div>
+                            <div>
+                                <span>Reasoning</span>
+                                <strong>@FormatNumber(Snapshot.TelemetrySummary.SessionTotal.ReasoningOutputTokens)</strong>
+                            </div>
+                            <div>
+                                <span>Total</span>
+                                <strong>@FormatNumber(Snapshot.TelemetrySummary.SessionTotal.TotalTokens)</strong>
                             </div>
                         </div>
                     </section>
@@ -181,6 +227,9 @@
 
     [Parameter]
     public string? CurrentEditSessionId { get; set; }
+
+    [Parameter]
+    public IReadOnlyList<string> CurrentDeclaredEditFiles { get; set; } = [];
 
     [Parameter]
     public string? QueuedReviewSessionId { get; set; }
@@ -312,11 +361,11 @@
 
     private string FormatRateSummary()
     {
-        string primary = FormatPercent(Snapshot.TelemetrySummary.PrimaryUsedPercent);
-        string secondary = FormatPercent(Snapshot.TelemetrySummary.SecondaryUsedPercent);
-        string plan = string.IsNullOrWhiteSpace(Snapshot.TelemetrySummary.PlanType)
+        string primary = FormatPercent(Snapshot.TelemetrySummary.RateLimits.PrimaryUsedPercent);
+        string secondary = FormatPercent(Snapshot.TelemetrySummary.RateLimits.SecondaryUsedPercent);
+        string plan = string.IsNullOrWhiteSpace(Snapshot.TelemetrySummary.RateLimits.PlanType)
             ? "plan unknown"
-            : Snapshot.TelemetrySummary.PlanType;
+            : Snapshot.TelemetrySummary.RateLimits.PlanType;
 
         return $"{primary} / {secondary} · {plan}";
     }

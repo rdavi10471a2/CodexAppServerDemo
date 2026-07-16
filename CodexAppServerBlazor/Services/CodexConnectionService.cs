@@ -23,6 +23,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
     private readonly PermissionRequestService permissionRequestService = new();
     private CodexAppServerClient? client;
     private string assistantText = string.Empty;
+    private bool autoApproveTrustedMcpToolRequests;
     private string currentTurnNoticeText = string.Empty;
     private bool isTurnRunning;
     private CodexTelemetrySummary telemetrySummary = CodexTelemetrySummary.Empty;
@@ -33,6 +34,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
     private WorkflowSessionState? workflowSessionState;
     private WorkflowTurnMode? currentTurnMode;
     private string? currentTurnActiveTaskId;
+    private string? currentTurnId;
     private bool currentTurnUsageRecorded;
     private bool currentTurnOperatorDecisionRequested;
     private bool currentTurnNotesUpdateQuestionRequested;
@@ -79,6 +81,16 @@ public sealed class CodexConnectionService : IAsyncDisposable
                 PermissionRequests: permissionRequestService.GetSnapshot(),
                 RawLines: rawLines.ToArray());
         }
+    }
+
+    public void SetAutoApproveTrustedMcpToolRequests(bool enabled)
+    {
+        lock (gate)
+        {
+            autoApproveTrustedMcpToolRequests = enabled;
+        }
+
+        Changed?.Invoke();
     }
 
     public async Task StartServerAsync(string codexExe, CancellationToken cancellationToken)
@@ -146,9 +158,11 @@ public sealed class CodexConnectionService : IAsyncDisposable
                 workflowSessionState = null;
                 currentTurnMode = null;
                 currentTurnActiveTaskId = null;
+                currentTurnId = null;
                 currentTurnUsageRecorded = false;
                 currentTurnOperatorDecisionRequested = false;
                 currentTurnNotesUpdateQuestionRequested = false;
+                telemetrySummary = CodexTelemetrySummary.Empty;
             }
 
             workspaceState.SetCurrentEditSessionId(null);
@@ -265,9 +279,11 @@ public sealed class CodexConnectionService : IAsyncDisposable
             workflowSessionState = null;
             currentTurnMode = null;
             currentTurnActiveTaskId = null;
+            currentTurnId = null;
             currentTurnUsageRecorded = false;
             currentTurnOperatorDecisionRequested = false;
             currentTurnNotesUpdateQuestionRequested = false;
+            telemetrySummary = CodexTelemetrySummary.Empty;
         }
 
         workspaceState.SetCurrentEditSessionId(null);
@@ -306,7 +322,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
             workspaceState.SetRepoRoot(repoRoot);
             workflowSessionState ??= new WorkflowSessionState(repoRoot, mode);
             workspaceState.SetCurrentEditSessionId(null);
-            SessionBootstrapPolicy sessionBootstrapPolicy = sessionBootstrapPolicyService.LoadPolicy();
+            SessionBootstrapPolicy sessionBootstrapPolicy = sessionBootstrapPolicyService.LoadPolicy(mode);
             WorkflowPromptSection workspaceContext = workspaceWorkflowContextService.BuildTurnContext(repoRoot);
             WorkflowTurnTaskContext taskContext = mode == WorkflowTurnMode.Work
                 ? taskWorkflowContextService.BuildTurnContext(repoRoot)
@@ -349,9 +365,11 @@ public sealed class CodexConnectionService : IAsyncDisposable
             {
                 currentTurnMode = mode;
                 currentTurnActiveTaskId = taskContext.ActiveTaskId;
+                currentTurnId = null;
                 currentTurnUsageRecorded = false;
                 currentTurnOperatorDecisionRequested = false;
                 currentTurnNotesUpdateQuestionRequested = false;
+                telemetrySummary = telemetrySummary.ResetCurrentTurn();
             }
             MarkTurnRunning();
             if (attachments is { Count: > 0 })
@@ -369,6 +387,10 @@ public sealed class CodexConnectionService : IAsyncDisposable
                     NormalizeSandbox(sandbox),
                     attachments,
                     cancellationToken);
+                lock (gate)
+                {
+                    currentTurnId = activeClient.ActiveTurnId;
+                }
             }
             catch
             {
@@ -387,6 +409,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
             if (envelope.IncludedSessionBootstrap)
             {
                 workflowSessionState.HasAttachedSessionBootstrap = true;
+                workflowSessionState.SessionBootstrapMode = mode;
             }
 
             AddEvent(statusEvents, "TurnMode", "ok", "coding-services", $"Turn mode set to {mode}.");
@@ -503,7 +526,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
             NormalizeSandbox(sandbox),
             cancellationToken);
         workflowSessionState = new WorkflowSessionState(repoRoot, mode);
-        SessionBootstrapPolicy sessionBootstrapPolicy = sessionBootstrapPolicyService.LoadPolicy();
+        SessionBootstrapPolicy sessionBootstrapPolicy = sessionBootstrapPolicyService.LoadPolicy(mode);
         AddEvent(statusEvents, "ThreadPolicy", "ok", "codex", $"Thread policy set to approval={NormalizeApprovalPolicy(approvalPolicy)}, sandbox={NormalizeSandbox(sandbox)}.");
         AddEvent(statusEvents, "ThreadMode", "ok", "coding-services", $"Thread initialized in {mode} mode.");
         AddEvent(
@@ -605,6 +628,25 @@ public sealed class CodexConnectionService : IAsyncDisposable
             return;
         }
 
+        bool autoApproveTrustedMcp;
+        lock (gate)
+        {
+            autoApproveTrustedMcp = autoApproveTrustedMcpToolRequests;
+        }
+
+        if (autoApproveTrustedMcp && PermissionRequestService.IsWrappedMcpToolRequest(e.Method, e.RawJson))
+        {
+            string toolName = PermissionRequestService.TryGetWrappedMcpToolName(e.RawJson) ?? "<unknown>";
+            AddEvent(
+                statusEvents,
+                "PermissionRequest",
+                "auto-approved",
+                "coding-services",
+                $"MCP method {toolName} auto-approved.");
+            _ = AutoApproveServerRequestAsync(e);
+            return;
+        }
+
         CodexPermissionRequest request = permissionRequestService.Add(e);
         AddEvent(
             statusEvents,
@@ -665,8 +707,17 @@ public sealed class CodexConnectionService : IAsyncDisposable
                     PreMergeValidationIsError: false,
                     PreMergeValidationForceApproved: false));
 
+            JsonObject content = new();
+            if (resolution.NotesUpdateRequested)
+            {
+                content["notesUpdateRequested"] = true;
+                content["userNotesPath"] = resolution.UserNotesPath;
+                content["agentNotesPath"] = resolution.AgentNotesPath;
+                content["notesInstruction"] = resolution.NotesInstruction;
+            }
+
             response = resolution.Completed
-                ? PermissionRequestService.CreateApproveResponse(e.Method, e.RawJson, PermissionApprovalScope.Turn)
+                ? PermissionRequestService.CreateApproveResponse(e.Method, e.RawJson, PermissionApprovalScope.Turn, content)
                 : PermissionRequestService.CreateDenyResponse(e.Method, cancelTurn: false);
             AddCurrentTurnNotice(resolution.Completed
                 ? $"Governed review session '{sessionId}' completed; releasing the agent."
@@ -729,6 +780,10 @@ public sealed class CodexConnectionService : IAsyncDisposable
         lock (gate)
         {
             telemetrySummary = telemetrySummary.Apply(e);
+            if (!string.IsNullOrWhiteSpace(e.TurnId))
+            {
+                currentTurnId = e.TurnId;
+            }
         }
 
         AddEvent(telemetryEvents, "Telemetry", null, "codex", e.Summary);
@@ -824,7 +879,7 @@ public sealed class CodexConnectionService : IAsyncDisposable
             operatorDecisionRequested = currentTurnOperatorDecisionRequested;
             notesUpdateQuestionRequested = currentTurnNotesUpdateQuestionRequested;
             threadId = client?.ThreadId;
-            turnId = client?.ActiveTurnId;
+            turnId = currentTurnId ?? client?.ActiveTurnId;
             currentEditSessionId = workspaceState.CurrentEditSessionId;
         }
 
@@ -1027,30 +1082,81 @@ public sealed record CodexOutputEvent(
     string Detail,
     string Severity);
 
-public sealed record CodexTelemetrySummary(
+public sealed record CodexTokenUsageSummary(
     int? InputTokens,
     int? CachedInputTokens,
     int? OutputTokens,
     int? ReasoningOutputTokens,
-    int? ModelContextWindow,
+    int? TotalTokens,
+    int? ModelContextWindow)
+{
+    public static CodexTokenUsageSummary Empty { get; } = new(null, null, null, null, null, null);
+
+    public CodexTokenUsageSummary Apply(TelemetryUsage? usage, int? modelContextWindow)
+    {
+        return this with
+        {
+            InputTokens = usage?.InputTokens ?? InputTokens,
+            CachedInputTokens = usage?.CachedInputTokens ?? CachedInputTokens,
+            OutputTokens = usage?.OutputTokens ?? OutputTokens,
+            ReasoningOutputTokens = usage?.ReasoningOutputTokens ?? ReasoningOutputTokens,
+            TotalTokens = usage?.TotalTokens ?? TotalTokens,
+            ModelContextWindow = modelContextWindow ?? ModelContextWindow
+        };
+    }
+
+    public CodexTokenUsageSummary Reset()
+    {
+        return Empty with
+        {
+            ModelContextWindow = ModelContextWindow
+        };
+    }
+}
+
+public sealed record CodexRateLimitSummary(
     int? PrimaryUsedPercent,
     int? SecondaryUsedPercent,
     string? PlanType)
 {
-    public static CodexTelemetrySummary Empty { get; } = new(null, null, null, null, null, null, null, null);
+    public static CodexRateLimitSummary Empty { get; } = new(null, null, null);
+
+    public CodexRateLimitSummary Apply(TelemetryEvent e)
+    {
+        return this with
+        {
+            PrimaryUsedPercent = e.PrimaryUsedPercent ?? PrimaryUsedPercent,
+            SecondaryUsedPercent = e.SecondaryUsedPercent ?? SecondaryUsedPercent,
+            PlanType = e.PlanType ?? PlanType
+        };
+    }
+}
+
+public sealed record CodexTelemetrySummary(
+    CodexTokenUsageSummary CurrentTurn,
+    CodexTokenUsageSummary SessionTotal,
+    CodexRateLimitSummary RateLimits,
+    string? LastTurnId)
+{
+    public static CodexTelemetrySummary Empty { get; } = new(CodexTokenUsageSummary.Empty, CodexTokenUsageSummary.Empty, CodexRateLimitSummary.Empty, null);
 
     public CodexTelemetrySummary Apply(TelemetryEvent e)
     {
         return this with
         {
-            InputTokens = e.InputTokens ?? InputTokens,
-            CachedInputTokens = e.CachedInputTokens ?? CachedInputTokens,
-            OutputTokens = e.OutputTokens ?? OutputTokens,
-            ReasoningOutputTokens = e.ReasoningOutputTokens ?? ReasoningOutputTokens,
-            ModelContextWindow = e.ModelContextWindow ?? ModelContextWindow,
-            PrimaryUsedPercent = e.PrimaryUsedPercent ?? PrimaryUsedPercent,
-            SecondaryUsedPercent = e.SecondaryUsedPercent ?? SecondaryUsedPercent,
-            PlanType = e.PlanType ?? PlanType
+            CurrentTurn = CurrentTurn.Apply(e.TurnUsage, e.ModelContextWindow),
+            SessionTotal = SessionTotal.Apply(e.SessionUsage, e.ModelContextWindow),
+            RateLimits = RateLimits.Apply(e),
+            LastTurnId = e.TurnId ?? LastTurnId
+        };
+    }
+
+    public CodexTelemetrySummary ResetCurrentTurn()
+    {
+        return this with
+        {
+            CurrentTurn = CurrentTurn.Reset(),
+            LastTurnId = null
         };
     }
 }

@@ -44,7 +44,11 @@ public sealed class TurnUsageHistoryServiceTests
             WorkflowTurnMode.Work,
             "task-1",
             "edit-test",
-            new CodexTelemetrySummary(100, 20, 50, 30, 200000, 10, 2, "default"),
+            new CodexTelemetrySummary(
+                new CodexTokenUsageSummary(100, 20, 50, 30, 170, 200000),
+                new CodexTokenUsageSummary(300, 120, 90, 40, 390, 200000),
+                new CodexRateLimitSummary(10, 2, "default"),
+                "turn-1"),
             "turn/completed",
             "completed",
             operatorDecisionRequested: true,
@@ -69,6 +73,12 @@ public sealed class TurnUsageHistoryServiceTests
         Assert.Equal(20, root.GetProperty("cachedInputTokens").GetInt32());
         Assert.Equal(50, root.GetProperty("outputTokens").GetInt32());
         Assert.Equal(30, root.GetProperty("reasoningOutputTokens").GetInt32());
+        Assert.Equal(170, root.GetProperty("totalTokens").GetInt32());
+        Assert.Equal(300, root.GetProperty("sessionInputTokens").GetInt32());
+        Assert.Equal(120, root.GetProperty("sessionCachedInputTokens").GetInt32());
+        Assert.Equal(90, root.GetProperty("sessionOutputTokens").GetInt32());
+        Assert.Equal(40, root.GetProperty("sessionReasoningOutputTokens").GetInt32());
+        Assert.Equal(390, root.GetProperty("sessionTotalTokens").GetInt32());
         Assert.Equal(200000, root.GetProperty("modelContextWindow").GetInt32());
         Assert.Equal(10, root.GetProperty("primaryUsedPercent").GetInt32());
         Assert.Equal(2, root.GetProperty("secondaryUsedPercent").GetInt32());

@@ -1,11 +1,19 @@
 using System.Text.Json;
 using CodexAppServerBlazor.AICodingServices.Core;
 using CodexAppServerBlazor.AICodingServices.Workflow;
+using Xunit.Abstractions;
 
 namespace CodexAppServerBlazor.Tests;
 
 public sealed class RoslynEditServiceTests
 {
+    private readonly ITestOutputHelper output;
+
+    public RoslynEditServiceTests(ITestOutputHelper output)
+    {
+        this.output = output;
+    }
+
     [Fact]
     public void GetFileOutline_returns_type_and_method_items_for_csharp_file()
     {
@@ -555,6 +563,366 @@ public sealed class RoslynEditServiceTests
         AssertFileContains(afterPropertyRemove.WorkingFilePath, "[McpServerTool]");
         AssertFileContains(afterPropertyRemove.WorkingFilePath, "[Description(\"Returns the current workspace metadata.\")]");
         AssertFileContains(afterPropertyRemove.WorkingFilePath, "[Description(\"Displays the current fake MCP state.\")]");
+    }
+
+    [Fact]
+    public void Add_members_and_submit_symbol_style_rewrite_can_produce_different_file_shapes_for_same_semantic_change()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        RoslynEditService service = new(CreateSettings(repository.RootPath));
+        const string originalText =
+            """
+            namespace Demo;
+
+            public class Unused11
+            {
+                public int Value { get; set; }
+
+                public Unused11(int value)
+                {
+                    Value = value;
+                }
+
+                public int AddOne()
+                {
+                    Value++;
+                    return Value;
+                }
+            }
+            """;
+
+        string addMembersPath = CreateWatchedFile(repository.RootPath, "Features/Unused11.AddMembers.cs", originalText);
+        string submitSymbolPath = CreateWatchedFile(repository.RootPath, "Features/Unused11.SubmitSymbol.cs", originalText);
+
+        string beforeAddMembers = File.ReadAllText(addMembersPath);
+        RoslynEditResult afterPropertyAdd = service.AddProperty(
+            addMembersPath,
+            "Unused11",
+            "public string Label { get; set; } = string.Empty;",
+            afterSymbol: "Value",
+            validateOverlay: false);
+        string afterPropertyText = File.ReadAllText(afterPropertyAdd.WorkingFilePath);
+
+        RoslynEditResult afterMethodAdd = service.AddMethod(
+            addMembersPath,
+            "Unused11",
+            """
+            public string Describe()
+            {
+                return $"{Label}:{Value}";
+            }
+            """,
+            afterSymbol: "AddOne",
+            validateOverlay: false);
+        string addMembersFinalText = File.ReadAllText(afterMethodAdd.WorkingFilePath);
+
+        string classSelectorJson = JsonSerializer.Serialize(new RoslynSymbolSelector(
+            ContainingNamespace: "Demo",
+            MemberKind: "class",
+            Name: "Unused11"));
+        RoslynEditResult submitSymbolResult = service.SubmitSymbol(
+            submitSymbolPath,
+            classSelectorJson,
+            """
+            public class Unused11
+            {
+                public int Value { get; set; }
+
+                public string Label { get; set; } = string.Empty;
+
+                public Unused11(int value)
+                {
+                    Value = value;
+                }
+
+                public int AddOne()
+                {
+                    Value++;
+                    return Value;
+                }
+
+                public string Describe()
+                {
+                    return $"{Label}:{Value}";
+                }
+            }
+            """,
+            validateOverlay: false);
+        string submitSymbolFinalText = File.ReadAllText(submitSymbolResult.WorkingFilePath);
+
+        output.WriteLine("Before add-members path:");
+        output.WriteLine(beforeAddMembers);
+        output.WriteLine("After add_property:");
+        output.WriteLine(afterPropertyText);
+        output.WriteLine("After add_method:");
+        output.WriteLine(addMembersFinalText);
+        output.WriteLine("After submit_symbol class rewrite:");
+        output.WriteLine(submitSymbolFinalText);
+        output.WriteLine("Final texts equal: " + string.Equals(addMembersFinalText, submitSymbolFinalText, StringComparison.Ordinal));
+
+        Assert.Contains("public string Label { get; set; } = string.Empty;", addMembersFinalText, StringComparison.Ordinal);
+        Assert.Contains("public string Describe()", addMembersFinalText, StringComparison.Ordinal);
+        Assert.Contains("return $\"{Label}:{Value}\";", addMembersFinalText, StringComparison.Ordinal);
+        Assert.Contains("public string Label { get; set; } = string.Empty;", submitSymbolFinalText, StringComparison.Ordinal);
+        Assert.Contains("public string Describe()", submitSymbolFinalText, StringComparison.Ordinal);
+        Assert.Contains("return $\"{Label}:{Value}\";", submitSymbolFinalText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Existing_code_churn_remove_and_restore_can_be_compared_between_add_members_and_submit_symbol()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        RoslynEditService service = new(CreateSettings(repository.RootPath));
+        const string seededText =
+            """
+            namespace Demo;
+
+            public class Unused11
+            {
+                public int Value { get; set; }
+
+                public string Label { get; set; } = string.Empty;
+
+                public Unused11(int value)
+                {
+                    Value = value;
+                }
+
+                public int AddOne()
+                {
+                    Value++;
+                    return Value;
+                }
+
+                public string Describe()
+                {
+                    return $"{Label}:{Value}";
+                }
+            }
+            """;
+
+        string addMembersPath = CreateWatchedFile(repository.RootPath, "Features/Unused11.ChurnAddMembers.cs", seededText);
+        string submitSymbolPath = CreateWatchedFile(repository.RootPath, "Features/Unused11.ChurnSubmitSymbol.cs", seededText);
+
+        string beforeChurn = File.ReadAllText(addMembersPath);
+
+        RoslynEditResult variantPropertyAdd = service.AddProperty(
+            addMembersPath,
+            "Unused11",
+            "public string Badge { get; set; } = \"seed\";",
+            afterSymbol: "Label",
+            validateOverlay: false);
+        RoslynEditResult variantMethodAdd = service.AddMethod(
+            addMembersPath,
+            "Unused11",
+            """
+            public string DescribeVerbose()
+            {
+                return $"{Label}:{Badge}:{Value}";
+            }
+            """,
+            afterSymbol: "Describe",
+            validateOverlay: false);
+
+        string afterVariantAdds = File.ReadAllText(variantMethodAdd.WorkingFilePath);
+
+        service.RemoveSymbol(
+            addMembersPath,
+            SerializeSelector("Unused11", "property", "Label"),
+            validateOverlay: false);
+        RoslynEditResult afterDescribeRemove = service.RemoveSymbol(
+            addMembersPath,
+            SerializeSelector("Unused11", "method", "Describe"),
+            validateOverlay: false);
+
+        string churnedWithoutOriginals = File.ReadAllText(afterDescribeRemove.WorkingFilePath);
+
+        File.WriteAllText(submitSymbolPath, churnedWithoutOriginals);
+
+        RoslynEditResult addMembersPropertyRestore = service.AddProperty(
+            addMembersPath,
+            "Unused11",
+            "public string Label { get; set; } = string.Empty;",
+            afterSymbol: "Value",
+            validateOverlay: false);
+        RoslynEditResult addMembersMethodRestore = service.AddMethod(
+            addMembersPath,
+            "Unused11",
+            """
+            public string Describe()
+            {
+                return $"{Label}:{Value}";
+            }
+            """,
+            afterSymbol: "AddOne",
+            validateOverlay: false);
+        string addMembersFinalText = File.ReadAllText(addMembersMethodRestore.WorkingFilePath);
+
+        string classSelectorJson = JsonSerializer.Serialize(new RoslynSymbolSelector(
+            ContainingNamespace: "Demo",
+            MemberKind: "class",
+            Name: "Unused11"));
+        RoslynEditResult submitSymbolRestore = service.SubmitSymbol(
+            submitSymbolPath,
+            classSelectorJson,
+            """
+            public class Unused11
+            {
+                public int Value { get; set; }
+
+                public string Label { get; set; } = string.Empty;
+
+                public string Badge { get; set; } = "seed";
+
+                public Unused11(int value)
+                {
+                    Value = value;
+                }
+
+                public int AddOne()
+                {
+                    Value++;
+                    return Value;
+                }
+
+                public string Describe()
+                {
+                    return $"{Label}:{Value}";
+                }
+
+                public string DescribeVerbose()
+                {
+                    return $"{Label}:{Badge}:{Value}";
+                }
+            }
+            """,
+            validateOverlay: false);
+        string submitSymbolFinalText = File.ReadAllText(submitSymbolRestore.WorkingFilePath);
+
+        output.WriteLine("Before churn:");
+        output.WriteLine(beforeChurn);
+        output.WriteLine("After adding variant symbols:");
+        output.WriteLine(afterVariantAdds);
+        output.WriteLine("Churned intermediate with originals removed:");
+        output.WriteLine(churnedWithoutOriginals);
+        output.WriteLine("After add-members restore:");
+        output.WriteLine(addMembersFinalText);
+        output.WriteLine("After submit_symbol restore:");
+        output.WriteLine(submitSymbolFinalText);
+        output.WriteLine($"Final texts equal after churn: {string.Equals(addMembersFinalText, submitSymbolFinalText, StringComparison.Ordinal)}");
+
+        Assert.Contains("public string Label { get; set; } = string.Empty;", addMembersFinalText, StringComparison.Ordinal);
+        Assert.Contains("public string Badge { get; set; } = \"seed\";", addMembersFinalText, StringComparison.Ordinal);
+        Assert.Contains("public string Describe()", addMembersFinalText, StringComparison.Ordinal);
+        Assert.Contains("public string DescribeVerbose()", addMembersFinalText, StringComparison.Ordinal);
+
+        Assert.Contains("public string Label { get; set; } = string.Empty;", submitSymbolFinalText, StringComparison.Ordinal);
+        Assert.Contains("public string Badge { get; set; } = \"seed\";", submitSymbolFinalText, StringComparison.Ordinal);
+        Assert.Contains("public string Describe()", submitSymbolFinalText, StringComparison.Ordinal);
+        Assert.Contains("public string DescribeVerbose()", submitSymbolFinalText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Exact_unused11_fixture_can_reveal_member_insertion_position_differences()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        RoslynEditService service = new(CreateSettings(repository.RootPath));
+        const string originalText =
+            """
+            namespace SchemaStudioWebViewer;
+
+            public class Unused11
+            {
+                public int Value { get; private set; }
+
+
+
+                public Unused11(int value)
+                {
+                    Value = value;
+                }
+
+                public int AddOne()
+                {
+                    Value++;
+                    return Value;
+                }
+
+            }
+            """;
+
+        string addMembersPath = CreateWatchedFile(repository.RootPath, "Features/Unused11.ExactFixture.AddMembers.cs", originalText);
+        string submitSymbolPath = CreateWatchedFile(repository.RootPath, "Features/Unused11.ExactFixture.SubmitSymbol.cs", originalText);
+
+        RoslynEditResult propertyAdd = service.AddProperty(
+            addMembersPath,
+            "Unused11",
+            "public string Label { get; set; } = string.Empty;",
+            afterSymbol: "Value",
+            validateOverlay: false);
+        string afterPropertyAdd = File.ReadAllText(propertyAdd.WorkingFilePath);
+
+        RoslynEditResult methodAdd = service.AddMethod(
+            addMembersPath,
+            "Unused11",
+            """
+            public string Describe()
+            {
+                return $"{Label}:{Value}";
+            }
+            """,
+            afterSymbol: "AddOne",
+            validateOverlay: false);
+        string afterMethodAdd = File.ReadAllText(methodAdd.WorkingFilePath);
+
+        string classSelectorJson = JsonSerializer.Serialize(new RoslynSymbolSelector(
+            ContainingNamespace: "SchemaStudioWebViewer",
+            MemberKind: "class",
+            Name: "Unused11"));
+        RoslynEditResult submitSymbolResult = service.SubmitSymbol(
+            submitSymbolPath,
+            classSelectorJson,
+            """
+            public class Unused11
+            {
+                public int Value { get; private set; }
+
+                public string Label { get; set; } = string.Empty;
+
+                public Unused11(int value)
+                {
+                    Value = value;
+                }
+
+                public int AddOne()
+                {
+                    Value++;
+                    return Value;
+                }
+
+                public string Describe()
+                {
+                    return $"{Label}:{Value}";
+                }
+            }
+            """,
+            validateOverlay: false);
+        string afterSubmitSymbol = File.ReadAllText(submitSymbolResult.WorkingFilePath);
+
+        output.WriteLine("Exact fixture original:");
+        output.WriteLine(originalText.Replace("\r\n", "\n", StringComparison.Ordinal));
+        output.WriteLine("Exact fixture after add_property:");
+        output.WriteLine(afterPropertyAdd);
+        output.WriteLine("Exact fixture after add_method:");
+        output.WriteLine(afterMethodAdd);
+        output.WriteLine("Exact fixture after submit_symbol:");
+        output.WriteLine(afterSubmitSymbol);
+        output.WriteLine($"Exact fixture final texts equal: {string.Equals(afterMethodAdd, afterSubmitSymbol, StringComparison.Ordinal)}");
+
+        Assert.Contains("public string Label { get; set; } = string.Empty;", afterMethodAdd, StringComparison.Ordinal);
+        Assert.Contains("public string Describe()", afterMethodAdd, StringComparison.Ordinal);
+        Assert.Contains("public string Label { get; set; } = string.Empty;", afterSubmitSymbol, StringComparison.Ordinal);
+        Assert.Contains("public string Describe()", afterSubmitSymbol, StringComparison.Ordinal);
     }
 
     [Fact]

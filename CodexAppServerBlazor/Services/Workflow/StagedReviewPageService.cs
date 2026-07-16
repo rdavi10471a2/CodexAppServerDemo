@@ -301,8 +301,9 @@ public sealed class StagedReviewPageService : IStagedReviewPageService
     private static StagedReviewPageModel CreateModel(StagedEditRecord record)
     {
         string currentPath = ResolveCurrentPath(record);
+        string proposedPath = ResolveProposedPath(record);
         string currentText = File.Exists(currentPath) ? File.ReadAllText(currentPath) : string.Empty;
-        string proposedText = File.Exists(record.StagedFilePath) ? File.ReadAllText(record.StagedFilePath) : string.Empty;
+        string proposedText = File.Exists(proposedPath) ? File.ReadAllText(proposedPath) : string.Empty;
         bool isDecided = !string.IsNullOrWhiteSpace(record.Decision);
         string decisionStatus = isDecided
             ? $"{record.Decision} ({record.Classification})"
@@ -311,6 +312,9 @@ public sealed class StagedReviewPageService : IStagedReviewPageService
         return new StagedReviewPageModel(
             record.StagedRecordId,
             record.RelativePath,
+            currentPath,
+            proposedPath,
+            record.WatchedFilePath,
             currentText,
             proposedText,
             decisionStatus,
@@ -333,6 +337,9 @@ public sealed class StagedReviewPageService : IStagedReviewPageService
             $"Session {sessionId}",
             string.Empty,
             string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
             "Session complete",
             IsDecided: true,
             IsNewFile: false,
@@ -351,6 +358,13 @@ public sealed class StagedReviewPageService : IStagedReviewPageService
         return string.IsNullOrWhiteSpace(record.ReviewBaselineFilePath)
             ? record.WatchedFilePath
             : record.ReviewBaselineFilePath;
+    }
+
+    private static string ResolveProposedPath(StagedEditRecord record)
+    {
+        return !string.IsNullOrWhiteSpace(record.WorkingFilePath)
+            ? record.WorkingFilePath
+            : record.StagedFilePath;
     }
 
     private sealed record StagedReviewDecisionOptions(
@@ -385,6 +399,9 @@ public sealed record StagedReviewQueueItem(
 public sealed record StagedReviewPageModel(
     string StagedRecordId,
     string RelativePath,
+    string CurrentPath,
+    string ProposedPath,
+    string WatchedFilePath,
     string CurrentText,
     string ProposedText,
     string DecisionStatus,

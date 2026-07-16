@@ -60,14 +60,20 @@ public sealed class TurnUsageHistoryService
                 TerminalSummary = terminalSummary,
                 OperatorDecisionRequested = operatorDecisionRequested,
                 NotesUpdateQuestionRequested = notesUpdateQuestionRequested,
-                InputTokens = telemetrySummary.InputTokens,
-                CachedInputTokens = telemetrySummary.CachedInputTokens,
-                OutputTokens = telemetrySummary.OutputTokens,
-                ReasoningOutputTokens = telemetrySummary.ReasoningOutputTokens,
-                ModelContextWindow = telemetrySummary.ModelContextWindow,
-                PrimaryUsedPercent = telemetrySummary.PrimaryUsedPercent,
-                SecondaryUsedPercent = telemetrySummary.SecondaryUsedPercent,
-                PlanType = telemetrySummary.PlanType
+                InputTokens = telemetrySummary.CurrentTurn.InputTokens,
+                CachedInputTokens = telemetrySummary.CurrentTurn.CachedInputTokens,
+                OutputTokens = telemetrySummary.CurrentTurn.OutputTokens,
+                ReasoningOutputTokens = telemetrySummary.CurrentTurn.ReasoningOutputTokens,
+                TotalTokens = telemetrySummary.CurrentTurn.TotalTokens,
+                SessionInputTokens = telemetrySummary.SessionTotal.InputTokens,
+                SessionCachedInputTokens = telemetrySummary.SessionTotal.CachedInputTokens,
+                SessionOutputTokens = telemetrySummary.SessionTotal.OutputTokens,
+                SessionReasoningOutputTokens = telemetrySummary.SessionTotal.ReasoningOutputTokens,
+                SessionTotalTokens = telemetrySummary.SessionTotal.TotalTokens,
+                ModelContextWindow = telemetrySummary.CurrentTurn.ModelContextWindow ?? telemetrySummary.SessionTotal.ModelContextWindow,
+                PrimaryUsedPercent = telemetrySummary.RateLimits.PrimaryUsedPercent,
+                SecondaryUsedPercent = telemetrySummary.RateLimits.SecondaryUsedPercent,
+                PlanType = telemetrySummary.RateLimits.PlanType
             };
 
             string safeThread = SanitizeFileSegment(threadId, "thread");
@@ -170,6 +176,18 @@ public sealed class TurnUsageRecord
     public int? OutputTokens { get; set; }
 
     public int? ReasoningOutputTokens { get; set; }
+
+    public int? TotalTokens { get; set; }
+
+    public int? SessionInputTokens { get; set; }
+
+    public int? SessionCachedInputTokens { get; set; }
+
+    public int? SessionOutputTokens { get; set; }
+
+    public int? SessionReasoningOutputTokens { get; set; }
+
+    public int? SessionTotalTokens { get; set; }
 
     public int? ModelContextWindow { get; set; }
 

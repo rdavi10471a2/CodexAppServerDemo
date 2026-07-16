@@ -5,7 +5,9 @@ using CodexAppServerBlazor.Services.Tasks;
 using CodexAppServerBlazor.Services.Workflow;
 using CodexAppServerBlazor.AICodingServices.Workflow;
 using CodexAppServerBlazor.AICodingServices.Core;
+using CodexAppServerBlazor.AICodingServices.Data;
 using CodexAppServerBlazor.Components.Pages.Home.Tasks;
+using MergeReviewDialogComponent = CodexAppServerBlazor.Components.Pages.Home.MergeReviewDialog.MergeReviewDialog;
 using Markdig;
 using Markdig.Extensions.MediaLinks;
 using Microsoft.AspNetCore.Components;
@@ -13,8 +15,9 @@ using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.JSInterop;
 using Radzen;
 using System.Net;
-using System.Text.RegularExpressions;
 using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace CodexAppServerBlazor.Components.Pages.Home;
 
@@ -62,6 +65,7 @@ public partial class Home : IDisposable, IAsyncDisposable
     private string? activeAssistantMessageId;
     private string renderedAssistantText = string.Empty;
     private string? lastPermissionResultToastKey;
+    private string? lastAutoApprovedMcpToastKey;
     private string? errorMessage;
     private bool showArchiveConversationPrompt;
     private ConversationContinuation pendingConversationContinuation;
@@ -72,6 +76,7 @@ public partial class Home : IDisposable, IAsyncDisposable
     private string archiveConversationContinueWithoutSavingText = "Continue";
     private string archiveConversationSaveButtonText = "Save";
     private string archiveConversationSuggestedName = string.Empty;
+    private bool autoApproveTrustedMcpToolRequests;
     private bool busy;
     private bool isRebuildingSourceIndex;
     private bool isConnectionPanelVisible;
@@ -86,6 +91,7 @@ public partial class Home : IDisposable, IAsyncDisposable
     private TaskCompletionSource<bool>? validationGateCompletion;
     private string? reviewDialogSessionId;
     private TaskCompletionSource<bool>? reviewDialogCompletion;
+    private bool reviewDialogNotesUpdateRequested;
     private int assistantViewVersion;
     private ElementReference controlGrid;
     private ElementReference workPanel;
@@ -105,6 +111,7 @@ public partial class Home : IDisposable, IAsyncDisposable
     private string CurrentTurnHtml => RenderMarkdown(GetCurrentTurnText());
     private string assistantViewKey => $"{repoRoot}:{assistantViewVersion}";
     private IReadOnlyList<CodexOutputEvent> DebugEvents => debugEvents.ToArray();
+    private IReadOnlyList<string> CurrentDeclaredEditFiles => LoadCurrentDeclaredEditFiles();
     private string WorkflowHistoryPath
     {
         get
@@ -123,6 +130,31 @@ public partial class Home : IDisposable, IAsyncDisposable
             {
                 return string.Empty;
             }
+        }
+    }
+
+    private IReadOnlyList<string> LoadCurrentDeclaredEditFiles()
+    {
+        if (string.IsNullOrWhiteSpace(repoRoot) || string.IsNullOrWhiteSpace(WorkspaceState.CurrentEditSessionId))
+        {
+            return [];
+        }
+
+        try
+        {
+            WorkflowEditPaths paths = new(SettingsProvider.GetSettings(repoRoot));
+            string sessionPlanPath = paths.GetSessionPlanPath(WorkspaceState.CurrentEditSessionId);
+            if (!File.Exists(sessionPlanPath))
+            {
+                return [];
+            }
+
+            EditSessionPlan? plan = JsonSerializer.Deserialize<EditSessionPlan>(File.ReadAllText(sessionPlanPath));
+            return plan?.DeclaredRelativePaths?.ToArray() ?? [];
+        }
+        catch
+        {
+            return [];
         }
     }
 
@@ -172,6 +204,7 @@ public partial class Home : IDisposable, IAsyncDisposable
     {
         ConnectionService.Changed += OnConnectionChanged;
         GovernedReviewCoordinator.Changed += OnGovernedReviewCoordinatorChanged;
+        ConnectionService.SetAutoApproveTrustedMcpToolRequests(autoApproveTrustedMcpToolRequests);
         snapshot = ConnectionService.GetSnapshot();
         mcpUrl = Configuration["Mcp:Url"] ?? McpHostFactory.DefaultLocalMcpUrl;
         string configuredCwd = WorkspaceSelectionService.GetStartupWorkspace();
@@ -518,6 +551,22 @@ public partial class Home : IDisposable, IAsyncDisposable
         {
             NotifyPermissionAction("Permission granted", "The agent can continue this turn.", NotificationSeverity.Success);
         }
+    }
+
+    private Task SetAutoApproveTrustedMcpToolRequests(bool enabled)
+    {
+        autoApproveTrustedMcpToolRequests = enabled;
+        ConnectionService.SetAutoApproveTrustedMcpToolRequests(enabled);
+        NotificationService.Notify(new NotificationMessage
+        {
+            Severity = NotificationSeverity.Info,
+            Summary = enabled ? "Trusted MCP auto-approve enabled" : "Trusted MCP auto-approve disabled",
+            Detail = enabled
+                ? "Trusted local MCP actions will auto-approve and still surface as toasts."
+                : "Trusted local MCP actions will require approval again.",
+            Duration = 3000
+        });
+        return Task.CompletedTask;
     }
 
     private async Task ApprovePermissionRequestForSession(int requestId)
@@ -1477,6 +1526,16 @@ public partial class Home : IDisposable, IAsyncDisposable
                     $"Cleaned {cleanedArtifacts} resolved artifact(s) for completed edit session '{launch.SessionId}'.");
             }
 
+            bool taskNotesUpdated = false;
+            if (remainingReviews.Count == 0 && reviewDialogNotesUpdateRequested)
+            {
+                taskNotesUpdated = TryApplyAcceptedReviewTaskNotesUpdate(
+                    repoRoot,
+                    launch.SessionId,
+                    model.RelativePath,
+                    model.PreMergeValidationIsError);
+            }
+
             GovernedReviewCoordinator.Complete(
                 launch.SessionId,
                 new GovernedReviewResolution(
@@ -1486,7 +1545,11 @@ public partial class Home : IDisposable, IAsyncDisposable
                     RemainingPendingCount: remainingReviews.Count,
                     Message: remainingReviews.Count == 0
                         ? $"Governed review completed for edit session '{launch.SessionId}'."
-                        : $"Governed review dialog closed before edit session '{launch.SessionId}' was fully resolved. {remainingReviews.Count} staged item(s) remain pending."));
+                        : $"Governed review dialog closed before edit session '{launch.SessionId}' was fully resolved. {remainingReviews.Count} staged item(s) remain pending.",
+                    NotesUpdateRequested: false,
+                    UserNotesPath: taskNotesUpdated ? TryGetActiveTaskNoteTargets(repoRoot).UserNotesPath : null,
+                    AgentNotesPath: taskNotesUpdated ? TryGetActiveTaskNoteTargets(repoRoot).AgentNotesPath : null,
+                    NotesInstruction: null));
         }
         catch (Exception ex)
         {
@@ -1538,6 +1601,7 @@ public partial class Home : IDisposable, IAsyncDisposable
             "home",
             $"Opening staged review dialog for session '{sessionId}'.");
         reviewDialogSessionId = sessionId;
+        reviewDialogNotesUpdateRequested = false;
         reviewDialogCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         await InvokeAsync(StateHasChanged);
 
@@ -1566,13 +1630,14 @@ public partial class Home : IDisposable, IAsyncDisposable
             $"Staged review dialog completion returned for session '{sessionId}'.");
     }
 
-    private async Task HandleStagedReviewDialogClosedAsync()
+    private async Task HandleStagedReviewDialogClosedAsync(bool notesUpdateRequested)
     {
         AddDebugEvent(
             "ReviewDialog",
             "close-callback",
             "home",
             $"Staged review dialog requested close for session '{reviewDialogSessionId ?? "<none>"}'.");
+        reviewDialogNotesUpdateRequested = notesUpdateRequested;
         TaskCompletionSource<bool>? completion = reviewDialogCompletion;
         reviewDialogSessionId = null;
         reviewDialogCompletion = null;
@@ -2033,6 +2098,36 @@ public partial class Home : IDisposable, IAsyncDisposable
             completed ? NotificationSeverity.Success : NotificationSeverity.Error);
     }
 
+    private void NotifyLatestAutoApprovedMcpRequest()
+    {
+        CodexOutputEvent? autoApprovedEvent = snapshot.StatusEvents
+            .Where(candidate =>
+                candidate.Type.Equals("PermissionRequest", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(candidate.Status, "auto-approved", StringComparison.OrdinalIgnoreCase)
+                && candidate.Detail.StartsWith("MCP method ", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(candidate => candidate.Timestamp)
+            .LastOrDefault();
+        if (autoApprovedEvent is null)
+        {
+            return;
+        }
+
+        string key = $"{autoApprovedEvent.Timestamp:O}:{autoApprovedEvent.Detail}";
+        if (string.Equals(lastAutoApprovedMcpToastKey, key, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        lastAutoApprovedMcpToastKey = key;
+        NotificationService.Notify(new NotificationMessage
+        {
+            Severity = NotificationSeverity.Info,
+            Summary = "Trusted MCP action auto-approved",
+            Detail = autoApprovedEvent.Detail,
+            Duration = 3500
+        });
+    }
+
     private static string RenderMarkdown(string markdown)
     {
         if (string.IsNullOrWhiteSpace(markdown))
@@ -2084,6 +2179,7 @@ public partial class Home : IDisposable, IAsyncDisposable
             "home",
             $"turnRunning={snapshot.IsTurnRunning}; threadId={snapshot.ThreadId ?? "<none>"}; activeTurnId={snapshot.ActiveTurnId ?? "<none>"}; permissions={snapshot.PermissionRequests.Count}; currentEditSessionId={WorkspaceState.CurrentEditSessionId ?? "<none>"}; launchedReviewSessionId={launchedReviewSessionId ?? "<none>"}; queuedReviewSessionId={pendingReviewLaunch?.SessionId ?? "<none>"}; latestStatus={(latestStatus is null ? "<none>" : latestStatus.Type + "|" + (latestStatus.Status ?? "-") + "|" + latestStatus.Detail)}");
         NotifyLatestPermissionResult();
+        NotifyLatestAutoApprovedMcpRequest();
         StateHasChanged();
         return Task.CompletedTask;
     }
@@ -2139,8 +2235,8 @@ public partial class Home : IDisposable, IAsyncDisposable
                 },
                 new DialogOptions
                 {
-                    Width = "88vw",
-                    Height = "88vh",
+                    Width = "90vw",
+                    Height = "90vh",
                     CloseDialogOnEsc = false,
                     CloseDialogOnOverlayClick = false,
                     Resizable = true,
@@ -2169,20 +2265,20 @@ public partial class Home : IDisposable, IAsyncDisposable
 
         try
         {
-            await DialogService.OpenAsync<StagedReviewDialog>(
+            await DialogService.OpenAsync<MergeReviewDialogComponent>(
                 "Merge Review",
                 new Dictionary<string, object?>
                 {
-                    [nameof(StagedReviewDialog.WorkspaceRoot)] = repoRoot,
-                    [nameof(StagedReviewDialog.SessionId)] = sessionId,
-                    [nameof(StagedReviewDialog.AutoCloseWhenComplete)] = true,
-                    [nameof(StagedReviewDialog.TraceEventRaised)] = EventCallback.Factory.Create<string>(this, HandleStagedReviewTraceAsync),
-                    [nameof(StagedReviewDialog.CloseRequested)] = EventCallback.Factory.Create(this, HandleStagedReviewDialogClosedAsync)
+                    [nameof(MergeReviewDialogComponent.WorkspaceRoot)] = repoRoot,
+                    [nameof(MergeReviewDialogComponent.SessionId)] = sessionId,
+                    [nameof(MergeReviewDialogComponent.AutoCloseWhenComplete)] = true,
+                    [nameof(MergeReviewDialogComponent.TraceEventRaised)] = EventCallback.Factory.Create<string>(this, HandleStagedReviewTraceAsync),
+                    [nameof(MergeReviewDialogComponent.CloseRequested)] = EventCallback.Factory.Create<bool>(this, HandleStagedReviewDialogClosedAsync)
                 },
                 new DialogOptions
                 {
-                    Width = "88vw",
-                    Height = "88vh",
+                    Width = "90vw",
+                    Height = "90vh",
                     CloseDialogOnEsc = false,
                     CloseDialogOnOverlayClick = false,
                     Resizable = true,
@@ -2200,6 +2296,140 @@ public partial class Home : IDisposable, IAsyncDisposable
             reviewDialogCompletion?.TrySetResult(true);
         }
     }
+
+    private (string? UserNotesPath, string? AgentNotesPath) TryGetActiveTaskNoteTargets(string workspaceRoot)
+    {
+        try
+        {
+            ActiveTaskNotesContext? context = TryGetActiveTaskNotesContext(workspaceRoot);
+            WorkflowTaskRow? activeTask = context?.Task;
+            return (activeTask?.NotesMarkdownPath, activeTask?.AgentNotesMarkdownPath);
+        }
+        catch
+        {
+            return (null, null);
+        }
+    }
+
+    private bool TryApplyAcceptedReviewTaskNotesUpdate(
+        string workspaceRoot,
+        string sessionId,
+        string relativePath,
+        bool acceptedWithOverride)
+    {
+        try
+        {
+            ActiveTaskNotesContext? context = TryGetActiveTaskNotesContext(workspaceRoot);
+            if (context?.Task is null)
+            {
+                NotificationService.Notify(new NotificationMessage
+                {
+                    Severity = NotificationSeverity.Warning,
+                    Summary = "Task notes update skipped",
+                    Detail = "No active task was available for the accepted review notes update.",
+                    Duration = 5000
+                });
+                return false;
+            }
+
+            string existingNotes = context.Repository.ReadNotes(context.Task.NotesMarkdownPath);
+            string updateBlock = BuildAcceptedReviewTaskNotesUpdate(
+                context.Task,
+                sessionId,
+                relativePath,
+                acceptedWithOverride);
+            string updatedNotes = AppendTaskNotesBlock(existingNotes, updateBlock);
+            WorkflowTaskRow updatedTask = context.Repository.UpdateNotes(context.Task.Id, updatedNotes);
+
+            NotificationService.Notify(new NotificationMessage
+            {
+                Severity = NotificationSeverity.Success,
+                Summary = "Task notes updated",
+                Detail = $"Updated task notes for {context.Task.ShortName} after accepted governed review.",
+                Duration = 4000
+            });
+            AddDebugEvent(
+                "TaskNotes",
+                "updated",
+                "home",
+                $"Updated task notes for '{context.Task.ShortName}' after accepted governed review session '{sessionId}'. NotesPath='{updatedTask.NotesMarkdownPath ?? "<none>"}'.");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            NotificationService.Notify(new NotificationMessage
+            {
+                Severity = NotificationSeverity.Warning,
+                Summary = "Task notes update failed",
+                Detail = ex.Message,
+                Duration = 7000
+            });
+            AddDebugEvent(
+                "TaskNotes",
+                "error",
+                "home",
+                $"Failed to update task notes after accepted governed review session '{sessionId}': {ex.Message}");
+            return false;
+        }
+    }
+
+    private ActiveTaskNotesContext? TryGetActiveTaskNotesContext(string workspaceRoot)
+    {
+        try
+        {
+            CodingServicesSettings settings = SettingsProvider.GetSettings(workspaceRoot);
+            WorkflowTaskBoardRepository repository = new(
+                SystemDataPaths.GetDefaultPlanningDatabasePath(settings),
+                SystemDataPaths.GetDefaultTaskMemoryRoot(settings));
+            WorkflowTaskBoardSnapshot snapshot = repository.LoadSnapshot();
+            WorkflowTaskRow? activeTask = snapshot.Tasks.FirstOrDefault(task =>
+                string.Equals(task.StateCode, "Active", StringComparison.OrdinalIgnoreCase)
+                && !task.IsArchived);
+            return activeTask is null ? null : new ActiveTaskNotesContext(repository, activeTask);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string BuildAcceptedReviewTaskNotesUpdate(
+        WorkflowTaskRow task,
+        string sessionId,
+        string relativePath,
+        bool acceptedWithOverride)
+    {
+        StringBuilder builder = new();
+        builder.AppendLine("## Latest accepted governed review");
+        builder.AppendLine();
+        builder.AppendLine($"- Updated: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        builder.AppendLine($"- Task: {task.ShortName}");
+        if (!string.IsNullOrWhiteSpace(relativePath))
+        {
+            builder.AppendLine($"- File: `{relativePath}`");
+        }
+
+        builder.AppendLine($"- Edit session: `{sessionId}`");
+        builder.AppendLine(acceptedWithOverride
+            ? "- Outcome: accepted with validation override."
+            : "- Outcome: accepted and pre-merge validation passed.");
+        builder.AppendLine();
+        builder.AppendLine("The watched source has been updated to reflect this accepted review.");
+        return builder.ToString().TrimEnd();
+    }
+
+    private static string AppendTaskNotesBlock(string existingNotes, string updateBlock)
+    {
+        string trimmedExisting = (existingNotes ?? string.Empty).TrimEnd();
+        if (string.IsNullOrWhiteSpace(trimmedExisting))
+        {
+            return updateBlock + Environment.NewLine;
+        }
+
+        return trimmedExisting + Environment.NewLine + Environment.NewLine + updateBlock + Environment.NewLine;
+    }
+
+    private sealed record ActiveTaskNotesContext(WorkflowTaskBoardRepository Repository, WorkflowTaskRow Task);
 
     private sealed record PendingReviewLaunchState(string SessionId, int PendingCount);
 

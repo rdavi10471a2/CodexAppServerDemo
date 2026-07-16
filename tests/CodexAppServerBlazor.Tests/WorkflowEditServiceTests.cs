@@ -133,6 +133,59 @@ public sealed class WorkflowEditServiceTests
         Assert.DoesNotContain("beta", workingText, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Write_paths_use_editorconfig_crlf_policy_even_when_source_file_is_lf()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        File.WriteAllText(
+            Path.Combine(repository.RootPath, ".editorconfig"),
+            "root = true\r\n\r\n[*]\r\nend_of_line = crlf\r\n");
+        CodingServicesSettings settings = CreateSettings(repository.RootPath);
+        WorkflowEditService service = new(settings);
+        string watchedFilePath = CreateWatchedFile(
+            repository.RootPath,
+            "Features/PolicySample.cs",
+            "public class PolicySample\n{\n    public string Name => \"before\";\n}\n");
+        EditSessionStatus status = service.Refresh(watchedFilePath);
+
+        ReplaceTextResult result = service.ReplaceText(
+            watchedFilePath,
+            "\"before\"",
+            "\"after\"",
+            expectedMatches: 1,
+            expectedWorkingHash: status.StagedHash);
+
+        string workingText = File.ReadAllText(result.WorkingFilePath);
+        Assert.Contains("\r\n", workingText, StringComparison.Ordinal);
+        Assert.DoesNotContain(";\n", workingText.Replace("\r\n", string.Empty, StringComparison.Ordinal), StringComparison.Ordinal);
+        Assert.Equal("CRLF", result.LineEnding);
+    }
+
+    [Fact]
+    public void Write_paths_fall_back_to_crlf_when_editorconfig_is_missing()
+    {
+        using TemporaryRepository repository = TemporaryRepository.Create();
+        CodingServicesSettings settings = CreateSettings(repository.RootPath);
+        WorkflowEditService service = new(settings);
+        string watchedFilePath = CreateWatchedFile(
+            repository.RootPath,
+            "Features/FallbackSample.cs",
+            "public class FallbackSample\n{\n    public string Name => \"before\";\n}\n");
+        EditSessionStatus status = service.Refresh(watchedFilePath);
+
+        ReplaceTextResult result = service.ReplaceText(
+            watchedFilePath,
+            "\"before\"",
+            "\"after\"",
+            expectedMatches: 1,
+            expectedWorkingHash: status.StagedHash);
+
+        string workingText = File.ReadAllText(result.WorkingFilePath);
+        Assert.Contains("\r\n", workingText, StringComparison.Ordinal);
+        Assert.DoesNotContain(";\n", workingText.Replace("\r\n", string.Empty, StringComparison.Ordinal), StringComparison.Ordinal);
+        Assert.Equal("CRLF", result.LineEnding);
+    }
+
     private static CodingServicesSettings CreateSettings(string repositoryRoot)
     {
         string solutionPath = Path.Combine(repositoryRoot, "CodexAppServerWinForms_corrected.slnx");
